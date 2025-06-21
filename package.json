@@ -1,0 +1,28 @@
+{
+  "name": "in-app-builder",
+  "version": "2.0.0",
+  "description": "Build and bundle your plugins right inside your vault, no external tools needed!",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node build.js && node esbuild.config.mjs --watch",
+    "build": "node build.js && node esbuild.config.mjs --production"
+  },
+  "keywords": [
+    "obsidian-md",
+    "obsidian-plugin"
+  ],
+  "author": "Yuichi-Aragi",
+  "license": "MIT",
+  "dependencies": {
+    "pako": "^2.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.3",
+    "@types/pako": "^2.0.3",
+    "builtin-modules": "5.0.0",
+    "esbuild": "^0.25.5",
+    "esbuild-wasm": "^0.25.5",
+    "obsidian": "latest",
+    "typescript": "^5.8.3"
+  }
+}
