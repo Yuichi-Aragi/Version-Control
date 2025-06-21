@@ -4,8 +4,8 @@
   "description": "A local, snapshot-based version control system. Lets you create finite number of versions of any note.",
   "main": "main.js",
   "scripts": {
-    "dev": "node build.js && node esbuild.config.mjs --watch",
-    "build": "node build.js && node esbuild.config.mjs --production"
+    "dev": "node esbuild.config.mjs --watch",
+    "build": "node esbuild.config.mjs --production"
   },
   "keywords": [
     "obsidian-md",
