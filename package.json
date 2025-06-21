@@ -9,15 +9,15 @@
   },
   "keywords": [
     "obsidian-md",
-    "obsidian-plugin"
-    "version-control"
-    "history-backup" 
-    "note-taking" 
+    "obsidian-plugin",
+    "version-control",
+    "history-backup",
+    "note-taking",
     "productivity"
   ],
   "author": "Yuichi-Aragi",
   "license": "MIT",
-  "dependencies": { },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^24.0.3",
     "esbuild": "^0.25.5",
