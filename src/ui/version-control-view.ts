@@ -61,7 +61,7 @@ export class VersionControlView extends ItemView {
         } catch (error) {
             console.error("Version Control: Failed to open view.", error);
             this.contentEl.empty();
-            const errorDiv = this.contentEl.createDiv({ cls: "v-placeholder" });
+            const errorDiv = this.contentEl.createDiv({ cls: "v-placeholder is-active" });
             setIcon(errorDiv.createDiv({ cls: "v-placeholder-icon" }), "alert-triangle");
             errorDiv.createEl("p", { text: "An error occurred while opening the Version Control view." });
             errorDiv.createEl("p", { text: "Please check the developer console for more details.", cls: "v-meta-label" });
@@ -69,8 +69,17 @@ export class VersionControlView extends ItemView {
     }
 
     async onClose() {
+        // Unsubscribe from the store to prevent the closed view from reacting to state changes.
         this.unsubscribe?.();
+
+        // Destroy all UI components to guarantee the release of all resources.
+        // This includes DOM elements, event listeners, timers, and observers.
+        this.placeholderComponent?.destroy();
+        this.actionBarComponent?.destroy();
+        this.settingsPanelComponent?.destroy();
         this.historyListComponent?.destroy();
+        this.previewPanelComponent?.destroy();
+        this.confirmationPanelComponent?.destroy();
     }
 
     private buildLayout() {
@@ -112,7 +121,7 @@ export class VersionControlView extends ItemView {
             const showPlaceholder = ui.viewMode === 'placeholder';
 
             // Toggle main view containers' visibility
-            this.historyViewContainer.style.display = showHistory ? 'flex' : 'none';
+            this.historyViewContainer.classList.toggle('is-active', showHistory);
             this.placeholderComponent.toggle(showPlaceholder);
 
             // Render content for visible main views
@@ -127,7 +136,7 @@ export class VersionControlView extends ItemView {
 
             // Handle overlay panels
             const isPanelOpen = ui.preview.isOpen || ui.confirmation.isOpen;
-            this.panelContainer.style.display = isPanelOpen ? 'flex' : 'none';
+            this.panelContainer.classList.toggle('is-active', isPanelOpen);
 
             // Render and toggle the preview panel
             if (ui.preview.isOpen) {
@@ -144,7 +153,7 @@ export class VersionControlView extends ItemView {
             console.error("Version Control: A critical error occurred during view rendering.", error);
             // Display an error message within the view itself to avoid a blank screen
             this.contentEl.empty();
-            const errorDiv = this.contentEl.createDiv({ cls: "v-placeholder" });
+            const errorDiv = this.contentEl.createDiv({ cls: "v-placeholder is-active" });
             setIcon(errorDiv.createDiv({ cls: "v-placeholder-icon" }), "alert-triangle");
             errorDiv.createEl("p", { text: "A critical error occurred while rendering the view." });
             errorDiv.createEl("p", { text: "Please try closing and reopening the view, or check the console.", cls: "v-meta-label" });
