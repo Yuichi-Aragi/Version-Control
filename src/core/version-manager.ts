@@ -201,9 +201,10 @@ export class VersionManager {
             content = removeFrontmatterKey(content, "vc-id");
 
             const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
-            const originalFile = noteManifest 
-                ? this.app.vault.getAbstractFileByPath(noteManifest.notePath) as TFile 
+            const abstractFile = noteManifest 
+                ? this.app.vault.getAbstractFileByPath(noteManifest.notePath)
                 : null;
+            const originalFile = abstractFile instanceof TFile ? abstractFile : null;
 
             const baseName = originalFile?.basename || 'Untitled';
             const parentFolder = originalFile?.parent;

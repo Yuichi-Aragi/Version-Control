@@ -182,6 +182,7 @@ export class CleanupManager {
 
     /**
      * Sets up or tears down the periodic cleanup interval based on settings.
+     * The initial startup cleanup is handled separately in the plugin's `onload` method.
      */
     public managePeriodicCleanup() {
         if (this.periodicCleanupInterval) {
@@ -191,8 +192,16 @@ export class CleanupManager {
         if (this.settingsProvider().autoCleanupOrphanedVersions) {
             // Run every hour
             this.periodicCleanupInterval = window.setInterval(() => this.cleanupOrphanedVersions(false), 60 * 60 * 1000);
-            // Also run on startup
-            this.app.workspace.onLayoutReady(() => this.cleanupOrphanedVersions(false));
+        }
+    }
+
+    /**
+     * Clears any active intervals. This should be called on unload.
+     */
+    public cleanupIntervals(): void {
+        if (this.periodicCleanupInterval) {
+            window.clearInterval(this.periodicCleanupInterval);
+            this.periodicCleanupInterval = null;
         }
     }
 
