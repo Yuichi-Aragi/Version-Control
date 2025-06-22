@@ -67,13 +67,16 @@
     color: var(--text-muted);
     text-align: center;
     padding: var(--size-4-8);
-    display: flex;
+    display: none;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: var(--size-4-2);
     flex-grow: 1;
     animation: v-fade-in 0.5s ease;
+}
+.v-placeholder.is-active {
+    display: flex;
 }
 
 .v-placeholder-icon {
@@ -172,9 +175,12 @@
 /* Version History */
 .v-history-view {
     flex-grow: 1;
-    display: flex;
+    display: none;
     flex-direction: column;
     min-height: 0;
+}
+.v-history-view.is-active {
+    display: flex;
 }
 
 .v-history-list-container {
@@ -215,6 +221,11 @@
     transition: opacity 0.3s ease;
 }
 
+/* NEW: Hide timestamps via class */
+.v-history-list.hide-timestamps .v-version-timestamp {
+    display: none;
+}
+
 .v-history-list.loading {
     opacity: 0.6;
 }
@@ -238,6 +249,11 @@
     border-color: var(--interactive-accent);
     transform: translateY(-2px);
     box-shadow: var(--shadow-s);
+}
+
+/* NEW: Style for error state */
+.v-history-entry.is-error {
+    border-color: var(--color-red);
 }
 
 .v-entry-header {
@@ -325,9 +341,12 @@
 .v-panel-container {
     /* flex-grow is removed as it's now a grid item, not a flex item of v-main */
     position: relative;
-    display: flex;
+    display: none;
     flex-direction: column;
     z-index: 10; /* Ensure panels are on top of the history list */
+}
+.v-panel-container.is-active {
+    display: flex;
 }
 
 .v-panel-container > .v-inline-panel {

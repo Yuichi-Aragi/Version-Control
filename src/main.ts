@@ -59,7 +59,16 @@ export default class VersionControlPlugin extends Plugin {
 			this.addCommands();
 			this.registerPluginEvents();
 			
+			// If auto-cleanup of orphans is enabled, perform a check once the layout is ready.
+            // This handles the initial startup check, and is only registered once.
+            if (this.settings.autoCleanupOrphanedVersions) {
+                this.app.workspace.onLayoutReady(() => {
+                    this.cleanupManager.cleanupOrphanedVersions(false);
+                });
+            }
+			// Manages the recurring interval for cleanup, starting/stopping it as needed.
 			this.cleanupManager.managePeriodicCleanup();
+			
 			this.addStatusBarItem().setText('VC Ready');
 			console.log("Version Control plugin loaded successfully.");
 		} catch (error) {
@@ -70,8 +79,8 @@ export default class VersionControlPlugin extends Plugin {
 	}
 
 	onunload() {
-		this.app.workspace.detachLeavesOfType(VIEW_TYPE_VERSION_CONTROL);
         this.cleanupManager?.completePendingCleanups();
+        this.cleanupManager?.cleanupIntervals();
 	}
 
 	async loadSettings(): Promise<VersionControlSettings> {
@@ -98,7 +107,7 @@ export default class VersionControlPlugin extends Plugin {
 	private addCommands() {
 		this.addCommand({
 			id: 'open-version-control-view',
-			name: 'Open Version Control View',
+			name: 'Open view',
 			callback: () => this.activateView(),
 		});
 
