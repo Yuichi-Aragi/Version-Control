@@ -80,6 +80,6 @@ Just click the **Settings icon** (`⚙️`) in the top right of the Version Cont
 
 Do check out my **In-App Builder** plugin that lets you build and bundle your plugins right inside your vault. No external tools needed! Fun fact: this whole plugin was compiled and built by IAB from start to finish.
 
-[link](https://github.com/Yuichi-Aragi/IAB)
+[IAB](https://github.com/Yuichi-Aragi/IAB)
 
 Bye.
