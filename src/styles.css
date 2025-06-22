@@ -412,6 +412,13 @@
     font-family: var(--font-monospace);
     font-size: var(--font-ui-smaller);
 }
+
+/* NEW: Force wrapping inside code blocks in the preview panel */
+.v-version-content-preview pre {
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
 .v-version-content-preview p:first-child {
     margin-top: 0;
 }
