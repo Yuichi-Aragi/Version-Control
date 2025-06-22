@@ -15,8 +15,10 @@ export class SettingsPanelComponent {
     }
 
     render(state: AppState) {
+        // Clear any previously running timer whenever the component re-renders.
+        // This handles cases where the panel is toggled off before the timer fires.
         if (this.autoCloseTimer) {
-            clearTimeout(this.autoCloseTimer);
+            window.clearTimeout(this.autoCloseTimer);
             this.autoCloseTimer = null;
         }
 
@@ -27,7 +29,7 @@ export class SettingsPanelComponent {
             return;
         }
 
-        // Set auto-close timer for 15 seconds
+        // Set a new auto-close timer now that the panel is confirmed to be open.
         this.autoCloseTimer = window.setTimeout(() => {
             if (this.plugin.store.getState().ui.isSettingsPanelOpen) {
                 this.plugin.store.dispatch(actions.toggleSettingsPanel());
@@ -46,6 +48,18 @@ export class SettingsPanelComponent {
         this.createSettingsAction(actionsContainer, "Help", "help-circle", () => new Notice("In compact view, right-click a version for options.", 4000));
 
         this.createPluginSettings(wrapper, state);
+    }
+
+    /**
+     * Clears any active timers and removes the component from the DOM.
+     * This is the definitive cleanup method called by the parent view when it closes.
+     */
+    public destroy() {
+        if (this.autoCloseTimer) {
+            window.clearTimeout(this.autoCloseTimer);
+            this.autoCloseTimer = null;
+        }
+        this.container.remove();
     }
 
     private handleExport(e: MouseEvent) {

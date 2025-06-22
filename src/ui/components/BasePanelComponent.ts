@@ -53,4 +53,12 @@ export abstract class BasePanelComponent {
     get isVisible(): boolean {
         return this.container.classList.contains('is-active');
     }
+
+    /**
+     * Removes the component's container from the DOM, ensuring all child elements
+     * and their event listeners are garbage collected. This is the primary cleanup method.
+     */
+    public destroy(): void {
+        this.container.remove();
+    }
 }

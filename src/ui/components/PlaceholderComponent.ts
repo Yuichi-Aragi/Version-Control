@@ -4,7 +4,7 @@ export class PlaceholderComponent {
     private container: HTMLElement;
 
     constructor(parent: HTMLElement) {
-        this.container = parent.createDiv({ cls: "v-placeholder", attr: { style: "display: none;" } });
+        this.container = parent.createDiv({ cls: "v-placeholder" });
     }
 
     render() {
@@ -18,19 +18,18 @@ export class PlaceholderComponent {
         });
     }
 
-    show() {
-        this.container.style.display = 'flex';
-    }
-
-    hide() {
-        this.container.style.display = 'none';
-    }
-
     /**
-     * Toggles the visibility of the component.
+     * Toggles the visibility of the component by adding or removing the 'is-active' class.
      * @param show True to show, false to hide.
      */
     toggle(show: boolean) {
-        this.container.style.display = show ? 'flex' : 'none';
+        this.container.classList.toggle('is-active', show);
+    }
+
+    /**
+     * Removes the component's container from the DOM. Called by the parent view on close.
+     */
+    public destroy(): void {
+        this.container.remove();
     }
 }

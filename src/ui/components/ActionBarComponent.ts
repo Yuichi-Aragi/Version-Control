@@ -68,4 +68,11 @@ export class ActionBarComponent {
             if (e.key === 'Escape') cleanup();
         });
     }
+
+    /**
+     * Removes the component's container from the DOM. Called by the parent view on close.
+     */
+    public destroy(): void {
+        this.container.remove();
+    }
 }

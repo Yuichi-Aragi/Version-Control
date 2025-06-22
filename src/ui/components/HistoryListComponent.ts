@@ -40,6 +40,7 @@ export class HistoryListComponent {
             this.countEl = header.createSpan("v-history-count");
             
             this.listEl = this.container.createDiv("v-history-list");
+            this.listEl.classList.toggle('hide-timestamps', !settings.showTimestamps);
 
             const totalCount = this.history.length;
             this.countEl.setText(`${totalCount} ${totalCount === 1 ? 'version' : 'versions'}`);
@@ -63,10 +64,7 @@ export class HistoryListComponent {
 
     private updateExistingItems(showTimestamps: boolean) {
         if (!this.listEl) return;
-        this.listEl.querySelectorAll('.v-history-entry').forEach((entryEl: HTMLElement) => {
-            const timestampEl = entryEl.querySelector<HTMLElement>('.v-version-timestamp');
-            if (timestampEl) timestampEl.style.display = showTimestamps ? '' : 'none';
-        });
+        this.listEl.classList.toggle('hide-timestamps', !showTimestamps);
     }
 
     private renderSkeleton() {
@@ -126,8 +124,7 @@ export class HistoryListComponent {
         header.createSpan({ cls: "v-version-id", text: `V${version.versionNumber}` });
         if (version.name) header.createDiv({ cls: "v-version-name", text: version.name, attr: { "title": version.name } });
         
-        const timestampEl = header.createSpan({ cls: "v-version-timestamp", text: moment(version.timestamp).fromNow(), attr: { "title": moment(version.timestamp).format("YYYY-MM-DD HH:mm:ss") } });
-        timestampEl.style.display = settings.showTimestamps ? '' : 'none';
+        header.createSpan({ cls: "v-version-timestamp", text: moment(version.timestamp).fromNow(), attr: { "title": moment(version.timestamp).format("YYYY-MM-DD HH:mm:ss") } });
 
         if (settings.isListView) {
             // In list view, the whole item is clickable to show the context menu.
@@ -143,8 +140,7 @@ export class HistoryListComponent {
     }
 
     private renderErrorEntry(parent: DocumentFragment | HTMLElement, version: VersionHistoryEntry) {
-        const entryEl = parent.createDiv("v-history-entry");
-        entryEl.style.borderColor = 'var(--color-red)';
+        const entryEl = parent.createDiv("v-history-entry is-error");
         const header = entryEl.createDiv("v-entry-header");
         header.createSpan({ cls: "v-version-id", text: `V${version?.versionNumber ?? '??'}` });
         header.createDiv({ cls: "v-version-name", text: "Error rendering this entry" });
@@ -188,8 +184,9 @@ export class HistoryListComponent {
         }
     }
 
-    destroy() {
+    public destroy() {
         this.observer?.disconnect();
-        this.container.empty();
+        this.observer = null;
+        this.container.remove();
     }
 }
