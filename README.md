@@ -62,14 +62,6 @@ This plugin solves that. It allows you to save "snapshots" of your notes at any 
     *   In **Card View**, use the buttons on each version to `View`, `Restore`, or `Delete`.
     *   In **Compact View**, right-click on any version to see all available actions in a context menu.
 
-### Future Plans & Your Ideas!
-
-I'm thinking about adding these features in the future, and I'd love your feedback!
-
-*   **Diff of two versions:** I'm stuck on how to present the differences in a user-friendly manner that even a non-technical person can understand easily. How would you like to see what's changed between two versions? **Please open an issue on GitHub with your suggestions!**
-
-*   **Search:** I don't know what its use would be, as in my workflow I typically don't need to search through old versions. What would you use a search feature for? Searching for specific text across all versions of a single note? Or something else? **Let me know your ideas!**
-
 ### Where Are The Settings? 🤔
 
 You can't find a settings tab? Well, there isn't one! I absolutely hate them. You can configure everything you need right from the UI.
