@@ -17,8 +17,11 @@
   ],
   "author": "Yuichi-Aragi",
   "license": "MIT",
-  "dependencies": {},
+  "dependencies": {
+    "diff": "^8.0.2"
+  },
   "devDependencies": {
+    "@types/diff": "^5.2.1",
     "@types/node": "^24.0.3",
     "esbuild": "^0.25.5",
     "obsidian": "latest",
