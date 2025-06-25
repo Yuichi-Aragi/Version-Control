@@ -1,97 +1,115 @@
 import { TFile } from 'obsidian';
-import { VersionControlSettings, VersionHistoryEntry } from '../types';
+import { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, DiffRequest } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
-import { Action } from './actions';
 import { Thunk } from './store';
+import { Change } from 'diff';
+
+// ===================================================================================
+// FORMAL STATE MACHINE DEFINITION
+// ===================================================================================
 
 /**
- * Defines the primary view state.
- * - placeholder: No active note is selected.
- * - loading: Actively fetching history for a note.
- * - history: Displaying the version history for the active note.
+ * @enum AppStatus
+ * Defines the possible top-level statuses of the Version Control application.
  */
-export type ViewMode = 'placeholder' | 'loading' | 'history';
-
-/**
- * Represents the state of the confirmation panel.
- */
-export interface ConfirmationState {
-    isOpen: boolean;
-    title: string;
-    message: string;
-    onConfirmAction: Action | Thunk | null;
+export enum AppStatus {
+    INITIALIZING = 'INITIALIZING',
+    PLACEHOLDER = 'PLACEHOLDER',
+    LOADING = 'LOADING', // Actively fetching history for a specific note
+    READY = 'READY',     // History loaded, UI interactive for a specific note
+    ERROR = 'ERROR',
 }
 
-/**
- * Represents the state of the version preview panel.
- */
-export interface PreviewState {
-    isOpen: boolean;
-    version: VersionHistoryEntry | null;
+// --- Panel States (Nested within ReadyState) ---
+
+export interface ConfirmationPanel {
+    type: 'confirmation';
+    title: string;
+    message: string;
+    onConfirmAction: Thunk; // Thunk to execute on confirmation
+}
+
+export interface PreviewPanel {
+    type: 'preview';
+    version: VersionHistoryEntry;
     content: string;
 }
 
-/**
- * Encapsulates all UI-related state. This drives the entire visual
- * representation of the plugin view, ensuring the DOM is always a
- * direct reflection of this state.
- */
-export interface UIState {
-    viewMode: ViewMode;
-    isNameInputVisible: boolean;
-    isSettingsPanelOpen: boolean;
-    isProcessing: boolean;
-    confirmation: ConfirmationState;
-    preview: PreviewState;
+export interface DiffPanel {
+    type: 'diff';
+    version1: VersionHistoryEntry;
+    version2: DiffTarget;
+    diffChanges: Change[] | null; // null while loading
 }
 
-/**
- * Holds all state related to the currently active, version-controlled note.
- */
-export interface ActiveNoteState {
-    file: TFile | null;
-    noteId: string | null;
-    history: VersionHistoryEntry[];
-    isLoadingHistory: boolean;
+export interface SettingsPanel {
+    type: 'settings';
 }
 
-/**
- * The root state of the entire application. This is the single source of truth.
- */
-export interface AppState {
+export type PanelState = ConfirmationPanel | PreviewPanel | DiffPanel | SettingsPanel | null;
+
+
+// --- Core Application States ---
+
+export interface InitializingState {
+    status: AppStatus.INITIALIZING;
     settings: VersionControlSettings;
-    ui: UIState;
-    activeNote: ActiveNoteState;
 }
 
-/**
- * Creates the initial state of the application when the plugin loads.
- * @param loadedSettings Settings loaded from disk.
- * @returns The complete initial AppState.
- */
+export interface PlaceholderState {
+    status: AppStatus.PLACEHOLDER;
+    settings: VersionControlSettings;
+}
+
+export interface LoadingState {
+    status: AppStatus.LOADING;
+    settings: VersionControlSettings;
+    file: TFile; // The file whose history is being loaded
+}
+
+export type SortProperty = 'versionNumber' | 'timestamp' | 'name' | 'size';
+export type SortDirection = 'asc' | 'desc';
+
+export interface SortOrder {
+    property: SortProperty;
+    direction: SortDirection;
+}
+
+export interface ReadyState {
+    status: AppStatus.READY;
+    settings: VersionControlSettings;
+    file: TFile; // The currently active and version-controlled file
+    noteId: string | null; // VC-ID of the note, null if not yet versioned
+    history: VersionHistoryEntry[];
+    isProcessing: boolean; // True if a background operation (save, restore, etc.) is in progress
+    panel: PanelState; // State of any active overlay panel
+    namingVersionId: string | null; // ID of the version currently being named inline
+    highlightedVersionId: string | null; // ID of version to highlight temporarily
+    
+    // Search and sort properties
+    isSearchActive: boolean;
+    searchQuery: string;
+    isSearchCaseSensitive: boolean;
+    sortOrder: SortOrder;
+
+    // Diff properties
+    diffRequest: DiffRequest | null;
+}
+
+export interface ErrorState {
+    status: AppStatus.ERROR;
+    settings: VersionControlSettings;
+    error: AppError; // Detailed error information
+}
+
+export type AppState =
+    | InitializingState
+    | PlaceholderState
+    | LoadingState
+    | ReadyState
+    | ErrorState;
+
 export const getInitialState = (loadedSettings: VersionControlSettings): AppState => ({
+    status: AppStatus.INITIALIZING,
     settings: { ...DEFAULT_SETTINGS, ...loadedSettings },
-    ui: {
-        viewMode: 'placeholder',
-        isNameInputVisible: false,
-        isSettingsPanelOpen: false,
-        isProcessing: false,
-        confirmation: {
-            isOpen: false,
-            title: '',
-            message: '',
-            onConfirmAction: null,
-        },
-        preview: {
-            isOpen: false,
-            version: null,
-            content: '',
-        },
-    },
-    activeNote: {
-        file: null,
-        noteId: null,
-        history: [],
-        isLoadingHistory: false,
-    },
 });

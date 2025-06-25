@@ -1,55 +1,63 @@
 import { AppState } from './state';
 import { Action } from './actions';
 import { rootReducer } from './reducer';
-import VersionControlPlugin from '../main';
-
-// A function that can be dispatched to perform async operations, with access to the plugin's core services.
-export type Thunk = (
-    dispatch: (action: Action | Thunk) => void,
-    getState: () => AppState,
-    plugin: VersionControlPlugin
-) => void;
+import { DependencyContainer } from '../core/dependency-container';
 
 /**
- * An enterprise-grade state management machine.
- * Inspired by Redux, it provides a predictable state container for the plugin.
- * It supports synchronous state changes via reducers and asynchronous logic via thunks.
- * This is the single, central hub for all state transitions in the application.
+ * A thunk is a function that can perform asynchronous logic and dispatch
+ * actions or other thunks. It receives the dispatch function, a function to
+ * get the current state, and the dependency injection container to resolve services.
+ */
+export type Thunk = (
+    dispatch: (actionOrThunk: Action | Thunk) => void,
+    getState: () => AppState,
+    container: DependencyContainer
+) => void | Promise<void>; // Thunks can be async
+
+/**
+ * The central state container for the application, following Redux principles.
+ * It holds the application state, allows state to be updated via dispatched
+ * actions, and manages subscriptions to state changes.
  */
 export class Store {
     private state: AppState;
     private listeners: Set<() => void> = new Set();
-    private plugin: VersionControlPlugin;
+    private container: DependencyContainer;
 
-    constructor(initialState: AppState, plugin: VersionControlPlugin) {
+    /**
+     * @param initialState The initial state of the application.
+     * @param container The dependency injection container, which thunks will use to resolve services.
+     */
+    constructor(initialState: AppState, container: DependencyContainer) {
         this.state = initialState;
-        this.plugin = plugin;
+        this.container = container;
     }
 
     /**
      * Returns the current state tree of the application.
-     * It is the single source of truth.
-     * Defined as an arrow function to preserve `this` context.
      */
     public getState = (): AppState => {
         return this.state;
     };
 
     /**
-     * Dispatches an action. This is the only way to trigger a state change.
-     * The action can be a plain object that will be handled by a reducer,
-     * or a thunk function for handling asynchronous logic.
+     * Dispatches an action or a thunk. This is the only way to trigger a state change.
+     * @param actionOrThunk The action object or thunk function to dispatch.
      */
-    public dispatch = (action: Action | Thunk): void => {
-        if (typeof action === 'function') {
-            // If it's a thunk, execute it with dispatch, getState, and the full plugin instance.
-            action(this.dispatch, this.getState, this.plugin);
+    public dispatch = (actionOrThunk: Action | Thunk): void => {
+        if (typeof actionOrThunk === 'function') {
+            // It's a thunk. Execute it with dispatch, getState, and the DI container.
+            const result = actionOrThunk(this.dispatch, this.getState, this.container);
+            if (result instanceof Promise) {
+                result.catch(error => {
+                    console.error("Version Control: Unhandled error in async thunk:", error);
+                });
+            }
         } else {
-            // For a plain action, calculate the new state using the root reducer.
+            // It's a plain action. Pass it to the reducer to compute the new state.
             const oldState = this.state;
-            this.state = rootReducer(this.state, action);
+            this.state = rootReducer(this.state, actionOrThunk);
             
-            // Notify listeners only if the state has actually changed to prevent unnecessary re-renders.
             if (oldState !== this.state) {
                 this.notifyListeners();
             }
@@ -57,8 +65,9 @@ export class Store {
     };
 
     /**
-     * Adds a change listener. It will be called any time an action is dispatched and the state changes.
-     * @param listener A callback to be invoked on every state change.
+     * Adds a change listener. It will be called any time an action is dispatched,
+     * and the state tree might have changed.
+     * @param listener A callback to be invoked on every dispatch.
      * @returns A function to remove this listener.
      */
     public subscribe = (listener: () => void): (() => void) => {
@@ -68,10 +77,13 @@ export class Store {
         };
     };
 
-    /**
-     * Notifies all subscribed listeners that the state has changed.
-     */
     private notifyListeners(): void {
-        this.listeners.forEach(listener => listener());
+        Array.from(this.listeners).forEach(listener => {
+            try {
+                listener();
+            } catch (error) {
+                console.error("Version Control: Error in store listener:", error);
+            }
+        });
     }
 }

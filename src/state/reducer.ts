@@ -1,136 +1,227 @@
-import { AppState, UIState, ActiveNoteState } from './state';
+import { AppState, AppStatus, ReadyState, SortOrder } from './state';
 import { Action, ActionType } from './actions';
+import { VersionControlSettings } from '../types';
 
-const settingsReducer = (state: AppState['settings'], action: Action): AppState['settings'] => {
-    switch (action.type) {
-        case ActionType.UPDATE_SETTINGS:
-            return { ...state, ...action.payload };
-        default:
-            return state;
+const settingsReducer = (currentSettings: VersionControlSettings, action: Action): VersionControlSettings => {
+    if (action.type === ActionType.UPDATE_SETTINGS) {
+        return { ...currentSettings, ...action.payload };
     }
+    return currentSettings;
 };
 
-const uiReducer = (state: UIState, action: Action): UIState => {
+const readyStateReducer = (state: ReadyState, action: Action): AppState => {
     switch (action.type) {
-        // --- Panel Logic ---
-        // This logic ensures that all overlay panels are mutually exclusive.
-        // Showing one will automatically hide all others, preventing UI conflicts.
-
-        case ActionType.TOGGLE_NAME_INPUT:
-            return {
-                ...state,
-                isNameInputVisible: action.payload,
-                isSettingsPanelOpen: false,
-                preview: { ...state.preview, isOpen: false },
-                confirmation: { ...state.confirmation, isOpen: false },
-            };
-
-        case ActionType.TOGGLE_SETTINGS_PANEL:
-            const isOpeningSettings = !state.isSettingsPanelOpen;
-            return {
-                ...state,
-                isSettingsPanelOpen: isOpeningSettings,
-                isNameInputVisible: false,
-                preview: { ...state.preview, isOpen: false },
-                confirmation: { ...state.confirmation, isOpen: false },
-            };
-
-        case ActionType.SHOW_CONFIRMATION:
-            return {
-                ...state,
-                confirmation: { ...action.payload, isOpen: true },
-                preview: { ...state.preview, isOpen: false },
-                isNameInputVisible: false,
-                isSettingsPanelOpen: false,
-            };
-
-        case ActionType.HIDE_CONFIRMATION:
-            return { ...state, confirmation: { ...state.confirmation, isOpen: false } };
-
-        case ActionType.SHOW_PREVIEW:
-            return {
-                ...state,
-                preview: { ...action.payload, isOpen: true },
-                confirmation: { ...state.confirmation, isOpen: false },
-                isNameInputVisible: false,
-                isSettingsPanelOpen: false,
-            };
-
-        case ActionType.HIDE_PREVIEW:
-            return { ...state, preview: { ...state.preview, isOpen: false } };
-
-        // --- Primary ViewMode Logic ---
-        // This logic controls the main content area of the view, independent of the overlay panels.
-        case ActionType.LOAD_HISTORY_START:
-            return { ...state, viewMode: 'loading' };
-        case ActionType.LOAD_HISTORY_SUCCESS:
-            return { ...state, viewMode: 'history' };
-        case ActionType.CLEAR_ACTIVE_NOTE:
-            // When the note is cleared, reset the UI to its initial placeholder state.
-            return { 
-                ...state, 
-                viewMode: 'placeholder',
-                isNameInputVisible: false,
-                isSettingsPanelOpen: false,
-                isProcessing: false, // Ensure processing state is reset
-                confirmation: { ...state.confirmation, isOpen: false },
-                preview: { ...state.preview, isOpen: false },
-            };
-        
-        // --- Global Processing State ---
-        case ActionType.SET_PROCESSING_STATE:
+        case ActionType.SET_PROCESSING:
             return { ...state, isProcessing: action.payload };
-            
-        default:
-            return state;
-    }
-};
 
-const activeNoteReducer = (state: ActiveNoteState, action: Action): ActiveNoteState => {
-    switch (action.type) {
-        case ActionType.SET_ACTIVE_NOTE:
-            // When setting a new note, only update file/id. History is loaded separately.
-            return { ...state, file: action.payload.file, noteId: action.payload.noteId };
-        case ActionType.LOAD_HISTORY_START:
-            // Clear previous history and set loading flag.
-            return { ...state, isLoadingHistory: true, history: [] };
-        case ActionType.LOAD_HISTORY_SUCCESS:
-            // Populate history and clear loading flag.
-            return { ...state, isLoadingHistory: false, history: action.payload };
+        case ActionType.OPEN_PANEL:
+            return {
+                ...state,
+                panel: action.payload,
+                isProcessing: false,
+                namingVersionId: null,
+                isSearchActive: false,
+                searchQuery: '',
+            };
+
+        case ActionType.CLOSE_PANEL:
+            return { ...state, panel: null };
+        
+        case ActionType.UPDATE_NOTE_ID_IN_STATE:
+            return { ...state, noteId: action.payload.noteId };
+
+        case ActionType.ADD_VERSION_SUCCESS: {
+            const newHistory = [action.payload.newVersion, ...state.history];
+            const namingVersionId = state.settings.enableVersionNaming ? action.payload.newVersion.id : null;
+            return {
+                ...state,
+                history: newHistory,
+                isProcessing: false,
+                namingVersionId: namingVersionId,
+            };
+        }
+
+        case ActionType.START_VERSION_EDITING:
+            return { ...state, namingVersionId: action.payload.versionId };
+
+        case ActionType.STOP_VERSION_EDITING:
+            return { ...state, namingVersionId: null };
+
+        case ActionType.UPDATE_VERSION_DETAILS_IN_STATE: {
+            const newHistory = state.history.map(v => 
+                v.id === action.payload.versionId ? { ...v, name: action.payload.name, tags: action.payload.tags } : v
+            );
+            return { ...state, history: newHistory };
+        }
+
+        case ActionType.HISTORY_LOADED_SUCCESS:
+            if (state.file.path === action.payload.file.path) {
+                return {
+                    ...state,
+                    history: action.payload.history,
+                    noteId: action.payload.noteId,
+                    isProcessing: false,
+                    panel: null,
+                    namingVersionId: null,
+                    highlightedVersionId: null,
+                };
+            }
+            return state;
+
         case ActionType.CLEAR_ACTIVE_NOTE:
-            // Reset to the initial empty state.
-            return { file: null, noteId: null, history: [], isLoadingHistory: false };
+            return {
+                status: AppStatus.PLACEHOLDER,
+                settings: state.settings,
+            };
+
+        case ActionType.TOGGLE_SEARCH:
+            if (action.payload) {
+                return {
+                    ...state,
+                    isSearchActive: true,
+                    panel: null,
+                    isSearchCaseSensitive: false,
+                };
+            } else {
+                return {
+                    ...state,
+                    isSearchActive: false,
+                    searchQuery: '',
+                    isSearchCaseSensitive: false,
+                };
+            }
+
+        case ActionType.SET_SEARCH_QUERY:
+            return { ...state, searchQuery: action.payload };
+
+        case ActionType.SET_SEARCH_CASE_SENSITIVITY:
+            return { ...state, isSearchCaseSensitive: action.payload };
+
+        case ActionType.SET_SORT_ORDER:
+            return { ...state, sortOrder: action.payload };
+
+        case ActionType.SET_HIGHLIGHTED_VERSION:
+            return { ...state, highlightedVersionId: action.payload.versionId };
+
+        case ActionType.START_DIFF_GENERATION:
+            return {
+                ...state,
+                diffRequest: {
+                    status: 'generating',
+                    version1: action.payload.version1,
+                    version2: action.payload.version2,
+                    diffChanges: null,
+                },
+                panel: null, // Close any open panel when starting a diff
+            };
+
+        case ActionType.DIFF_GENERATION_SUCCEEDED:
+            if (state.diffRequest && state.diffRequest.version1.id === action.payload.version1Id && state.diffRequest.version2.id === action.payload.version2Id) {
+                return {
+                    ...state,
+                    diffRequest: {
+                        ...state.diffRequest,
+                        status: 'ready',
+                        diffChanges: action.payload.diffChanges,
+                    }
+                };
+            }
+            return state;
+
+        case ActionType.DIFF_GENERATION_FAILED:
+            if (state.diffRequest && state.diffRequest.version1.id === action.payload.version1Id && state.diffRequest.version2.id === action.payload.version2Id) {
+                return { ...state, diffRequest: null };
+            }
+            return state;
+        
+        case ActionType.CLEAR_DIFF_REQUEST:
+            return { ...state, diffRequest: null };
+
         default:
             return state;
     }
 };
 
-/**
- * The root reducer combines all other reducers into a single function.
- * It is a pure function that computes the next state tree based on the
- * previous state and the dispatched action.
- * @param state The current application state.
- * @param action The dispatched action.
- * @returns The new application state.
- */
 export const rootReducer = (state: AppState, action: Action): AppState => {
-    const newSettings = settingsReducer(state.settings, action);
-    const newUi = uiReducer(state.ui, action);
-    const newActiveNote = activeNoteReducer(state.activeNote, action);
-
-    // If no slice of the state has changed, return the original state object.
-    // This is a critical optimization that prevents unnecessary re-renders in subscribed components.
-    if (
-        newSettings === state.settings &&
-        newUi === state.ui &&
-        newActiveNote === state.activeNote
-    ) {
-        return state;
+    if (action.type === ActionType.REPORT_ERROR) {
+        return {
+            status: AppStatus.ERROR,
+            settings: state.settings,
+            error: action.payload,
+        };
     }
 
-    return {
-        settings: newSettings,
-        ui: newUi,
-        activeNote: newActiveNote,
-    };
+    const newSettings = settingsReducer(state.settings, action);
+    if (newSettings !== state.settings) {
+        return { ...state, settings: newSettings };
+    }
+
+    if (action.type === ActionType.INITIALIZE_VIEW) {
+        const { file: newActiveFile } = action.payload;
+
+        if (!newActiveFile) {
+            return { status: AppStatus.PLACEHOLDER, settings: state.settings };
+        }
+
+        if (state.status === AppStatus.READY && state.file.path === newActiveFile.path && !state.isProcessing) {
+            if (state.noteId === action.payload.noteId && action.payload.source !== 'manifest') {
+                 return state;
+            }
+        }
+        
+        return {
+            status: AppStatus.LOADING,
+            settings: state.settings,
+            file: newActiveFile,
+        };
+    }
+
+    switch (state.status) {
+        case AppStatus.INITIALIZING:
+            if (action.type === ActionType.CLEAR_ACTIVE_NOTE) {
+                return { status: AppStatus.PLACEHOLDER, settings: state.settings };
+            }
+            return state;
+
+        case AppStatus.LOADING:
+            if (action.type === ActionType.HISTORY_LOADED_SUCCESS) {
+                if (state.file.path === action.payload.file.path) {
+                    const defaultSortOrder: SortOrder = { property: 'versionNumber', direction: 'desc' };
+                    return {
+                        status: AppStatus.READY,
+                        settings: state.settings,
+                        file: action.payload.file,
+                        noteId: action.payload.noteId,
+                        history: action.payload.history,
+                        isProcessing: false,
+                        panel: null,
+                        namingVersionId: null,
+                        highlightedVersionId: null,
+                        isSearchActive: false,
+                        searchQuery: '',
+                        isSearchCaseSensitive: false,
+                        sortOrder: defaultSortOrder,
+                        diffRequest: null,
+                    };
+                }
+            }
+            if (action.type === ActionType.CLEAR_ACTIVE_NOTE) {
+                return { status: AppStatus.PLACEHOLDER, settings: state.settings };
+            }
+            return state;
+
+        case AppStatus.READY:
+            return readyStateReducer(state, action);
+
+        case AppStatus.PLACEHOLDER:
+        case AppStatus.ERROR:
+            if (action.type === ActionType.CLEAR_ACTIVE_NOTE) {
+                return { status: AppStatus.PLACEHOLDER, settings: state.settings };
+            }
+            return state;
+        
+        default:
+            console.warn("Version Control: Unhandled state in rootReducer", state);
+            return state;
+    }
 };
