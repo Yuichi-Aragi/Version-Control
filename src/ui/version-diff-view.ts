@@ -1,0 +1,130 @@
+import { ItemView, WorkspaceLeaf, moment, App } from "obsidian";
+import { VIEW_TYPE_VERSION_DIFF } from "../constants";
+import { Store } from "../state/store";
+import { DiffViewDisplayState } from "../types";
+import { Change } from "diff";
+
+export class VersionDiffView extends ItemView {
+    store: Store;
+    app: App;
+    private currentDisplayState: DiffViewDisplayState | null = null;
+    private tabContentEl: HTMLElement | null = null;
+
+    constructor(leaf: WorkspaceLeaf, store: Store, app: App) {
+        super(leaf);
+        this.store = store;
+        this.app = app;
+        this.icon = "diff";
+    }
+
+    getViewType(): string {
+        return VIEW_TYPE_VERSION_DIFF;
+    }
+
+    getDisplayText(): string {
+        if (this.currentDisplayState) {
+            const { version1, version2, noteName } = this.currentDisplayState;
+            const v1Label = `V${version1.versionNumber}`;
+            const v2Label = version2.id === 'current' ? 'Current' : `V${(version2 as any).versionNumber}`;
+            return `Diff: ${noteName} (${v2Label} vs ${v1Label})`;
+        }
+        return "Version Diff";
+    }
+
+    async setState(state: any, options: any): Promise<void> {
+        await super.setState(state, options);
+
+        if (state && state.version1 && state.version2 && state.diffChanges) {
+            this.currentDisplayState = state as DiffViewDisplayState;
+            if (this.tabContentEl) {
+                this.render();
+            }
+            this.leaf.updateHeader();
+        }
+    }
+
+    async onOpen() {
+        this.containerEl.addClass("version-diff-view");
+        this.tabContentEl = this.contentEl.createDiv("v-preview-panel-tab-content"); // Reuse class for consistent padding
+        
+        if (this.currentDisplayState) {
+            this.render();
+        } else {
+            this.renderPlaceholder();
+        }
+    }
+
+    async onClose() {
+        this.contentEl.empty();
+        this.currentDisplayState = null;
+        this.tabContentEl = null;
+    }
+
+    private render() {
+        if (!this.tabContentEl || !this.currentDisplayState) return;
+        this.tabContentEl.empty();
+
+        const { version1, version2, diffChanges, noteName } = this.currentDisplayState;
+
+        // Header
+        const headerEl = this.tabContentEl.createDiv("v-panel-header");
+        const v1Label = version1.name ? `"${version1.name}" (V${version1.versionNumber})` : `Version ${version1.versionNumber}`;
+        const v2Label = version2.id === 'current' ? 'Current Note State' : (version2.name ? `"${version2.name}" (V${(version2 as any).versionNumber})` : `Version ${(version2 as any).versionNumber}`);
+        
+        headerEl.createEl("h3", { text: `Comparing versions of "${noteName}"` });
+        headerEl.createDiv({
+            text: `Base (Red, -): ${v1Label} - ${moment(version1.timestamp).format('LLL')}`,
+            cls: "v-meta-label"
+        });
+        headerEl.createDiv({
+            text: `Compared (Green, +): ${v2Label} - ${version2.id === 'current' ? 'Now' : moment(version2.timestamp).format('LLL')}`,
+            cls: "v-meta-label"
+        });
+
+        // Diff Content
+        const diffContentWrapper = this.tabContentEl.createDiv({ cls: "v-diff-content-wrapper" });
+        this.renderDiffLines(diffContentWrapper, diffChanges);
+    }
+
+    private renderDiffLines(container: HTMLElement, changes: Change[]) {
+        let oldLineNum = 1;
+        let newLineNum = 1;
+    
+        for (const part of changes) {
+            const lines = part.value.split('\n');
+            if (lines[lines.length - 1] === '') {
+                lines.pop();
+            }
+    
+            for (const line of lines) {
+                const lineEl = container.createDiv({ cls: 'diff-line' });
+                
+                const prefixEl = lineEl.createDiv({ cls: 'diff-line-prefix' });
+                const oldNumEl = lineEl.createDiv({ cls: 'diff-line-num old' });
+                const newNumEl = lineEl.createDiv({ cls: 'diff-line-num new' });
+                const contentEl = lineEl.createDiv({ cls: 'diff-line-content' });
+                contentEl.setText(line || '\u00A0');
+    
+                if (part.added) {
+                    lineEl.addClass('diff-add');
+                    prefixEl.setText('+');
+                    newNumEl.setText(String(newLineNum++));
+                } else if (part.removed) {
+                    lineEl.addClass('diff-remove');
+                    prefixEl.setText('-');
+                    oldNumEl.setText(String(oldLineNum++));
+                } else {
+                    lineEl.addClass('diff-context');
+                    oldNumEl.setText(String(oldLineNum++));
+                    newNumEl.setText(String(newLineNum++));
+                }
+            }
+        }
+    }
+
+    private renderPlaceholder() {
+        if (!this.tabContentEl) return;
+        this.tabContentEl.empty();
+        this.tabContentEl.setText("No diff data to display. Open a diff from the Version Control panel.");
+    }
+}

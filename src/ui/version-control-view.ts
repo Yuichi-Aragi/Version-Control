@@ -1,40 +1,38 @@
-import { ItemView, WorkspaceLeaf, setIcon } from "obsidian";
-import VersionControlPlugin from "../main";
+import { ItemView, WorkspaceLeaf, App } from "obsidian";
 import { VIEW_TYPE_VERSION_CONTROL } from "../constants";
 import { Store } from "../state/store";
-import { AppState } from "../state/state";
-import { thunks } from "../state/thunks";
+import { AppState, AppStatus } from "../state/state";
 
-// UI Components
 import { PlaceholderComponent } from "./components/PlaceholderComponent";
 import { ActionBarComponent } from "./components/ActionBarComponent";
 import { SettingsPanelComponent } from "./components/SettingsPanelComponent";
 import { HistoryListComponent } from "./components/HistoryListComponent";
 import { PreviewPanelComponent } from "./components/PreviewPanelComponent";
+import { DiffPanelComponent } from "./components/DiffPanelComponent";
 import { ConfirmationPanelComponent } from "./components/ConfirmationPanelComponent";
+import { ErrorDisplayComponent } from "./components/ErrorDisplayComponent";
 
 export class VersionControlView extends ItemView {
-    plugin: VersionControlPlugin;
     store: Store;
-    private unsubscribe: () => void;
+    app: App;
+    private unsubscribeFromStore: () => void;
     
-    // Component Instances
     private placeholderComponent: PlaceholderComponent;
     private actionBarComponent: ActionBarComponent;
     private settingsPanelComponent: SettingsPanelComponent;
     private historyListComponent: HistoryListComponent;
     private previewPanelComponent: PreviewPanelComponent;
+    private diffPanelComponent: DiffPanelComponent;
     private confirmationPanelComponent: ConfirmationPanelComponent;
+    private errorDisplayComponent: ErrorDisplayComponent;
 
-    // DOM Containers
-    private mainEl: HTMLElement;
-    private historyViewContainer: HTMLElement;
-    private panelContainer: HTMLElement;
+    private mainContainer: HTMLElement;
+    private readyStateContainer: HTMLElement;
 
-    constructor(leaf: WorkspaceLeaf, plugin: VersionControlPlugin) {
+    constructor(leaf: WorkspaceLeaf, store: Store, app: App) {
         super(leaf);
-        this.plugin = plugin;
-        this.store = plugin.store;
+        this.store = store;
+        this.app = app;
         this.icon = "history";
     }
 
@@ -47,116 +45,98 @@ export class VersionControlView extends ItemView {
     }
 
     async onOpen() {
-        try {
-            this.containerEl.addClass("version-control-view");
-            this.contentEl.addClass("version-control-content");
-            
-            this.buildLayout();
-            this.initComponents();
+        this.containerEl.addClass("version-control-view");
+        this.contentEl.addClass("version-control-content");
+        
+        this.mainContainer = this.contentEl.createDiv("v-main");
 
-            this.unsubscribe = this.store.subscribe(() => this.render(this.store.getState()));
-            // Initial render and data fetch
-            this.render(this.store.getState());
-            this.store.dispatch(thunks.updateActiveNote());
-        } catch (error) {
-            console.error("Version Control: Failed to open view.", error);
-            this.contentEl.empty();
-            const errorDiv = this.contentEl.createDiv({ cls: "v-placeholder is-active" });
-            setIcon(errorDiv.createDiv({ cls: "v-placeholder-icon" }), "alert-triangle");
-            errorDiv.createEl("p", { text: "An error occurred while opening the Version Control view." });
-            errorDiv.createEl("p", { text: "Please check the developer console for more details.", cls: "v-meta-label" });
-        }
+        this.initComponents();
+
+        this.unsubscribeFromStore = this.store.subscribe(() => {
+            if (this.leaf.parent) {
+                this.render(this.store.getState());
+            }
+        });
+        
+        this.render(this.store.getState());
     }
 
     async onClose() {
-        // Unsubscribe from the store to prevent the closed view from reacting to state changes.
-        this.unsubscribe?.();
-
-        // Destroy all UI components to guarantee the release of all resources.
-        // This includes DOM elements, event listeners, timers, and observers.
-        this.placeholderComponent?.destroy();
-        this.actionBarComponent?.destroy();
-        this.settingsPanelComponent?.destroy();
-        this.historyListComponent?.destroy();
-        this.previewPanelComponent?.destroy();
-        this.confirmationPanelComponent?.destroy();
-    }
-
-    private buildLayout() {
+        if (this.unsubscribeFromStore) {
+            this.unsubscribeFromStore();
+        }
+        // Components are now children of this view, they will be unloaded automatically.
         this.contentEl.empty();
-        this.mainEl = this.contentEl.createDiv("v-main");
-        
-        this.historyViewContainer = this.mainEl.createDiv({ cls: "v-history-view" });
-        this.panelContainer = this.mainEl.createDiv({ cls: "v-panel-container" });
     }
 
     private initComponents() {
-        this.placeholderComponent = new PlaceholderComponent(this.mainEl);
-
-        const topContainer = this.historyViewContainer.createDiv();
-        this.actionBarComponent = new ActionBarComponent(topContainer, this.plugin);
-        this.settingsPanelComponent = new SettingsPanelComponent(topContainer, this.plugin);
-
-        this.historyListComponent = new HistoryListComponent(this.historyViewContainer, this.plugin);
-
-        this.previewPanelComponent = new PreviewPanelComponent(this.panelContainer, this.plugin);
-        this.confirmationPanelComponent = new ConfirmationPanelComponent(this.panelContainer, this.plugin);
+        this.placeholderComponent = this.addChild(new PlaceholderComponent(this.mainContainer));
+        this.errorDisplayComponent = this.addChild(new ErrorDisplayComponent(this.mainContainer, this.store, this.app));
+        
+        this.readyStateContainer = this.mainContainer.createDiv('v-ready-state-container');
+        
+        this.actionBarComponent = this.addChild(new ActionBarComponent(this.readyStateContainer, this.store));
+        this.settingsPanelComponent = this.addChild(new SettingsPanelComponent(this.readyStateContainer, this.store));
+        this.historyListComponent = this.addChild(new HistoryListComponent(this.readyStateContainer, this.store));
+        
+        this.previewPanelComponent = this.addChild(new PreviewPanelComponent(this.readyStateContainer, this.store, this.app));
+        this.diffPanelComponent = this.addChild(new DiffPanelComponent(this.readyStateContainer, this.store));
+        this.confirmationPanelComponent = this.addChild(new ConfirmationPanelComponent(this.readyStateContainer, this.store));
     }
 
-    /**
-     * Main render function, driven by state changes from the store.
-     * It declaratively orchestrates what is visible on the screen based on the current AppState.
-     * This function is the heart of the view's reactivity, ensuring the UI
-     * is always a perfect reflection of the application state.
-     */
     private render(state: AppState) {
-        try {
-            const { ui } = state;
+        const isAppProcessing = state.status === AppStatus.READY && state.isProcessing;
+        this.contentEl.classList.toggle('is-processing', isAppProcessing);
 
-            // Apply global processing class to lock UI during critical operations
-            this.contentEl.classList.toggle('is-processing', ui.isProcessing);
+        const showPlaceholder = state.status === AppStatus.INITIALIZING || state.status === AppStatus.PLACEHOLDER;
+        const showError = state.status === AppStatus.ERROR;
+        const showReadyOrLoading = state.status === AppStatus.READY || state.status === AppStatus.LOADING;
 
-            // Determine which main view should be visible
-            const showHistory = ui.viewMode === 'history' || ui.viewMode === 'loading';
-            const showPlaceholder = ui.viewMode === 'placeholder';
+        this.placeholderComponent.getContainer().toggle(showPlaceholder);
+        this.errorDisplayComponent.getContainer().toggle(showError);
+        this.readyStateContainer.toggle(showReadyOrLoading);
 
-            // Toggle main view containers' visibility
-            this.historyViewContainer.classList.toggle('is-active', showHistory);
-            this.placeholderComponent.toggle(showPlaceholder);
+        switch (state.status) {
+            case AppStatus.INITIALIZING:
+                this.placeholderComponent.render("Initializing Version Control...", "sync");
+                break;
 
-            // Render content for visible main views
-            if (showHistory) {
-                this.actionBarComponent.render(state);
-                this.settingsPanelComponent.render(state);
-                this.historyListComponent.render(state);
-            }
-            if (showPlaceholder) {
+            case AppStatus.PLACEHOLDER:
                 this.placeholderComponent.render();
-            }
+                break;
 
-            // Handle overlay panels
-            const isPanelOpen = ui.preview.isOpen || ui.confirmation.isOpen;
-            this.panelContainer.classList.toggle('is-active', isPanelOpen);
+            case AppStatus.ERROR:
+                this.errorDisplayComponent.render(state.error);
+                break;
 
-            // Render and toggle the preview panel
-            if (ui.preview.isOpen) {
-                this.previewPanelComponent.render(state, this);
-            }
-            this.previewPanelComponent.toggle(ui.preview.isOpen);
+            case AppStatus.LOADING:
+                this.actionBarComponent.getContainer().hide();
+                this.settingsPanelComponent.getContainer().hide();
+                this.previewPanelComponent.getContainer().hide();
+                this.diffPanelComponent.getContainer().hide();
+                this.confirmationPanelComponent.getContainer().hide();
+                
+                this.historyListComponent.renderAsLoading();
+                this.historyListComponent.getContainer().show();
+                break;
 
-            // Render and toggle the confirmation panel
-            if (ui.confirmation.isOpen) {
-                this.confirmationPanelComponent.render(state);
-            }
-            this.confirmationPanelComponent.toggle(ui.confirmation.isOpen);
-        } catch (error) {
-            console.error("Version Control: A critical error occurred during view rendering.", error);
-            // Display an error message within the view itself to avoid a blank screen
-            this.contentEl.empty();
-            const errorDiv = this.contentEl.createDiv({ cls: "v-placeholder is-active" });
-            setIcon(errorDiv.createDiv({ cls: "v-placeholder-icon" }), "alert-triangle");
-            errorDiv.createEl("p", { text: "A critical error occurred while rendering the view." });
-            errorDiv.createEl("p", { text: "Please try closing and reopening the view, or check the console.", cls: "v-meta-label" });
+            case AppStatus.READY:
+                this.actionBarComponent.getContainer().show();
+                this.historyListComponent.getContainer().show();
+
+                this.actionBarComponent.render(state);
+                this.historyListComponent.render(state);
+                
+                this.settingsPanelComponent.render(state.panel?.type === 'settings', state);
+                this.previewPanelComponent.render(state.panel?.type === 'preview' ? state.panel : null);
+                this.diffPanelComponent.render(state.panel?.type === 'diff' ? state.panel : null);
+                this.confirmationPanelComponent.render(state.panel?.type === 'confirmation' ? state.panel : null);
+                break;
+            
+            default:
+                console.error("Version Control: Unknown AppStatus in render:", state);
+                this.placeholderComponent.render("An unexpected error occurred in the view.", "alert-circle");
+                this.placeholderComponent.getContainer().show();
         }
     }
 }
