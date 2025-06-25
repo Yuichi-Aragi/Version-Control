@@ -1,217 +1,226 @@
-import { App, Notice, moment } from "obsidian";
+import { App, TFile, moment } from "obsidian";
 import { ManifestManager } from "./manifest-manager";
 import { VersionControlSettings, NoteManifest } from "../types";
+import { NOTE_FRONTMATTER_KEY } from "../constants";
+import { PluginEvents } from "./plugin-events";
 
+/**
+ * Manages all cleanup operations, such as removing old versions based on
+ * retention policies and cleaning up data for orphaned (deleted) notes.
+ * It operates in a decoupled manner by listening to events from the PluginEvents bus.
+ */
 export class CleanupManager {
     private app: App;
     private manifestManager: ManifestManager;
     private settingsProvider: () => VersionControlSettings;
+    private eventBus: PluginEvents;
+    
     private cleanupPromises = new Map<string, Promise<void>>();
-    private periodicCleanupInterval: number | null = null;
+    private isOrphanCleanupRunning = false;
 
-    constructor(app: App, manifestManager: ManifestManager, settingsProvider: () => VersionControlSettings) {
+    constructor(
+        app: App, 
+        manifestManager: ManifestManager, 
+        settingsProvider: () => VersionControlSettings,
+        eventBus: PluginEvents
+    ) {
         this.app = app;
         this.manifestManager = manifestManager;
         this.settingsProvider = settingsProvider;
+        this.eventBus = eventBus;
     }
 
     /**
-     * Schedules cleanup for a specific note to avoid concurrent operations.
+     * Registers event listeners on the event bus. This should be called
+     * once during plugin initialization.
      */
-    scheduleCleanup(noteId: string): void {
+    public initialize(): void {
+        this.eventBus.on('version-saved', this.handleVersionSaved);
+    }
+
+    /**
+     * Event handler that triggers a per-note cleanup when a new version is saved.
+     */
+    private handleVersionSaved = (noteId: string): void => {
+        this.scheduleCleanup(noteId);
+    }
+
+    /**
+     * Schedules a cleanup operation for a specific note, ensuring that only one
+     * cleanup process runs at a time for the same note.
+     * @param noteId The ID of the note to clean up.
+     */
+    public scheduleCleanup(noteId: string): void {
         if (this.cleanupPromises.has(noteId)) {
-            return; // Cleanup already scheduled
+            return; 
         }
-        const cleanupPromise = this.cleanupOldVersions(noteId)
+        const cleanupPromise = this.performPerNoteCleanup(noteId)
+            .catch(error => {
+                console.error(`VC: Error during scheduled cleanup for note ${noteId}.`, error);
+            })
             .finally(() => {
                 this.cleanupPromises.delete(noteId);
             });
         this.cleanupPromises.set(noteId, cleanupPromise);
     }
 
-    /**
-     * Cleans up old versions for a single note based on settings.
-     */
-    private async cleanupOldVersions(noteId: string): Promise<void> {
-        try {
-            const settings = this.settingsProvider();
-            const { maxVersionsPerNote, autoCleanupOldVersions, autoCleanupDays } = settings;
+    private async performPerNoteCleanup(noteId: string): Promise<void> {
+        const settings = this.settingsProvider();
+        const { maxVersionsPerNote, autoCleanupOldVersions, autoCleanupDays } = settings;
 
-            if ((maxVersionsPerNote <= 0 || maxVersionsPerNote === Infinity) && !autoCleanupOldVersions) {
-                return;
-            }
+        if ((maxVersionsPerNote <= 0) && (!autoCleanupOldVersions || autoCleanupDays <= 0)) {
+            return;
+        }
 
-            const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
-            if (!noteManifest || Object.keys(noteManifest.versions).length <= 1) {
-                return;
-            }
+        const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
+        if (!noteManifest || Object.keys(noteManifest.versions).length <= 1) {
+            return;
+        }
 
-            const versions = Object.entries(noteManifest.versions);
-            const versionsToDelete = new Set<string>();
+        const versions = Object.entries(noteManifest.versions);
+        const versionsToDelete = new Set<string>();
 
-            // Age-based cleanup
-            if (autoCleanupOldVersions && autoCleanupDays > 0) {
-                const cutoffDate = moment().subtract(autoCleanupDays, 'days');
-                for (const [versionId, versionData] of versions) {
-                    if (versions.length - versionsToDelete.size <= 1) break;
-                    if (moment(versionData.timestamp).isBefore(cutoffDate)) {
-                        versionsToDelete.add(versionId);
-                    }
+        if (autoCleanupOldVersions && autoCleanupDays > 0) {
+            const cutoffDate = moment().subtract(autoCleanupDays, 'days');
+            versions.forEach(([versionId, versionData]) => {
+                if (versions.length - versionsToDelete.size > 1 && moment(versionData.timestamp).isBefore(cutoffDate)) {
+                    versionsToDelete.add(versionId);
+                }
+            });
+        }
+
+        if (maxVersionsPerNote > 0) {
+            const remainingVersions = versions.filter(([versionId]) => !versionsToDelete.has(versionId));
+            if (remainingVersions.length > maxVersionsPerNote) {
+                remainingVersions.sort(([, a], [, b]) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                const numberToExceedCount = remainingVersions.length - maxVersionsPerNote;
+                for (let i = 0; i < numberToExceedCount; i++) {
+                    versionsToDelete.add(remainingVersions[i][0]);
                 }
             }
+        }
 
-            // Count-based cleanup
-            if (maxVersionsPerNote > 0) {
-                const remainingVersions = versions.filter(([versionId]) => !versionsToDelete.has(versionId));
-                if (remainingVersions.length > maxVersionsPerNote) {
-                    remainingVersions.sort(([, a], [, b]) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-                    const numberToDelete = remainingVersions.length - maxVersionsPerNote;
-                    for (let i = 0; i < numberToDelete; i++) {
-                        versionsToDelete.add(remainingVersions[i][0]);
-                    }
-                }
-            }
-
-            if (versionsToDelete.size > 0) {
-                await this.deleteVersions(noteManifest, versionsToDelete);
-            }
-        } catch (error) {
-            console.error(`Version Control: Error during old version cleanup for note ${noteId}`, error);
+        if (versionsToDelete.size > 0) {
+            console.log(`VC: Identified ${versionsToDelete.size} old versions to cleanup for note ${noteId}.`);
+            await this.deleteMultipleVersions(noteManifest, Array.from(versionsToDelete));
         }
     }
 
-    /**
-     * Deletes multiple version files and updates the note manifest.
-     */
-    private async deleteVersions(noteManifest: NoteManifest, versionIds: Set<string>): Promise<void> {
+    private async deleteMultipleVersions(noteManifest: NoteManifest, versionIdsToDelete: string[]): Promise<void> {
         let deletedCount = 0;
         const deletionPromises: Promise<void>[] = [];
-        const failedDeletions: string[] = [];
+        const failedFileDeletions: string[] = [];
 
-        for (const versionId of versionIds) {
-            if (noteManifest.versions[versionId]) {
-                const versionPath = noteManifest.versions[versionId].filePath;
+        for (const versionId of versionIdsToDelete) {
+            const versionData = noteManifest.versions[versionId];
+            if (versionData) {
                 delete noteManifest.versions[versionId];
+                deletedCount++;
                 
                 deletionPromises.push(
-                    this.app.vault.adapter.exists(versionPath)
-                        .then(exists => exists ? this.app.vault.adapter.remove(versionPath) : Promise.resolve())
-                        .catch(error => {
-                            failedDeletions.push(versionPath);
-                            console.error(`Failed to delete version file ${versionPath}:`, error);
-                        })
+                    (async () => {
+                        try {
+                            const versionFilePath = this.manifestManager.getNoteVersionPath(noteManifest.noteId, versionId);
+                            if (await this.app.vault.adapter.exists(versionFilePath)) {
+                                await this.app.vault.adapter.remove(versionFilePath);
+                            }
+                        } catch (fileError) {
+                            const versionFilePath = this.manifestManager.getNoteVersionPath(noteManifest.noteId, versionId);
+                            failedFileDeletions.push(versionFilePath);
+                            console.error(`VC: Failed to delete version file ${versionFilePath} during cleanup.`, fileError);
+                        }
+                    })()
                 );
-                deletedCount++;
             }
         }
 
         await Promise.allSettled(deletionPromises);
 
-        if (failedDeletions.length > 0) {
-            console.error(`Version Control: Failed to delete ${failedDeletions.length} version files.`, failedDeletions);
-            new Notice("Version Control: Some old version files could not be deleted. Check console.");
+        if (failedFileDeletions.length > 0) {
+            console.error(`VC: Failed to delete ${failedFileDeletions.length} version files during cleanup for note ${noteManifest.noteId}. Paths:`, failedFileDeletions);
         }
 
         if (deletedCount > 0) {
             noteManifest.lastModified = new Date().toISOString();
             await this.manifestManager.saveNoteManifest(noteManifest);
-            console.log(`Version Control: Cleaned up ${deletedCount} old versions for note ${noteManifest.noteId}.`);
+            this.eventBus.trigger('version-deleted', noteManifest.noteId);
+            console.log(`VC: Successfully cleaned up ${deletedCount} old versions for note ${noteManifest.noteId}.`);
         }
     }
 
-    /**
-     * Scans the vault for version data linked to notes that no longer exist.
-     */
-    async cleanupOrphanedVersions(manualTrigger: boolean) {
+    async cleanupOrphanedVersions(manualTrigger: boolean): Promise<{ count: number, success: boolean }> {
+        const settings = this.settingsProvider();
+        if (!settings.autoCleanupOrphanedVersions && !manualTrigger) {
+            return { count: 0, success: true };
+        }
+        if (this.isOrphanCleanupRunning) {
+            console.log("VC: Orphan cleanup is already in progress. Skipping this run.");
+            return { count: 0, success: true };
+        }
+        this.isOrphanCleanupRunning = true;
+
         try {
-            const settings = this.settingsProvider();
-            if (!settings.autoCleanupOrphanedVersions && !manualTrigger) {
-                return;
+            const centralManifest = await this.manifestManager.loadCentralManifest(true);
+            if (!centralManifest || !centralManifest.notes) {
+                console.warn("VC: Central manifest is empty or invalid. Skipping orphan cleanup.");
+                return { count: 0, success: true };
             }
 
-            if (manualTrigger) {
-                new Notice("Starting cleanup of orphaned version data...");
-            }
-            
-            const centralManifest = await this.manifestManager.loadCentralManifest();
-            if (!centralManifest) {
-                if (manualTrigger) new Notice("Cleanup failed: Could not load manifest.");
-                return;
-            }
+            const allVaultFilePaths = new Set(this.app.vault.getMarkdownFiles().map(f => f.path));
+            const orphanedNoteIdsToDelete: string[] = [];
 
-            const allNotePaths = new Set(this.app.vault.getMarkdownFiles().map(f => f.path));
-            let orphanedCount = 0;
-            const promises = [];
-
-            for (const [noteId, data] of Object.entries(centralManifest.notes)) {
-                // Defensive check for corrupted manifest entries
-                if (!data || typeof data.notePath !== 'string') {
-                    console.warn(`Version Control: Found corrupted entry in central manifest for ID ${noteId}. Deleting.`, data);
-                    promises.push(this.manifestManager.deleteNoteEntry(noteId));
-                    orphanedCount++;
+            for (const [noteId, noteData] of Object.entries(centralManifest.notes)) {
+                if (!noteData || typeof noteData.notePath !== 'string') {
+                    console.warn(`VC: Corrupted entry in central manifest for ID ${noteId}. Removing. Data:`, JSON.stringify(noteData));
+                    orphanedNoteIdsToDelete.push(noteId);
                     continue;
                 }
 
-                if (!allNotePaths.has(data.notePath)) {
-                    console.log(`Version Control: Found orphaned entry for ID ${noteId} (last known path: ${data.notePath}). Deleting.`);
-                    promises.push(this.manifestManager.deleteNoteEntry(noteId));
-                    orphanedCount++;
-                }
-            }
+                const noteFileExists = allVaultFilePaths.has(noteData.notePath);
 
-            if (promises.length > 0) {
-                await Promise.all(promises);
-            }
-
-            if (manualTrigger) {
-                if (orphanedCount > 0) {
-                    new Notice(`Cleanup complete. Removed ${orphanedCount} orphaned version histor${orphanedCount > 1 ? 'ies' : 'y'}.`);
+                if (!noteFileExists) {
+                    console.log(`VC (Orphan): File not found for note ID ${noteId} at path "${noteData.notePath}". Scheduling data deletion.`);
+                    orphanedNoteIdsToDelete.push(noteId);
                 } else {
-                    new Notice("Cleanup complete. No orphaned version data found.");
+                    const file = this.app.vault.getAbstractFileByPath(noteData.notePath) as TFile;
+                    const fileCache = this.app.metadataCache.getFileCache(file);
+                    let idFromFrontmatter = fileCache?.frontmatter?.[NOTE_FRONTMATTER_KEY] ?? null;
+                    if (typeof idFromFrontmatter === 'string' && idFromFrontmatter.trim() === '') {
+                        idFromFrontmatter = null;
+                    }
+
+                    if (idFromFrontmatter !== noteId) {
+                        console.log(`VC (Orphan): Mismatched vc-id for note ID ${noteId} at path "${noteData.notePath}". Manifest ID: ${noteId}, File FM ID: "${idFromFrontmatter}". Scheduling data deletion.`);
+                        orphanedNoteIdsToDelete.push(noteId);
+                    }
                 }
-            } else if (orphanedCount > 0) {
-                console.log(`Version Control: Auto-cleanup removed ${orphanedCount} orphaned version histories.`);
             }
+
+            if (orphanedNoteIdsToDelete.length > 0) {
+                const deletionPromises = orphanedNoteIdsToDelete.map(id => this.manifestManager.deleteNoteEntry(id));
+                await Promise.allSettled(deletionPromises);
+                
+                // Emit event for each successfully deleted history
+                orphanedNoteIdsToDelete.forEach(id => this.eventBus.trigger('history-deleted', id));
+
+                console.log(`VC: Orphan cleanup removed ${orphanedNoteIdsToDelete.length} histor${orphanedNoteIdsToDelete.length > 1 ? 'ies' : 'y'}.`);
+            }
+            return { count: orphanedNoteIdsToDelete.length, success: true };
+
         } catch (error) {
-            console.error("Version Control: An unexpected error occurred during orphaned version cleanup.", error);
-            if (manualTrigger) {
-                new Notice("Orphaned version cleanup failed. Check console for details.");
-            }
+            console.error("VC: Unexpected error during orphaned version cleanup.", error);
+            return { count: 0, success: false };
+        } finally {
+            this.isOrphanCleanupRunning = false;
         }
     }
 
-    /**
-     * Sets up or tears down the periodic cleanup interval based on settings.
-     * The initial startup cleanup is handled separately in the plugin's `onload` method.
-     */
-    public managePeriodicCleanup() {
-        if (this.periodicCleanupInterval) {
-            window.clearInterval(this.periodicCleanupInterval);
-            this.periodicCleanupInterval = null;
-        }
-        if (this.settingsProvider().autoCleanupOrphanedVersions) {
-            // Run every hour
-            this.periodicCleanupInterval = window.setInterval(() => this.cleanupOrphanedVersions(false), 60 * 60 * 1000);
-        }
-    }
-
-    /**
-     * Clears any active intervals. This should be called on unload.
-     */
-    public cleanupIntervals(): void {
-        if (this.periodicCleanupInterval) {
-            window.clearInterval(this.periodicCleanupInterval);
-            this.periodicCleanupInterval = null;
-        }
-    }
-
-    /**
-     * Waits for any pending cleanup operations to complete.
-     */
     async completePendingCleanups(): Promise<void> {
-        const pendingCleanups = Array.from(this.cleanupPromises.values());
-        if (pendingCleanups.length > 0) {
-            await Promise.allSettled(pendingCleanups);
+        const pending = Array.from(this.cleanupPromises.values());
+        if (pending.length > 0) {
+            console.log(`VC: Waiting for ${pending.length} pending per-note cleanups...`);
+            await Promise.allSettled(pending);
+            console.log("VC: All pending per-note cleanups completed.");
         }
         this.cleanupPromises.clear();
     }
