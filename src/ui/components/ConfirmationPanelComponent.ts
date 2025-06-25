@@ -1,30 +1,57 @@
-import VersionControlPlugin from "../../main";
-import { AppState } from "../../state/state";
+import { Store } from "../../state/store";
+import { ConfirmationPanel as ConfirmationPanelState, AppStatus } from "../../state/state";
 import { actions } from "../../state/actions";
 import { BasePanelComponent } from "./BasePanelComponent";
 
 export class ConfirmationPanelComponent extends BasePanelComponent {
-    constructor(parent: HTMLElement, plugin: VersionControlPlugin) {
-        super(parent, plugin, ["v-inline-panel", "v-confirmation-panel"]);
+    private innerPanel: HTMLElement;
+
+    constructor(parent: HTMLElement, store: Store) {
+        super(parent, store, ["v-panel-container"]); 
+        this.innerPanel = this.container.createDiv({ cls: "v-inline-panel v-confirmation-panel" });
     }
 
-    render(state: AppState) {
-        this.container.empty();
-        const { title, message, onConfirmAction } = state.ui.confirmation;
+    render(panelState: ConfirmationPanelState | null) {
+        this.toggle(!!panelState);
+        
+        if (!panelState) {
+            if (this.innerPanel.hasChildNodes()) {
+                this.innerPanel.empty();
+            }
+            return;
+        }
+        
+        if (this.innerPanel.hasChildNodes() && this.innerPanel.dataset.confirmationTitle === panelState.title) {
+            const confirmBtn = this.innerPanel.querySelector('button.mod-warning') as HTMLButtonElement;
+            confirmBtn?.focus();
+            return;
+        }
 
-        this.container.createEl("h3", { text: title });
-        this.container.createEl("p", { text: message });
+        this.innerPanel.empty();
+        this.innerPanel.dataset.confirmationTitle = panelState.title;
 
-        const buttons = this.container.createDiv("modal-buttons");
-        const confirmBtn = buttons.createEl("button", { text: "Confirm", cls: "mod-warning" });
+        this.innerPanel.createEl("h3", { text: panelState.title });
+        this.innerPanel.createEl("p", { text: panelState.message });
+
+        const buttonsContainer = this.innerPanel.createDiv("modal-buttons");
+
+        const confirmBtn = buttonsContainer.createEl("button", { text: "Confirm", cls: "mod-warning" });
+        confirmBtn.setAttribute("aria-label", `Confirm: ${panelState.title}`);
         confirmBtn.addEventListener("click", () => {
-            if (onConfirmAction) {
-                // Dispatch the thunk or action that was packaged with the confirmation request
-                this.plugin.store.dispatch(onConfirmAction);
+            const currentState = this.store.getState();
+            if (currentState.status === AppStatus.READY && !currentState.isProcessing) {
+                this.store.dispatch(panelState.onConfirmAction);
+            } else {
+                this.store.dispatch(actions.closePanel());
             }
         });
         
-        const cancelBtn = buttons.createEl("button", { text: "Cancel" });
-        cancelBtn.addEventListener("click", () => this.plugin.store.dispatch(actions.hideConfirmation()));
+        const cancelBtn = buttonsContainer.createEl("button", { text: "Cancel" });
+        cancelBtn.setAttribute("aria-label", "Cancel action");
+        cancelBtn.addEventListener("click", () => {
+            this.store.dispatch(actions.closePanel());
+        });
+
+        confirmBtn.focus();
     }
 }

@@ -1,35 +1,53 @@
-import { setIcon } from "obsidian";
+import { setIcon, HTMLElement as ObsidianHTMLElement, Component } from "obsidian";
 
-export class PlaceholderComponent {
-    private container: HTMLElement;
+export class PlaceholderComponent extends Component {
+    private container: ObsidianHTMLElement;
+    private currentTitle: string | undefined;
+    private currentIcon: string | undefined;
 
-    constructor(parent: HTMLElement) {
+
+    constructor(parent: ObsidianHTMLElement) {
+        super();
         this.container = parent.createDiv({ cls: "v-placeholder" });
+        this.container.hide();
     }
 
-    render() {
+    render(title?: string, iconName?: string) {
+        const newTitle = title || "Open a Markdown note to see its version history.";
+        const newIcon = iconName || "file-text";
+
+        // Only re-render if content actually changes to prevent unnecessary DOM manipulation
+        if (this.currentTitle === newTitle && this.currentIcon === newIcon && this.container.hasChildNodes()) {
+            // this.container.show(); // Visibility is controlled by VersionControlView
+            return;
+        }
+        
+        this.currentTitle = newTitle;
+        this.currentIcon = newIcon;
         this.container.empty();
+
         const iconDiv = this.container.createDiv({ cls: "v-placeholder-icon" });
-        setIcon(iconDiv, "file-text");
-        this.container.createEl("p", { text: "Open a note to see its version history." });
+        setIcon(iconDiv, newIcon);
+
         this.container.createEl("p", { 
-            text: "Save a version to start tracking changes.",
-            cls: "v-meta-label"
+            text: newTitle,
+            cls: "v-placeholder-title"
         });
+
+        if (!title) { // Show default subtitle only if no custom title is provided
+            this.container.createEl("p", { 
+                text: "If the note is already open, try focusing its editor pane. Save a version to begin tracking changes.",
+                cls: "v-placeholder-subtitle v-meta-label"
+            });
+        }
+        // this.container.show(); // Visibility is controlled by VersionControlView
     }
 
-    /**
-     * Toggles the visibility of the component by adding or removing the 'is-active' class.
-     * @param show True to show, false to hide.
-     */
-    toggle(show: boolean) {
-        this.container.classList.toggle('is-active', show);
+    public getContainer(): ObsidianHTMLElement {
+        return this.container;
     }
 
-    /**
-     * Removes the component's container from the DOM. Called by the parent view on close.
-     */
-    public destroy(): void {
+    onunload() {
         this.container.remove();
     }
 }

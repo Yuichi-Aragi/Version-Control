@@ -1,64 +1,62 @@
-import VersionControlPlugin from "../../main";
-import { AppState } from "../../state/state";
+import { Component } from "obsidian";
+import { Store } from "../../state/store";
 
 /**
- * An abstract base class for UI panel components that can be shown or hidden.
- * It encapsulates the common logic for visibility toggling.
+ * An abstract base class for UI panel components that typically overlay or integrate
+ * closely with the main view area and can be shown or hidden.
+ * It extends Component to provide a lifecycle for its children.
  */
-export abstract class BasePanelComponent {
+export abstract class BasePanelComponent extends Component {
     protected container: HTMLElement;
-    protected plugin: VersionControlPlugin;
+    protected store: Store;
 
-    constructor(parent: HTMLElement, plugin: VersionControlPlugin, cssClasses: string[]) {
+    constructor(parent: HTMLElement, store: Store, cssClasses: string[]) {
+        super();
         this.container = parent.createDiv({ cls: cssClasses });
-        this.plugin = plugin;
+        this.store = store;
+        this.container.hide(); // Initially hidden
     }
 
     /**
-     * The main render function to be implemented by subclasses.
-     * @param state The current application state.
-     * @param args Additional arguments that might be needed for rendering.
+     * Main render function to be implemented by subclasses.
+     * @param panelSpecificState Data relevant to this panel.
+     * @param args Additional arguments.
      */
-    abstract render(state: AppState, ...args: any[]): void;
+    abstract render(panelSpecificState: any, ...args: any[]): void;
 
-    /**
-     * Makes the panel visible.
-     */
-    show() {
+    protected show(): void {
+        this.container.show();
         this.container.classList.add('is-active');
     }
 
-    /**
-     * Hides the panel.
-     */
-    hide() {
+    protected hide(): void {
+        this.container.hide();
         this.container.classList.remove('is-active');
     }
 
     /**
-     * Toggles the visibility of the panel.
-     * @param show True to show, false to hide.
+     * Toggles visibility. Subclasses call this in their render method.
+     * @param shouldShow True to show, false to hide.
      */
-    toggle(show: boolean) {
-        if (show) {
+    protected toggle(shouldShow: boolean): void {
+        if (shouldShow) {
             this.show();
         } else {
             this.hide();
         }
     }
 
-    /**
-     * Checks if the panel is currently visible.
-     */
-    get isVisible(): boolean {
-        return this.container.classList.contains('is-active');
+    public get isVisible(): boolean {
+        return this.container.style.display !== 'none' && this.container.classList.contains('is-active');
     }
 
-    /**
-     * Removes the component's container from the DOM, ensuring all child elements
-     * and their event listeners are garbage collected. This is the primary cleanup method.
-     */
-    public destroy(): void {
+    public getContainer(): HTMLElement {
+        return this.container;
+    }
+
+    onunload() {
+        // This will be called automatically when the parent component unloads.
+        // It ensures the DOM element is removed from the parent.
         this.container.remove();
     }
 }
