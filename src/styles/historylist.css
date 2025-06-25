@@ -1,0 +1,311 @@
+/* Version History */
+.v-history-list-container {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: var(--size-4-2);
+}
+
+.v-history-header {
+    flex-shrink: 0;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-2);
+    font-size: var(--font-ui-medium);
+    padding-bottom: var(--size-4-2);
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.v-history-count {
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+    margin-left: auto;
+    font-weight: normal;
+}
+
+.v-history-list {
+    flex-grow: 1;
+    overflow-y: auto;
+    min-height: 0;
+    padding-top: var(--size-4-2);
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-2);
+}
+
+.v-history-list.hide-timestamps .v-version-timestamp {
+    display: none;
+}
+
+.v-history-entry {
+    display: flex;
+    flex-direction: column;
+    padding: var(--size-4-2);
+    border-radius: var(--radius-m);
+    background-color: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    animation: v-fade-in 0.3s ease forwards;
+    will-change: transform, box-shadow, border-color;
+}
+.v-history-entry:hover {
+    border-color: var(--interactive-accent);
+    transform: translateY(-3px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+}
+.v-history-entry.is-error {
+    border-color: var(--color-red);
+}
+.v-history-entry.is-error .v-error-icon {
+    color: var(--color-red);
+    margin-left: auto;
+}
+.v-history-entry.is-highlighted {
+    box-shadow: 0 0 0 2px var(--interactive-accent);
+    transition: box-shadow 0.5s ease-out;
+}
+
+
+.v-entry-header {
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-3);
+    margin-bottom: var(--size-4-2);
+}
+.v-version-id {
+    font-weight: 600;
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+    padding: var(--size-4-1) var(--size-4-2);
+    border-radius: var(--radius-s);
+    font-size: var(--font-ui-smaller);
+}
+.v-version-name {
+    font-weight: 600;
+    font-size: var(--font-ui-small);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 1; 
+    min-width: 0; 
+}
+/* MODIFICATION: Don't truncate name in list view */
+.v-history-entry.is-list-view .v-version-name {
+    flex-shrink: 0;
+    overflow: visible;
+    text-overflow: clip;
+}
+.v-version-timestamp {
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+    margin-left: auto;
+    white-space: nowrap;
+    flex-shrink: 0; 
+}
+.v-version-content {
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+}
+
+/* Tag Styles */
+.v-version-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--size-4-1);
+    margin-top: var(--size-4-2);
+    padding-bottom: var(--size-4-2);
+    transition: all 0.3s ease-in-out;
+}
+/* CARD VIEW collapsed tags */
+.v-history-entry:not(.is-list-view) .v-version-tags {
+    max-height: 2.2em;
+    overflow: hidden;
+    cursor: pointer;
+    position: relative;
+}
+/* CARD VIEW ellipsis */
+.v-history-entry:not(.is-list-view) .v-version-tags:not(:hover)::after {
+    content: '...';
+    position: absolute;
+    bottom: 5px;
+    right: 5px;
+    background-color: var(--background-secondary);
+    padding-left: 4px;
+    color: var(--text-muted);
+    font-weight: bold;
+}
+/* GLOBAL expanded state hides name */
+.v-history-entry.is-tags-expanded .v-version-name {
+    display: none;
+}
+
+/* CARD VIEW expanded tags */
+.v-history-entry:not(.is-list-view).is-tags-expanded .v-version-tags {
+    max-height: 10em;
+}
+.v-history-entry:not(.is-list-view).is-tags-expanded .v-version-tags::after {
+    display: none;
+}
+
+.v-version-tag {
+    background-color: var(--color-purple-alpha);
+    color: var(--color-purple);
+    padding: 2px 6px;
+    border-radius: var(--radius-s);
+    font-size: var(--font-ui-smaller);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /* MODIFIED: Set a max-width for all tags to prevent super long ones from breaking layout */
+    max-width: 25ch;
+}
+
+/* LIST VIEW collapsed tags */
+.v-version-tags.is-list-view {
+    margin-top: 0;
+    padding-bottom: 0;
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    /* NEW */
+    position: relative;
+    cursor: pointer;
+    align-items: center;
+}
+
+/* LIST VIEW ellipsis */
+.v-history-entry.is-list-view .v-version-tags::after {
+    content: '...';
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    right: 0;
+    background: var(--background-secondary);
+    padding: 0 2px 0 6px;
+    color: var(--text-muted);
+    font-weight: bold;
+    pointer-events: none;
+}
+
+/* LIST VIEW expanded tags */
+.v-history-entry.is-list-view.is-tags-expanded .v-version-tags {
+    flex-wrap: wrap;
+    white-space: normal;
+    overflow: visible;
+    cursor: default;
+}
+.v-history-entry.is-list-view.is-tags-expanded .v-version-tags::after {
+    display: none;
+}
+
+.v-entry-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--size-4-1);
+    margin-top: var(--size-4-2);
+    padding-top: var(--size-4-2);
+    border-top: 1px solid var(--background-modifier-border);
+}
+.v-action-btn {
+    padding: var(--size-4-2);
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: var(--radius-s);
+    transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    will-change: transform, background-color, color;
+}
+.v-action-btn:hover {
+    background-color: var(--background-modifier-hover);
+    color: var(--text-normal);
+    transform: translateY(-2px);
+}
+.v-action-btn:active {
+    transform: translateY(0);
+}
+.v-action-btn.danger:hover {
+    background-color: var(--background-modifier-error);
+    color: var(--text-on-accent);
+}
+
+/* List View Mode */
+.v-history-entry.is-list-view {
+    flex-direction: row;
+    align-items: center;
+    padding: var(--size-4-2);
+    cursor: pointer;
+}
+.is-list-view .v-entry-header {
+    flex-grow: 1;
+    margin-bottom: 0;
+    min-width: 0; 
+    overflow: hidden;
+    flex-wrap: nowrap;
+    gap: var(--size-4-2);
+}
+.is-list-view .v-version-content,
+.is-list-view .v-entry-footer {
+    display: none;
+}
+
+/* New wrapper for name and tags in list view */
+.v-entry-main-info {
+    display: flex;
+    align-items: center;
+    flex: 1 1 0; /* Grow and shrink, with 0 basis */
+    min-width: 0; /* Critical for shrinking */
+    overflow: hidden;
+    gap: var(--size-4-3);
+}
+
+.v-history-entry.is-naming {
+    border-color: var(--interactive-accent);
+    box-shadow: 0 0 0 2px var(--interactive-accent-rgb-0.4);
+    transform: translateY(0);
+}
+.v-history-entry.is-naming:hover {
+    transform: translateY(0);
+}
+
+.version-control-view .v-history-entry.is-naming input.v-version-name-input {
+    -webkit-appearance: none;
+    appearance: none;
+    background-color: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    outline: none;
+    padding: 0;
+    margin: 0;
+    width: 100%;
+    height: auto;
+    line-height: 1.2;
+    flex-shrink: 1; 
+    min-width: 0;
+    font-family: inherit;
+    font-weight: 600;
+    font-size: var(--font-ui-small);
+    color: var(--text-normal);
+    caret-color: var(--interactive-accent);
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.2s ease-in-out;
+}
+
+.version-control-view .v-history-entry.is-naming input.v-version-name-input:focus {
+    border-bottom-color: var(--interactive-accent);
+}
+
+.version-control-view .v-history-entry.is-naming input.v-version-name-input::placeholder {
+    color: var(--text-faint);
+    font-weight: normal;
+    font-style: italic;
+    opacity: 1;
+}

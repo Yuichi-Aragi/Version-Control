@@ -1,0 +1,82 @@
+/* Placeholder Component */
+.v-placeholder {
+    color: var(--text-muted);
+    text-align: center;
+    padding: var(--size-4-8);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--size-4-2);
+    flex-grow: 1;
+    animation: v-fade-in 0.5s ease;
+}
+
+.v-placeholder-icon {
+    font-size: 2.5em;
+    opacity: 0.5;
+}
+
+/* Empty State Component */
+.v-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: var(--size-4-8) var(--size-4-4);
+    color: var(--text-muted);
+    flex-grow: 1;
+    animation: v-fade-in 0.5s ease;
+}
+.v-empty-state-icon {
+    font-size: 3em;
+    opacity: 0.3;
+    margin-bottom: var(--size-4-3);
+}
+
+/* Skeleton Loader Component */
+.v-history-entry.is-skeleton {
+    pointer-events: none;
+}
+.is-skeleton .v-skeleton-item {
+    background-color: var(--background-secondary) !important; 
+    opacity: 0.7 !important;
+    border-radius: var(--radius-s);
+    animation: v-pulse 1.5s infinite ease-in-out;
+}
+.is-skeleton .v-entry-header { margin-bottom: var(--size-4-2); }
+.is-skeleton .v-version-id { width: 40px; height: 20px; color: transparent; }
+.is-skeleton .v-version-name { height: 16px; width: 60%; }
+.is-skeleton .v-version-timestamp { height: 14px; width: 80px; }
+.is-skeleton .v-version-content { height: 14px; width: 40%; margin-top: var(--size-4-1); }
+.is-skeleton .v-entry-footer { display: none; }
+
+/* Error Display Component */
+.v-error-display .v-placeholder-icon {
+    color: var(--color-red-rgb);
+}
+.v-error-display h3 {
+    color: var(--text-error);
+}
+.v-error-display .v-error-details {
+    background-color: var(--background-modifier-error-hover);
+    border: 1px solid var(--background-modifier-error);
+    padding: var(--size-4-2);
+    border-radius: var(--radius-s);
+    font-size: var(--font-ui-smaller);
+    max-height: 150px;
+    overflow-y: auto;
+    text-align: left;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin-top: var(--size-4-2);
+}
+.v-error-display button.mod-cta {
+    margin-top: var(--size-4-3);
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+.v-error-display button.mod-cta:hover {
+    background-color: var(--interactive-accent-hover);
+}

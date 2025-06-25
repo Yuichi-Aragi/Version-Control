@@ -1,1 +1,230 @@
+/* Actions Bar */
+.v-top-container {
+    flex-shrink: 0;
+}
+.v-actions-container {
+    flex-shrink: 0;
+    padding: var(--size-4-2);
+    position: relative;
+    height: var(--input-height);
+}
 
+.v-top-actions,
+.v-search-bar-container {
+    position: absolute;
+    width: calc(100% - var(--size-4-2) * 2);
+    top: 50%;
+    left: var(--size-4-2);
+    display: flex;
+    align-items: center;
+    transform: translateY(-50%);
+    transition: opacity 0.2s ease-in-out;
+    will-change: opacity;
+}
+
+.v-top-actions {
+    justify-content: space-between;
+    opacity: 1;
+    pointer-events: auto;
+    z-index: 1;
+}
+
+.v-search-bar-container {
+    gap: var(--size-4-2);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.v-actions-container.is-searching .v-top-actions {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.v-actions-container.is-searching .v-search-bar-container {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.v-top-actions-right-group {
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-1);
+}
+
+.v-top-actions .v-save-button {
+    background-color: transparent;
+    border: 1px solid var(--interactive-accent);
+    color: var(--text-normal);
+    padding: var(--size-4-1) var(--size-4-3);
+    height: auto;
+    box-shadow: none;
+    font-weight: var(--font-semibold);
+    transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    will-change: transform, border-color, background-color;
+}
+.v-top-actions .v-save-button:hover {
+    background-color: var(--background-modifier-hover);
+    border-color: var(--interactive-accent-hover);
+    color: var(--text-normal);
+    transform: translateY(-1px);
+}
+
+.v-search-input-wrapper {
+    flex-grow: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.v-search-input-wrapper::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 0;
+    height: 2px;
+    background-color: var(--interactive-accent);
+    transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+    z-index: 3;
+}
+.v-search-bar-container.is-query-active .v-search-input-wrapper::after {
+    width: 100%;
+}
+
+
+.v-search-bar-container .search-input-container {
+    width: 100%;
+}
+
+.v-search-bar-container input[type="search"] {
+    width: 100%;
+    padding-left: calc(var(--size-4-2) + var(--icon-size) + var(--size-4-2));
+    padding-right: calc(var(--size-4-2) * 2 + var(--icon-size) * 2);
+    background-color: transparent;
+    border: none;
+    border-bottom: 1px solid var(--background-modifier-border);
+    border-radius: 0;
+    box-shadow: none;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+.v-search-bar-container input[type="search"]:focus {
+    border-color: var(--text-muted);
+    box-shadow: none;
+}
+
+.v-search-icon {
+    position: absolute;
+    left: var(--size-4-2);
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    z-index: 2;
+    cursor: pointer;
+    padding: var(--size-4-1);
+    border-radius: var(--radius-s);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+.v-search-icon:hover {
+    background-color: var(--background-modifier-hover);
+    color: var(--text-error);
+}
+
+.v-search-input-buttons {
+    position: absolute;
+    right: var(--size-4-2);
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-1);
+}
+
+.v-actions-container .clickable-icon {
+    color: var(--text-muted);
+    background-color: transparent;
+    border: none;
+    padding: var(--size-4-1);
+    border-radius: var(--radius-s);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.v-actions-container .clickable-icon:hover {
+    background-color: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+.v-actions-container .clickable-icon.is-active {
+    background-color: var(--background-modifier-accent);
+    color: var(--text-on-accent);
+}
+
+.v-search-bar-container .v-search-input-buttons .clickable-icon.is-active {
+    background-color: var(--color-purple-alpha);
+    color: var(--color-purple);
+}
+
+.v-filter-button {
+    flex-shrink: 0;
+}
+
+/* Diff Indicator Button */
+.v-diff-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease-in-out;
+    will-change: transform, filter;
+}
+
+.v-diff-indicator.is-generating .svg-icon {
+    color: var(--color-purple);
+    animation: v-glow-pulse 1.5s infinite ease-in-out, spin 2s linear infinite;
+}
+
+.v-diff-indicator.is-ready {
+    animation: v-ready-pop-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.v-diff-indicator.is-ready .svg-icon {
+    color: var(--color-green);
+    animation: v-green-glow 1.2s ease-out;
+}
+
+@keyframes v-glow-pulse {
+    0%, 100% {
+        transform: scale(1);
+        filter: drop-shadow(0 0 2px rgba(var(--color-purple-rgb), 0.5));
+    }
+    50% {
+        transform: scale(1.15);
+        filter: drop-shadow(0 0 6px rgba(var(--color-purple-rgb), 0.7));
+    }
+}
+
+@keyframes v-ready-pop-in {
+    0% {
+        transform: scale(0.5);
+        opacity: 0;
+    }
+    70% {
+        transform: scale(1.2);
+        opacity: 1;
+    }
+    100% {
+        transform: scale(1);
+    }
+}
+
+@keyframes v-green-glow {
+    0% {
+        filter: drop-shadow(0 0 8px rgba(var(--color-green-rgb), 0.7));
+    }
+    100% {
+        filter: drop-shadow(0 0 0 transparent);
+    }
+}

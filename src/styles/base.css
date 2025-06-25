@@ -1,0 +1,92 @@
+/* General View Styles */
+.version-control-view {
+    padding: 0;
+}
+
+.version-control-content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    position: relative; /* For processing overlay */
+}
+
+/* Global processing state to prevent concurrent actions */
+.version-control-content.is-processing {
+    cursor: wait;
+}
+.version-control-content.is-processing::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: var(--background-primary);
+    opacity: 0.5;
+    z-index: 100;
+}
+.version-control-content.is-processing button,
+.version-control-content.is-processing input,
+.version-control-content.is-processing .clickable-icon,
+.version-control-content.is-processing .v-history-entry.is-list-view,
+.version-control-content.is-processing .setting-item-control {
+    pointer-events: none;
+    opacity: 0.6;
+}
+
+.v-main {
+    flex-grow: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.v-ready-state-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Animations */
+@keyframes v-pulse {
+    0% { background-color: var(--background-secondary); opacity: 0.7; }
+    50% { background-color: var(--background-modifier-border); opacity: 0.5; }
+    100% { background-color: var(--background-secondary); opacity: 0.7; }
+}
+@keyframes v-fade-in {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Scrollbars */
+.v-history-list::-webkit-scrollbar,
+.v-preview-panel-content .v-version-content-preview::-webkit-scrollbar,
+.v-diff-panel-content .v-version-content-preview::-webkit-scrollbar,
+.v-settings-panel-content-wrapper::-webkit-scrollbar,
+.version-preview-view .v-preview-panel-tab-content::-webkit-scrollbar,
+.version-diff-view .v-preview-panel-tab-content::-webkit-scrollbar { 
+    width: 6px;
+}
+.v-history-list::-webkit-scrollbar-thumb,
+.v-preview-panel-content .v-version-content-preview::-webkit-scrollbar-thumb,
+.v-diff-panel-content .v-version-content-preview::-webkit-scrollbar-thumb,
+.v-settings-panel-content-wrapper::-webkit-scrollbar-thumb,
+.version-preview-view .v-preview-panel-tab-content::-webkit-scrollbar-thumb,
+.version-diff-view .v-preview-panel-tab-content::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb-bg);
+    border-radius: 3px;
+}
+
+/* Touch hover effects */
+@media (hover: hover) and (pointer: coarse) {
+    .v-history-entry:hover {
+        transform: translateY(-1px) !important;
+        box-shadow: 0 3px 8px rgba(0,0,0,0.05) !important;
+    }
+    .v-action-btn:hover {
+        transform: translateY(-1px) !important;
+    }
+}

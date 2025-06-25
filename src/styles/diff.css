@@ -1,0 +1,82 @@
+/* Diff Panel Styles */
+.v-diff-panel-content.is-loading, .version-diff-view .is-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--size-4-4);
+    color: var(--text-muted);
+    flex-grow: 1;
+}
+
+.v-diff-content-wrapper {
+    font-family: var(--font-monospace);
+    font-size: var(--font-ui-smaller);
+    line-height: 1.5;
+    background-color: var(--background-secondary);
+    border-radius: var(--radius-m);
+    overflow-y: auto;
+    flex-grow: 1;
+    padding: var(--size-4-2) 0;
+}
+
+.diff-line {
+    display: flex;
+    width: 100%;
+    padding: 0 var(--size-4-2);
+    min-height: 1.5em; /* Ensure empty lines are visible */
+}
+
+.diff-line:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+.diff-line-prefix {
+    flex-shrink: 0;
+    width: 1.5ch;
+    text-align: center;
+    user-select: none;
+    font-weight: bold;
+}
+
+.diff-line-num {
+    flex-shrink: 0;
+    width: 4ch;
+    padding-right: var(--size-4-2);
+    text-align: right;
+    color: var(--text-faint);
+    user-select: none;
+}
+
+.diff-line-content {
+    flex-grow: 1;
+    white-space: pre-wrap;
+    word-break: break-all;
+    padding-left: var(--size-4-2);
+    border-left: 1px solid var(--background-modifier-border-hover);
+}
+
+/* Added lines */
+.diff-add {
+    background-color: var(--color-green-alpha);
+}
+.diff-add .diff-line-prefix {
+    color: var(--color-green);
+}
+
+/* Removed lines */
+.diff-remove {
+    background-color: var(--color-red-alpha);
+}
+.diff-remove .diff-line-prefix {
+    color: var(--color-red);
+}
+.diff-remove .diff-line-content {
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+
+/* Context lines */
+.diff-context .diff-line-prefix {
+    color: var(--text-faint);
+}
