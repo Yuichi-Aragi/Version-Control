@@ -2,7 +2,7 @@ import { ItemView, WorkspaceLeaf, moment, App } from "obsidian";
 import { VIEW_TYPE_VERSION_DIFF } from "../constants";
 import { Store } from "../state/store";
 import { DiffViewDisplayState } from "../types";
-import { Change } from "diff";
+import { renderDiffLines } from "./utils/diff-renderer";
 
 export class VersionDiffView extends ItemView {
     store: Store;
@@ -83,43 +83,7 @@ export class VersionDiffView extends ItemView {
 
         // Diff Content
         const diffContentWrapper = this.tabContentEl.createDiv({ cls: "v-diff-content-wrapper" });
-        this.renderDiffLines(diffContentWrapper, diffChanges);
-    }
-
-    private renderDiffLines(container: HTMLElement, changes: Change[]) {
-        let oldLineNum = 1;
-        let newLineNum = 1;
-    
-        for (const part of changes) {
-            const lines = part.value.split('\n');
-            if (lines[lines.length - 1] === '') {
-                lines.pop();
-            }
-    
-            for (const line of lines) {
-                const lineEl = container.createDiv({ cls: 'diff-line' });
-                
-                const prefixEl = lineEl.createDiv({ cls: 'diff-line-prefix' });
-                const oldNumEl = lineEl.createDiv({ cls: 'diff-line-num old' });
-                const newNumEl = lineEl.createDiv({ cls: 'diff-line-num new' });
-                const contentEl = lineEl.createDiv({ cls: 'diff-line-content' });
-                contentEl.setText(line || '\u00A0');
-    
-                if (part.added) {
-                    lineEl.addClass('diff-add');
-                    prefixEl.setText('+');
-                    newNumEl.setText(String(newLineNum++));
-                } else if (part.removed) {
-                    lineEl.addClass('diff-remove');
-                    prefixEl.setText('-');
-                    oldNumEl.setText(String(oldLineNum++));
-                } else {
-                    lineEl.addClass('diff-context');
-                    oldNumEl.setText(String(oldLineNum++));
-                    newNumEl.setText(String(newLineNum++));
-                }
-            }
-        }
+        renderDiffLines(diffContentWrapper, diffChanges);
     }
 
     private renderPlaceholder() {
