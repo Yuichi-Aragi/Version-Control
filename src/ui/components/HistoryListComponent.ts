@@ -2,7 +2,7 @@ import { setIcon, moment, HTMLElement as ObsidianHTMLElement, MouseEvent as Obsi
 import { VersionHistoryEntry } from "../../types";
 import { formatFileSize } from "../utils/dom";
 import { Store } from "../../state/store";
-import { ReadyState, AppStatus } from "../../state/state";
+import { ReadyState } from "../../state/state";
 import { versionActions, VersionActionConfig } from "../VersionActions"; 
 import { thunks } from "../../state/thunks/index";
 import { actions } from "../../state/actions";
@@ -14,22 +14,7 @@ export class HistoryListComponent extends Component {
     private countEl: ObsidianHTMLElement | null = null;
     private store: Store;
 
-    // --- State Caching and Rendering Control ---
-    private currentProcessedHistoryIds: string[] | null = null;
     private processedHistory: VersionHistoryEntry[] = [];
-    private currentSettingsSnapshot: { 
-        isListView?: boolean; 
-        showTimestamps?: boolean;
-        namingVersionId?: string | null;
-        highlightedVersionId?: string | null;
-    } = {};
-
-    // --- Infinite Scroll ---
-    private expandedTags: Set<string> = new Set();
-    private displayedItemsCount = 0;
-    private readonly ITEMS_PER_PAGE = 30;
-    private intersectionObserver: IntersectionObserver | null = null;
-    private sentinelEl: ObsidianHTMLElement | null = null;
 
     constructor(parent: ObsidianHTMLElement, store: Store) {
         super();
@@ -39,115 +24,29 @@ export class HistoryListComponent extends Component {
     }
 
     render(state: ReadyState) {
-        // 1. Calculate new data state based on current filters and sorting
         const newProcessedHistory = this.getFilteredAndSortedHistory(state);
-        const newHistoryIds = newProcessedHistory.map(h => h.id);
 
-        // 2. Determine if a hard reset of the list is needed. This happens if:
-        //    - The set of visible version IDs changes (due to filtering/new versions).
-        //    - The fundamental view mode (list vs. card) changes.
-        const historyIdsChanged = this.currentProcessedHistoryIds === null || this.currentProcessedHistoryIds.join(',') !== newHistoryIds.join(',');
-        const viewModeChanged = this.currentSettingsSnapshot.isListView !== state.settings.isListView;
+        const viewModeChanged = this.listEl && (this.listEl.classList.contains('is-list-view') !== state.settings.isListView);
+        const historyIdsChanged = !this.processedHistory || this.processedHistory.map(v => v.id).join(',') !== newProcessedHistory.map(v => v.id).join(',');
 
-        if (historyIdsChanged || viewModeChanged) {
-            // Perform a full rebuild of the list DOM.
-            this.performHardReset(state, newProcessedHistory, newHistoryIds);
-        } else {
-            // If we are here, the list of items is the same, but their content (e.g., name, tags) might have changed.
-            // First, update the component's internal cache of processed history with the new data.
+        if (viewModeChanged || historyIdsChanged) {
+            // Hard reset: The list of items or their fundamental layout has changed.
+            // This is necessary for view mode switches, filtering, and sorting.
             this.processedHistory = newProcessedHistory;
-            // Then, perform "soft" updates on the existing DOM elements without a full rebuild.
-            this.performSoftUpdates(state);
+            this.rebuildList(state);
+        } else {
+            // Soft update: The list of items is the same, but their content might have changed (e.g., name, highlight).
+            // This is for things like renaming a version or highlighting one for diffing.
+            this.processedHistory = newProcessedHistory;
+            this.updateExistingEntries(state);
         }
 
-        // 3. Always update dynamic elements like the version count.
-        this.updateCountDisplay(newProcessedHistory.length, state.history.length);
+        this.updateCountDisplay(this.processedHistory.length, state.history.length);
         this.container.show();
     }
 
-    private performHardReset(state: ReadyState, newProcessedHistory: VersionHistoryEntry[], newHistoryIds: string[]) {
-        // --- Update internal state ---
-        this.processedHistory = newProcessedHistory;
-        this.currentProcessedHistoryIds = newHistoryIds;
-        this.currentSettingsSnapshot = {
-            isListView: state.settings.isListView,
-            showTimestamps: state.settings.showTimestamps,
-            namingVersionId: state.namingVersionId,
-            highlightedVersionId: state.highlightedVersionId,
-        };
-        
-        // --- Reset infinite scroll state ---
-        this.displayedItemsCount = 0;
-        this.cleanupObserver();
-        this.expandedTags.clear();
-
-        // --- Rebuild DOM structure ---
-        this.container.empty();
-        this.buildSkeletonDOM(state);
-
-        // --- Render content ---
-        if (state.history.length === 0) {
-            this.renderEmptyState("inbox", "No versions saved yet.", "Click 'Save New Version' to begin tracking changes.");
-        } else if (newProcessedHistory.length === 0) {
-            this.renderEmptyState("search-x", "No matching versions found.", `Try a different search query (e.g., 'tag:mytag') or change sort options.`);
-        } else {
-            this.loadMoreItems(state); // This will load the first page
-        }
-    }
-
-    private performSoftUpdates(state: ReadyState) {
-        // Naming state change
-        const oldNamingId = this.currentSettingsSnapshot.namingVersionId;
-        const newNamingId = state.namingVersionId;
-        if (oldNamingId !== newNamingId) {
-            this.updateNamingState(oldNamingId, newNamingId, state);
-            this.currentSettingsSnapshot.namingVersionId = newNamingId;
-        }
-
-        // Timestamp visibility change
-        const timestampVisibilityChanged = this.currentSettingsSnapshot.showTimestamps !== state.settings.showTimestamps;
-        if (timestampVisibilityChanged) {
-            this.currentSettingsSnapshot.showTimestamps = state.settings.showTimestamps;
-            this.listEl?.classList.toggle('hide-timestamps', !state.settings.showTimestamps);
-        }
-
-        // Highlight change
-        const highlightChanged = this.currentSettingsSnapshot.highlightedVersionId !== state.highlightedVersionId;
-        if (highlightChanged) {
-            this.updateHighlight(state.highlightedVersionId);
-            this.currentSettingsSnapshot.highlightedVersionId = state.highlightedVersionId;
-        }
-    }
-
-    private updateNamingState(oldNamingId: string | null | undefined, newNamingId: string | null, state: ReadyState) {
-        if (!this.listEl) return;
-    
-        const reRenderEntry = (versionId: string | null | undefined) => {
-            if (!versionId) return;
-            const entryEl = this.listEl!.querySelector(`[data-version-id="${versionId}"]`) as HTMLElement;
-            const versionData = this.processedHistory.find(v => v.id === versionId);
-            if (entryEl && versionData) {
-                const fragment = document.createDocumentFragment();
-                // We pass the *current* state to renderHistoryEntry to ensure it has the latest namingVersionId
-                this.renderHistoryEntry(fragment, versionData, state);
-                const newEntryEl = fragment.firstElementChild;
-                if (newEntryEl) {
-                    entryEl.replaceWith(newEntryEl);
-                }
-            }
-        };
-    
-        // Re-render both the old and new entries to correctly update their states
-        reRenderEntry(oldNamingId);
-        reRenderEntry(newNamingId);
-    }
-
     renderAsLoading() {
-        this.cleanupObserver();
         this.container.empty();
-        this.currentProcessedHistoryIds = null; 
-        this.currentSettingsSnapshot = {};
-
         this.buildSkeletonDOM(null); 
         this.updateCountDisplay("Loading...");
 
@@ -229,8 +128,69 @@ export class HistoryListComponent extends Component {
         
         this.listEl = this.container.createDiv("v-history-list");
         if (state && this.listEl) { 
-            this.listEl.classList.toggle('hide-timestamps', !state.settings.showTimestamps);
+            this.listEl.classList.toggle('is-list-view', state.settings.isListView);
         }
+    }
+
+    private rebuildList(state: ReadyState) {
+        this.container.empty();
+        this.buildSkeletonDOM(state);
+
+        if (state.history.length === 0) {
+            this.renderEmptyState("inbox", "No versions saved yet.", "Click 'Save New Version' to begin tracking changes.");
+            return;
+        }
+        if (this.processedHistory.length === 0) {
+            this.renderEmptyState("search-x", "No matching versions found.", `Try a different search query or change sort options.`);
+            return;
+        }
+
+        // Suppress entry animations during a full rebuild (sort/filter) to prevent jank
+        this.listEl!.addClass('is-rebuilding');
+
+        const fragment = document.createDocumentFragment();
+        for (const version of this.processedHistory) {
+            try {
+                this.renderHistoryEntry(fragment, version, state);
+            } catch (error) {
+                console.error("VC: Failed to render a history entry.", { entry: version, error });
+                this.renderErrorEntry(fragment, version);
+            }
+        }
+        this.listEl!.appendChild(fragment);
+
+        // Re-enable animations after the DOM has settled
+        setTimeout(() => this.listEl?.removeClass('is-rebuilding'), 50);
+    }
+
+    private updateExistingEntries(state: ReadyState) {
+        if (!this.listEl) return;
+
+        const entryElements = this.listEl.children;
+        for (let i = 0; i < entryElements.length; i++) {
+            const el = entryElements[i] as HTMLElement;
+            const versionId = el.dataset.versionId;
+            if (!versionId) continue;
+
+            const versionData = this.processedHistory.find(v => v.id === versionId);
+            if (!versionData) {
+                el.remove();
+                continue;
+            }
+
+            const isNamingThisVersion = versionData.id === state.namingVersionId;
+            const isExpanded = state.expandedTagIds.includes(versionId);
+            const newSignature = `${versionData.name || ''}|${(versionData.tags || []).join(',')}|${isNamingThisVersion}|${isExpanded}`;
+
+            if (el.dataset.signature !== newSignature) {
+                const newEl = this.createHistoryEntry(versionData, state);
+                el.replaceWith(newEl);
+            } else {
+                el.classList.toggle('is-highlighted', versionData.id === state.highlightedVersionId);
+            }
+        }
+        
+        this.listEl.classList.toggle('hide-timestamps', !state.settings.showTimestamps);
     }
 
     private updateCountDisplay(shown: number | string, total?: number) {
@@ -244,77 +204,26 @@ export class HistoryListComponent extends Component {
             }
         }
     }
-    
-    private cleanupObserver() {
-        if (this.intersectionObserver) {
-            this.intersectionObserver.disconnect();
-            this.intersectionObserver = null;
-        }
-        if (this.sentinelEl) {
-            this.sentinelEl.remove();
-            this.sentinelEl = null;
-        }
-    }
 
-    private loadMoreItems(state: ReadyState) {
-        if (!this.listEl || this.displayedItemsCount >= this.processedHistory.length) {
-            this.cleanupObserver(); 
-            return;
-        }
-
+    private createHistoryEntry(version: VersionHistoryEntry, state: ReadyState): HTMLElement {
         const fragment = document.createDocumentFragment();
-        const end = Math.min(this.displayedItemsCount + this.ITEMS_PER_PAGE, this.processedHistory.length);
-        
-        for (let i = this.displayedItemsCount; i < end; i++) {
-            try {
-                this.renderHistoryEntry(fragment, this.processedHistory[i], state);
-            } catch (error) {
-                console.error("VC: Failed to render a history entry.", { entry: this.processedHistory[i], error });
-                this.renderErrorEntry(fragment, this.processedHistory[i]); 
-            }
-        }
-        this.listEl.appendChild(fragment);
-        this.displayedItemsCount = end;
-
-        if (this.displayedItemsCount < this.processedHistory.length) {
-            if (!this.sentinelEl || !this.listEl.contains(this.sentinelEl)) {
-                this.sentinelEl = this.listEl.createDiv("v-scroll-sentinel");
-                this.sentinelEl.setAttribute("aria-hidden", "true"); 
-            }
-            if (this.sentinelEl.parentElement !== this.listEl) {
-                 this.listEl.appendChild(this.sentinelEl);
-            }
-
-            if (!this.intersectionObserver) {
-                this.intersectionObserver = new IntersectionObserver(
-                    (entries) => {
-                        if (entries[0]?.isIntersecting) {
-                            const freshState = this.store.getState();
-                            if (freshState.status === AppStatus.READY) {
-                                this.loadMoreItems(freshState);
-                            }
-                        }
-                    },
-                    { root: this.listEl, rootMargin: '200px 0px' } 
-                );
-            }
-            this.intersectionObserver.observe(this.sentinelEl);
-        } else {
-            this.cleanupObserver(); 
-        }
+        this.renderHistoryEntry(fragment, version, state);
+        return fragment.firstElementChild as HTMLElement;
     }
 
     private renderHistoryEntry(parent: DocumentFragment | ObsidianHTMLElement, version: VersionHistoryEntry, state: ReadyState) {
-        const { settings, namingVersionId, highlightedVersionId } = state;
+        const { settings, namingVersionId, highlightedVersionId, expandedTagIds } = state;
         const isNamingThisVersion = version.id === namingVersionId;
+        const isExpanded = expandedTagIds.includes(version.id);
 
         const entryEl = parent.createDiv("v-history-entry");
         entryEl.toggleClass('is-list-view', settings.isListView);
         entryEl.toggleClass('is-naming', isNamingThisVersion);
         entryEl.toggleClass('is-highlighted', version.id === highlightedVersionId);
-        entryEl.toggleClass('is-tags-expanded', this.expandedTags.has(version.id));
+        entryEl.toggleClass('is-tags-expanded', isExpanded);
         entryEl.setAttribute('role', 'listitem');
         entryEl.dataset.versionId = version.id;
+        entryEl.dataset.signature = `${version.name || ''}|${(version.tags || []).join(',')}|${isNamingThisVersion}|${isExpanded}`;
 
         const header = entryEl.createDiv("v-entry-header");
         header.createSpan({ cls: "v-version-id", text: `V${version.versionNumber}` });
@@ -366,15 +275,7 @@ export class HistoryListComponent extends Component {
 
         tagsContainer.addEventListener('click', (e) => {
             e.stopPropagation();
-            const entryEl = (e.currentTarget as HTMLElement).closest('.v-history-entry');
-            if (entryEl) {
-                if (this.expandedTags.has(version.id)) {
-                    this.expandedTags.delete(version.id);
-                } else {
-                    this.expandedTags.add(version.id);
-                }
-                entryEl.classList.toggle('is-tags-expanded');
-            }
+            this.store.dispatch(actions.toggleTagExpansion(version.id));
         });
 
         (version.tags || []).forEach(tag => {
@@ -411,7 +312,9 @@ export class HistoryListComponent extends Component {
         };
 
         input.addEventListener('blur', () => {
-            setTimeout(saveDetails, 100); // A small delay to prevent race conditions
+            // A small delay is a pragmatic way to handle race conditions where a click
+            // on another element would blur the input before the click is processed.
+            setTimeout(saveDetails, 100);
         });
 
         input.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -426,7 +329,6 @@ export class HistoryListComponent extends Component {
 
         requestAnimationFrame(() => {
             input.focus();
-            // Don't pre-select, just move cursor to the end
             input.setSelectionRange(input.value.length, input.value.length);
         });
     }
@@ -434,11 +336,11 @@ export class HistoryListComponent extends Component {
     private handleEntryClick(version: VersionHistoryEntry, event: MouseEvent) {
         event.preventDefault();
         event.stopPropagation();
-        this.store.dispatch(thunks.showPreviewOptions(version, event as unknown as ObsidianMouseEvent));
+        // For list view, a direct click should perform the primary action: preview in panel.
+        this.store.dispatch(thunks.viewVersionInPanel(version));
     }
 
     private handleEntryContextMenu(version: VersionHistoryEntry, event: MouseEvent) {
-        // Don't open context menu if user is editing the name/tags
         if (event.target instanceof HTMLInputElement && event.target.classList.contains('v-version-name-input')) {
             return;
         }
@@ -451,6 +353,7 @@ export class HistoryListComponent extends Component {
         if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             event.stopPropagation();
+            // On keyboard activation, open the full context menu for accessibility.
             let mouseEvent: ObsidianMouseEvent;
             if (event.target instanceof HTMLElement) { 
                 const rect = event.target.getBoundingClientRect();
@@ -478,14 +381,15 @@ export class HistoryListComponent extends Component {
     }
 
     private createActionButtons(container: ObsidianHTMLElement, version: VersionHistoryEntry) {
+        // The primary action for a card is to preview it in the panel.
         const viewBtn = container.createEl("button", {
             cls: "v-action-btn",
-            attr: { "aria-label": "View content options", "title": "View content options" }
+            attr: { "aria-label": "Preview in Panel", "title": "Preview in Panel" }
         });
         setIcon(viewBtn, "eye");
         viewBtn.addEventListener("click", (e: MouseEvent) => {
             e.stopPropagation(); 
-            this.store.dispatch(thunks.showPreviewOptions(version, e as unknown as ObsidianMouseEvent));
+            this.store.dispatch(thunks.viewVersionInPanel(version));
         });
 
         versionActions.forEach((actionConfig: VersionActionConfig) => {
@@ -522,22 +426,12 @@ export class HistoryListComponent extends Component {
             emptyStateContainer.createEl("p", { cls: "v-empty-state-subtitle v-meta-label", text: subtitle });
         }
     }
-
-    private updateHighlight(versionId: string | null) {
-        if (!this.listEl) return;
-        this.listEl.findAll('.is-highlighted').forEach(el => el.removeClass('is-highlighted'));
-        if (versionId) {
-            const entryToHighlight = this.listEl.querySelector(`[data-version-id="${versionId}"]`);
-            entryToHighlight?.addClass('is-highlighted');
-        }
-    }
     
     public getContainer(): ObsidianHTMLElement {
         return this.container;
     }
 
     onunload() {
-        this.cleanupObserver();
         this.container.remove();
     }
 }
