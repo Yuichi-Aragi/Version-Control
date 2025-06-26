@@ -118,7 +118,6 @@ export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: Dif
 
 export const viewReadyDiff = (): Thunk => (dispatch, getState, container) => {
     const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
-    const app = container.resolve<App>(SERVICE_NAMES.APP);
     const state = getState();
 
     if (state.status !== AppStatus.READY) return;
@@ -133,34 +132,11 @@ export const viewReadyDiff = (): Thunk => (dispatch, getState, container) => {
         return;
     }
     
-    if (diffRequest.status !== 'ready') return;
+    if (diffRequest.status !== 'ready' || !diffRequest.diffChanges) return;
 
     const { version1, version2, diffChanges } = diffRequest;
-    const { file } = state;
 
-    const menuOptions = [
-        {
-            title: "Show Diff in Panel",
-            icon: "sidebar-right",
-            callback: () => {
-                dispatch(actions.openDiffPanel({ version1, version2, diffChanges }));
-                dispatch(actions.clearDiffRequest());
-            }
-        },
-        {
-            title: "Show Diff in New Tab",
-            icon: "file-diff",
-            callback: async () => {
-                const leaf = app.workspace.getLeaf('tab');
-                await leaf.setViewState({
-                    type: VIEW_TYPE_VERSION_DIFF,
-                    active: true,
-                    state: { version1, version2, diffChanges, noteName: file.basename, notePath: file.path }
-                });
-                app.workspace.revealLeaf(leaf);
-                dispatch(actions.clearDiffRequest());
-            }
-        }
-    ];
-    uiService.showActionMenu(menuOptions);
+    // Directly open the panel, as this was the implied action for the indicator.
+    dispatch(actions.openDiffPanel({ version1, version2, diffChanges }));
+    dispatch(actions.clearDiffRequest());
 };

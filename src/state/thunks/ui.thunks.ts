@@ -37,11 +37,9 @@ export const viewVersionInPanel = (version: VersionHistoryEntry): Thunk => async
         uiService.showNotice("VC: Failed to load content for preview. Check console.");
     } finally {
         const finalState = getState();
-        if (finalState.status === AppStatus.READY && 
-            (finalState.panel?.type !== 'preview' || finalState.panel.version.id !== version.id)) {
+        // Ensure processing is turned off only if the panel is open or if it failed to open
+        if (finalState.status === AppStatus.READY) {
              dispatch(actions.setProcessing(false));
-        } else if (finalState.status === AppStatus.READY && finalState.panel?.type === 'preview' && finalState.panel.version.id === version.id) {
-            dispatch(actions.setProcessing(false));
         }
     }
 };
@@ -131,16 +129,6 @@ export const showVersionContextMenu = (version: VersionHistoryEntry, event: Obsi
         return;
     }
     uiService.showVersionContextMenu(version, event);
-};
-
-export const showPreviewOptions = (version: VersionHistoryEntry, event: ObsidianMouseEvent): Thunk => (dispatch, getState, container) => {
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
-    const state = getState();
-
-    if (state.status !== AppStatus.READY || state.noteId !== version.noteId) {
-        return;
-    }
-    uiService.showPreviewOptions(version, event);
 };
 
 export const showSortMenu = (event: MouseEvent): Thunk => (dispatch, getState, container) => {

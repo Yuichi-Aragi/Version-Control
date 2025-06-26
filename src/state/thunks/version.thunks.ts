@@ -29,31 +29,8 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): Thunk => asy
         }
         return;
     }
-    const { file: initialFileFromState, history: initialHistory } = initialState;
+    const { file: initialFileFromState } = initialState;
 
-    // For auto-saves, first check if content has changed to avoid redundant versions.
-    if (isAuto) {
-        if (initialHistory.length > 0) {
-            const latestVersion = initialHistory[0]; // History is sorted desc
-            const latestContent = await versionManager.getVersionContent(latestVersion.noteId, latestVersion.id);
-            
-            const activeMarkdownView = app.workspace.getActiveViewOfType(MarkdownView);
-            let currentContent: string | null = null;
-            if (activeMarkdownView && activeMarkdownView.file && activeMarkdownView.file.path === initialFileFromState.path) {
-                currentContent = activeMarkdownView.editor.getValue();
-            } else {
-                currentContent = await app.vault.cachedRead(initialFileFromState);
-            }
-
-            if (latestContent !== null && latestContent === currentContent) {
-                console.log("VC (Watch Mode): Content unchanged. Skipping auto-save.");
-                return; // Do not save, and do not reset the timer. Let it run its course.
-            }
-        }
-    }
-
-    // If we proceed, it's either a manual save or a valid auto-save.
-    // In both cases, we want to reset the timer after the save is complete.
     dispatch(actions.setProcessing(true));
 
     try {
@@ -64,18 +41,31 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): Thunk => asy
             return;
         }
 
-        const { newVersionEntry, displayName, newNoteId } = await versionManager.saveNewVersionForFile(liveFile);
+        const result = await versionManager.saveNewVersionForFile(liveFile);
         
-        if (initialState.noteId !== newNoteId) {
-            dispatch(actions.updateNoteIdInState(newNoteId));
+        if (result.status === 'duplicate') {
+            if (!isAuto) {
+                uiService.showNotice("Content is identical to the latest version. No new version was saved.", 4000);
+            } else {
+                console.log("VC (Watch Mode): Content unchanged. Skipping auto-save.");
+            }
+            return; // Return early, finally block will still execute
         }
-
-        dispatch(actions.addVersionSuccess(newVersionEntry));
         
-        if (!isAuto) {
-            uiService.showNotice(`Version ${displayName} saved for "${liveFile.basename}".`);
-        } else {
-            console.log(`VC (Watch Mode): Auto-saved version ${displayName} for "${liveFile.basename}".`);
+        // It was saved
+        const { newVersionEntry, displayName, newNoteId } = result;
+        if (newVersionEntry) {
+            if (initialState.noteId !== newNoteId) {
+                dispatch(actions.updateNoteIdInState(newNoteId));
+            }
+
+            dispatch(actions.addVersionSuccess(newVersionEntry));
+            
+            if (!isAuto) {
+                uiService.showNotice(`Version ${displayName} saved for "${liveFile.basename}".`);
+            } else {
+                console.log(`VC (Watch Mode): Auto-saved version ${displayName} for "${liveFile.basename}".`);
+            }
         }
 
     } catch (error) {
@@ -85,7 +75,7 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): Thunk => asy
         }
         dispatch(initializeView(app.workspace.activeLeaf));
     } finally {
-        plugin.manageWatchModeInterval(); // Reset the timer after any save attempt (success or fail).
+        plugin.manageWatchModeInterval(); // Reset the timer after any save attempt.
         const finalState = getState();
         if (finalState.status === AppStatus.READY) {
             dispatch(actions.setProcessing(false));
@@ -103,26 +93,24 @@ export const updateVersionDetails = (versionId: string, nameAndTags: string): Th
     }
     const noteId = state.noteId;
 
+    // Optimistic UI update
+    const tagsRegex = /(?:^|\s)#([^\s#]+)/g;
+    const tags: string[] = [];
+    let match;
+    const cleanInput = nameAndTags;
+    while ((match = tagsRegex.exec(cleanInput)) !== null) {
+        tags.push(match[1]);
+    }
+    const name = nameAndTags.replace(tagsRegex, '').trim();
+    const finalTags = [...new Set(tags)].slice(0, 5);
+    dispatch(actions.updateVersionDetailsInState(versionId, name || undefined, finalTags.length > 0 ? finalTags : undefined));
+
     try {
-        // This is a fire-and-forget to the backend. The UI updates optimistically.
-        versionManager.updateVersionDetails(noteId, versionId, nameAndTags);
-
-        // Optimistically update UI
-        const tagsRegex = /(?:^|\s)#([^\s#]+)/g;
-        const tags: string[] = [];
-        let match;
-        const cleanInput = nameAndTags;
-        while ((match = tagsRegex.exec(cleanInput)) !== null) {
-            tags.push(match[1]);
-        }
-        const name = nameAndTags.replace(tagsRegex, '').trim();
-        const finalTags = [...new Set(tags)].slice(0, 5);
-
-        dispatch(actions.updateVersionDetailsInState(versionId, name || undefined, finalTags.length > 0 ? finalTags : undefined));
-
+        await versionManager.updateVersionDetails(noteId, versionId, nameAndTags);
     } catch (error) {
-        console.error(`VC: Failed to dispatch name/tag update for version ${versionId}.`, error);
-        uiService.showNotice("VC: Error: Could not update version details. Check console.", 5000);
+        console.error(`VC: Failed to save name/tag update for version ${versionId}. Reverting UI.`, error);
+        uiService.showNotice("VC: Error: Could not save version details. Reverting changes.", 5000);
+        // On failure, reload history to revert the optimistic update
         dispatch(loadHistoryForNoteId(state.file, noteId));
     } finally {
         dispatch(actions.stopVersionEditing());
@@ -176,7 +164,7 @@ export const restoreVersion = (versionId: string): Thunk => async (dispatch, get
             throw new Error(`Restore failed. Note's version control ID has changed or was removed. Expected "${initialNoteIdFromState}", found "${currentNoteIdOnDisk}".`);
         }
 
-        await versionManager.saveNewVersionForFile(liveFile, `Backup before restoring V${versionId.substring(0,6)}...`);
+        await versionManager.saveNewVersionForFile(liveFile, `Backup before restoring V${versionId.substring(0,6)}...`, { force: true });
         const restoreSuccess = await versionManager.restoreVersion(liveFile, initialNoteIdFromState, versionId);
         
         if (restoreSuccess) {
