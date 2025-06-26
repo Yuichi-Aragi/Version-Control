@@ -46,10 +46,14 @@
     border-radius: var(--radius-m);
     background-color: var(--background-secondary);
     border: 1px solid var(--background-modifier-border);
-    transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
-    animation: v-fade-in 0.3s ease forwards;
+    transition: transform 0.2s ease-out, box-shadow 0.2s ease-out, border-color 0.2s ease-out;
     will-change: transform, box-shadow, border-color;
 }
+/* Only animate entries when not doing a full rebuild (e.g., on sort/filter) */
+.v-history-list:not(.is-rebuilding) .v-history-entry {
+    animation: v-fade-in 0.3s ease-out forwards;
+}
+
 .v-history-entry:hover {
     border-color: var(--interactive-accent);
     transform: translateY(-3px);
@@ -91,12 +95,6 @@
     flex-shrink: 1; 
     min-width: 0; 
 }
-/* MODIFICATION: Don't truncate name in list view */
-.v-history-entry.is-list-view .v-version-name {
-    flex-shrink: 0;
-    overflow: visible;
-    text-overflow: clip;
-}
 .v-version-timestamp {
     font-size: var(--font-ui-smaller);
     color: var(--text-muted);
@@ -116,7 +114,7 @@
     gap: var(--size-4-1);
     margin-top: var(--size-4-2);
     padding-bottom: var(--size-4-2);
-    transition: all 0.3s ease-in-out;
+    transition: max-height 0.3s ease-in-out;
 }
 /* CARD VIEW collapsed tags */
 .v-history-entry:not(.is-list-view) .v-version-tags {
@@ -159,7 +157,6 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    /* MODIFIED: Set a max-width for all tags to prevent super long ones from breaking layout */
     max-width: 25ch;
 }
 
@@ -171,7 +168,6 @@
     min-width: 0;
     overflow: hidden;
     white-space: nowrap;
-    /* NEW */
     position: relative;
     cursor: pointer;
     align-items: center;
@@ -217,7 +213,7 @@
     color: var(--text-muted);
     cursor: pointer;
     border-radius: var(--radius-s);
-    transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: transform 0.2s ease-out, background-color 0.2s ease-out, color 0.2s ease-out;
     display: flex;
     align-items: center;
     justify-content: center;

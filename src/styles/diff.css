@@ -12,7 +12,7 @@
 .v-diff-content-wrapper {
     font-family: var(--font-monospace);
     font-size: var(--font-ui-smaller);
-    line-height: 1.5;
+    line-height: 1.6; /* Increased for readability */
     background-color: var(--background-secondary);
     border-radius: var(--radius-m);
     overflow-y: auto;
@@ -23,29 +23,38 @@
 .diff-line {
     display: flex;
     width: 100%;
-    padding: 0 var(--size-4-2);
-    min-height: 1.5em; /* Ensure empty lines are visible */
+    padding: 0; /* Padding is handled by children */
+    min-height: 1.6em; /* Match line-height */
+    box-sizing: border-box;
 }
 
 .diff-line:hover {
     background-color: var(--background-modifier-hover);
 }
 
-.diff-line-prefix {
+.diff-line-gutter {
+    display: flex;
     flex-shrink: 0;
-    width: 1.5ch;
-    text-align: center;
+    width: 8ch; /* 4ch for each number */
     user-select: none;
-    font-weight: bold;
+    text-align: right;
+    padding: 0 var(--size-4-2) 0 var(--size-4-1);
+    border-right: 1px solid var(--background-modifier-border);
 }
 
 .diff-line-num {
-    flex-shrink: 0;
+    display: inline-block;
     width: 4ch;
-    padding-right: var(--size-4-2);
-    text-align: right;
     color: var(--text-faint);
+}
+
+.diff-line-prefix {
+    flex-shrink: 0;
+    width: 2.5ch; /* A bit more space for the symbol */
+    text-align: center;
     user-select: none;
+    font-weight: var(--font-semibold);
+    padding-right: var(--size-4-1);
 }
 
 .diff-line-content {
@@ -53,27 +62,35 @@
     white-space: pre-wrap;
     word-break: break-all;
     padding-left: var(--size-4-2);
-    border-left: 1px solid var(--background-modifier-border-hover);
+    /* Removed left border from here */
 }
 
 /* Added lines */
 .diff-add {
-    background-color: var(--color-green-alpha);
+    background-color: rgba(var(--color-green-rgb), 0.15);
 }
 .diff-add .diff-line-prefix {
     color: var(--color-green);
 }
+.diff-add .diff-line-num.new {
+    font-weight: var(--font-semibold);
+    color: var(--text-normal);
+}
 
 /* Removed lines */
 .diff-remove {
-    background-color: var(--color-red-alpha);
+    background-color: rgba(var(--color-red-rgb), 0.15);
 }
 .diff-remove .diff-line-prefix {
     color: var(--color-red);
 }
+.diff-remove .diff-line-num.old {
+    font-weight: var(--font-semibold);
+    color: var(--text-normal);
+}
 .diff-remove .diff-line-content {
-    text-decoration: line-through;
-    opacity: 0.7;
+    /* text-decoration: line-through; (REMOVED for GitHub-like feel) */
+    /* opacity: 0.7; (REMOVED) */
 }
 
 /* Context lines */
