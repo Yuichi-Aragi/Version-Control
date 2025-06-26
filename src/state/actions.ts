@@ -29,11 +29,12 @@ export enum ActionType {
     STOP_VERSION_EDITING = 'STOP_VERSION_EDITING',
     UPDATE_VERSION_DETAILS_IN_STATE = 'UPDATE_VERSION_DETAILS_IN_STATE',
 
-    // search/sort actions
+    // search/sort/filter actions
     TOGGLE_SEARCH = 'TOGGLE_SEARCH',
     SET_SEARCH_QUERY = 'SET_SEARCH_QUERY',
     SET_SEARCH_CASE_SENSITIVITY = 'SET_SEARCH_CASE_SENSITIVITY',
     SET_SORT_ORDER = 'SET_SORT_ORDER',
+    TOGGLE_TAG_EXPANSION = 'TOGGLE_TAG_EXPANSION',
 
     // Diff actions
     SET_HIGHLIGHTED_VERSION = 'SET_HIGHLIGHTED_VERSION',
@@ -69,6 +70,7 @@ export interface ToggleSearchAction { type: ActionType.TOGGLE_SEARCH; payload: b
 export interface SetSearchQueryAction { type: ActionType.SET_SEARCH_QUERY; payload: string; }
 export interface SetSearchCaseSensitivityAction { type: ActionType.SET_SEARCH_CASE_SENSITIVITY; payload: boolean; }
 export interface SetSortOrderAction { type: ActionType.SET_SORT_ORDER; payload: SortOrder; }
+export interface ToggleTagExpansionAction { type: ActionType.TOGGLE_TAG_EXPANSION; payload: { versionId: string }; }
 
 // Diff interfaces
 export interface SetHighlightedVersionAction { type: ActionType.SET_HIGHLIGHTED_VERSION; payload: { versionId: string | null }; }
@@ -100,6 +102,7 @@ export type Action =
     | SetSearchQueryAction
     | SetSearchCaseSensitivityAction
     | SetSortOrderAction
+    | ToggleTagExpansionAction
     | SetHighlightedVersionAction
     | StartDiffGenerationAction
     | DiffGenerationSucceededAction
@@ -137,6 +140,7 @@ export const actions = {
     setSearchQuery: (query: string): SetSearchQueryAction => ({ type: ActionType.SET_SEARCH_QUERY, payload: query }),
     setSearchCaseSensitivity: (isCaseSensitive: boolean): SetSearchCaseSensitivityAction => ({ type: ActionType.SET_SEARCH_CASE_SENSITIVITY, payload: isCaseSensitive }),
     setSortOrder: (sortOrder: SortOrder): SetSortOrderAction => ({ type: ActionType.SET_SORT_ORDER, payload: sortOrder }),
+    toggleTagExpansion: (versionId: string): ToggleTagExpansionAction => ({ type: ActionType.TOGGLE_TAG_EXPANSION, payload: { versionId } }),
 
     // Diff action creators
     setHighlightedVersion: (versionId: string | null): SetHighlightedVersionAction => ({ type: ActionType.SET_HIGHLIGHTED_VERSION, payload: { versionId } }),
