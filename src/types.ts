@@ -36,7 +36,6 @@ export interface NoteManifest {
       timestamp: string;
       name?: string;
       tags?: string[]; // Added for tagging
-      filePath: string;
       size: number;
     };
   };
