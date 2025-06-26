@@ -5,6 +5,7 @@ import { VersionHistoryEntry, NoteManifest } from "../types";
 import { removeFrontmatterKey, generateUniqueFilePath } from "../utils/file";
 import { NOTE_FRONTMATTER_KEY } from "../constants";
 import { PluginEvents } from "./plugin-events";
+import { generateUniqueId } from "../utils/id";
 
 /**
  * Manages the core business logic for versioning operations like saving,
@@ -35,104 +36,140 @@ export class VersionManager {
      * @returns An object with `name` and `tags` properties.
      */
     private _parseNameAndTags(input: string): { name: string, tags: string[] } {
-        const tagsRegex = /(?:^|\s)#([^\s#]+)/g;
         const tags: string[] = [];
-        let match;
-        // Use a non-mutating exec loop
-        const cleanInput = input;
-        while ((match = tagsRegex.exec(cleanInput)) !== null) {
-            tags.push(match[1]);
-        }
-        const name = input.replace(tagsRegex, '').trim();
-        const finalTags = [...new Set(tags)].slice(0, 5); // Unique tags, max 5
+        const name = input.replace(/(?:^|\s)#([^\s#]+)/g, (match, tag) => {
+            tags.push(tag);
+            return ' ';
+        }).replace(/\s+/g, ' ').trim();
 
+        const finalTags = [...new Set(tags)].slice(0, 5); // Unique tags, max 5
         return { name, tags: finalTags };
     }
 
     /**
      * Saves a new version of a given file. This method encapsulates the entire
-     * process, including getting or creating a note ID.
+     * process, including getting or creating a note ID, in a more atomic way.
      * @param file The TFile to save a version of.
      * @param nameAndTags An optional string containing the name and tags for the new version.
-     * @returns An object containing the new version entry, a display name, and the note ID.
+     * @param options.force If true, saves the version even if content is identical to the last one.
+     * @returns An object indicating if the version was saved or was a duplicate.
      */
-    async saveNewVersionForFile(file: TFile, nameAndTags?: string): Promise<{ newVersionEntry: VersionHistoryEntry, displayName: string, newNoteId: string }> {
+    async saveNewVersionForFile(
+        file: TFile, 
+        nameAndTags?: string, 
+        options: { force?: boolean } = {}
+    ): Promise<{ status: 'saved' | 'duplicate', newVersionEntry: VersionHistoryEntry | null, displayName: string, newNoteId: string }> {
+        const { force = false } = options;
+
         if (!file) {
             throw new Error("Invalid file provided to saveNewVersionForFile.");
         }
 
+        const noteId = await this.noteManager.getOrCreateNoteId(file);
+        if (!noteId) {
+            throw new Error("Could not get or create a note ID for the file.");
+        }
+
+        let noteManifest = await this.manifestManager.loadNoteManifest(noteId);
+        if (!noteManifest) {
+            console.warn(`VC: Manifest for note ${noteId} missing during save. Recreating.`);
+            noteManifest = await this.manifestManager.createNoteEntry(noteId, file.path);
+        }
+
+        const activeMarkdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
+        let contentToSave: string;
+
+        if (activeMarkdownView && activeMarkdownView.file && activeMarkdownView.file.path === file.path) {
+            contentToSave = activeMarkdownView.editor.getValue();
+        } else {
+            contentToSave = await this.app.vault.cachedRead(file);
+        }
+
+        // Check for duplicate content, unless forced
+        if (!force && noteManifest.totalVersions > 0) {
+            const history = await this.getVersionHistory(noteId);
+            if (history.length > 0) {
+                const latestVersion = history[0]; // Already sorted desc by version number
+                const latestContent = await this.getVersionContent(noteId, latestVersion.id);
+                if (latestContent !== null && latestContent === contentToSave) {
+                    console.log(`VC: Content for "${file.path}" is identical to the latest version. Skipping save.`);
+                    return { status: 'duplicate', newVersionEntry: null, displayName: '', newNoteId: noteId };
+                }
+            }
+        }
+
+        const versionId = generateUniqueId();
+        const finalVersionFilePath = this.manifestManager.getNoteVersionPath(noteId, versionId);
+
         try {
-            const noteId = await this.noteManager.getOrCreateNoteId(file);
-            if (!noteId) {
-                throw new Error("Could not get or create a note ID for the file.");
-            }
+            // Safer order: 1. Write file. 2. Update manifest.
+            // This prevents the manifest from pointing to a non-existent file.
+            await this.app.vault.adapter.write(finalVersionFilePath, contentToSave);
 
-            let noteManifest = await this.manifestManager.loadNoteManifest(noteId);
-            if (!noteManifest) {
-                console.warn(`VC: Manifest for note ${noteId} missing during save. Recreating.`);
-                noteManifest = await this.manifestManager.createNoteEntry(noteId, file.path);
-            }
-
-            const activeMarkdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-            let contentToSave: string;
-
-            if (activeMarkdownView && activeMarkdownView.file && activeMarkdownView.file.path === file.path) {
-                contentToSave = activeMarkdownView.editor.getValue();
-            } else {
-                contentToSave = await this.app.vault.cachedRead(file);
-            }
-
-            const versionNumber = (noteManifest.totalVersions || 0) + 1;
-            const versionId = `v${versionNumber}_${Date.now()}`; 
-            const timestamp = new Date().toISOString();
-            const versionFilePath = this.manifestManager.getNoteVersionPath(noteId, versionId);
-
-            await this.app.vault.adapter.write(versionFilePath, contentToSave);
-            
-            let fileSize = contentToSave.length; 
+            let fileSize = contentToSave.length;
             try {
-                const stats = await this.app.vault.adapter.stat(versionFilePath);
+                const stats = await this.app.vault.adapter.stat(finalVersionFilePath);
                 fileSize = stats?.size ?? fileSize;
             } catch (statError) {
-                console.warn(`VC: Could not get file stats for ${versionFilePath}. Using content length.`, statError);
+                console.warn(`VC: Could not get file stats for ${finalVersionFilePath}. Using content length.`, statError);
             }
 
             const { name, tags } = this._parseNameAndTags(nameAndTags || '');
+            const timestamp = new Date().toISOString();
 
-            const versionData = {
-                versionNumber, timestamp, 
-                name: name || undefined,
-                tags: tags.length > 0 ? tags : undefined,
-                filePath: versionFilePath, size: fileSize,
-            };
-            noteManifest.versions[versionId] = versionData;
-            noteManifest.totalVersions = versionNumber;
-            noteManifest.lastModified = timestamp;
+            const updatedManifest = await this.manifestManager.updateNoteManifest(noteId, (manifest) => {
+                const versionNumber = (manifest.totalVersions || 0) + 1;
+                
+                const versionData = {
+                    versionNumber,
+                    timestamp,
+                    name: name || undefined,
+                    tags: tags.length > 0 ? tags : undefined,
+                    size: fileSize,
+                };
 
-            await this.manifestManager.saveNoteManifest(noteManifest);
-            
-            const displayName = name ? `"${name}" (V${versionNumber})` : `Version ${versionNumber}`;
+                manifest.versions[versionId] = versionData;
+                manifest.totalVersions = versionNumber;
+                manifest.lastModified = timestamp;
+                
+                return manifest;
+            });
 
-            // Emit an event to notify other parts of the system (like CleanupManager)
+            const savedVersionData = updatedManifest.versions[versionId];
+            const savedVersionNumber = savedVersionData.versionNumber;
+
+            const displayName = name ? `"${name}" (V${savedVersionNumber})` : `Version ${savedVersionNumber}`;
             this.eventBus.trigger('version-saved', noteId);
-            
+
             return {
+                status: 'saved',
                 newVersionEntry: {
                     id: versionId,
                     noteId,
                     notePath: file.path,
-                    versionNumber: versionData.versionNumber,
-                    timestamp: versionData.timestamp,
-                    name: versionData.name,
-                    tags: versionData.tags,
-                    size: versionData.size,
+                    versionNumber: savedVersionNumber,
+                    timestamp: timestamp,
+                    name: name || undefined,
+                    tags: tags.length > 0 ? tags : undefined,
+                    size: fileSize,
                 },
                 displayName,
                 newNoteId: noteId,
             };
 
         } catch (error) {
-            console.error(`VC: CRITICAL FAILURE in saveNewVersionForFile for "${file.path}".`, error);
+            console.error(`VC: CRITICAL FAILURE in saveNewVersionForFile for "${file.path}". Rolling back.`, error);
+            // If the process failed, try to clean up the version file that might have been created.
+            if (await this.app.vault.adapter.exists(finalVersionFilePath)) {
+                try {
+                    await this.app.vault.adapter.remove(finalVersionFilePath);
+                    console.log(`VC: Successfully cleaned up orphaned version file: ${finalVersionFilePath}`);
+                } catch (cleanupError) {
+                    console.error(`VC: FAILED to clean up orphaned version file after an error: ${finalVersionFilePath}`, cleanupError);
+                }
+            }
+            // Invalidate the note manifest cache to ensure it's re-read fresh next time, in case it was partially modified in memory.
+            this.manifestManager.invalidateNoteManifestCache(noteId);
             throw error;
         }
     }
@@ -141,24 +178,20 @@ export class VersionManager {
         if (!noteId || !versionId) {
             throw new Error("Invalid noteId or versionId for updateVersionDetails.");
         }
-        try {
-            const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
-            if (!noteManifest || !noteManifest.versions[versionId]) {
+        
+        const { name, tags } = this._parseNameAndTags(nameAndTags);
+
+        await this.manifestManager.updateNoteManifest(noteId, (manifest) => {
+            if (!manifest.versions[versionId]) {
                 throw new Error(`Version ${versionId} not found in manifest for note ${noteId}.`);
             }
+            manifest.versions[versionId].name = name || undefined;
+            manifest.versions[versionId].tags = tags.length > 0 ? tags : undefined;
+            manifest.lastModified = new Date().toISOString();
+            return manifest;
+        });
 
-            const { name, tags } = this._parseNameAndTags(nameAndTags);
-
-            noteManifest.versions[versionId].name = name || undefined;
-            noteManifest.versions[versionId].tags = tags.length > 0 ? tags : undefined;
-            noteManifest.lastModified = new Date().toISOString();
-
-            await this.manifestManager.saveNoteManifest(noteManifest);
-            console.log(`VC: Updated details for version ${versionId} to name: "${name}", tags: [${tags.join(', ')}].`);
-        } catch (error) {
-            console.error(`VC: Failed to update details for version ${versionId}.`, error);
-            throw error;
-        }
+        console.log(`VC: Updated details for version ${versionId} to name: "${name}", tags: [${tags.join(', ')}].`);
     }
 
     async getVersionHistory(noteId: string): Promise<VersionHistoryEntry[]> {
@@ -182,15 +215,15 @@ export class VersionManager {
     async getVersionContent(noteId: string, versionId: string): Promise<string | null> {
         if (!noteId || !versionId) return null;
         try {
-            const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
-            const versionData = noteManifest?.versions?.[versionId];
-            if (!versionData) {
-                console.error(`VC: Version ${versionId} not found in manifest for note ${noteId}.`);
-                return null;
-            }
-
             const versionFilePath = this.manifestManager.getNoteVersionPath(noteId, versionId);
             if (!await this.app.vault.adapter.exists(versionFilePath)) {
+                // Attempt to load manifest to double-check before erroring
+                const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
+                const versionData = noteManifest?.versions?.[versionId];
+                if (!versionData) {
+                    console.error(`VC: Version ${versionId} not found in manifest for note ${noteId}.`);
+                    return null;
+                }
                 console.error(`VC: Data integrity issue. Version file missing: ${versionFilePath}`);
                 return null;
             }
@@ -271,9 +304,14 @@ export class VersionManager {
             }
 
             const versionFilePath = this.manifestManager.getNoteVersionPath(noteId, versionId);
-            delete noteManifest.versions[versionId]; 
-            noteManifest.lastModified = new Date().toISOString();
-            await this.manifestManager.saveNoteManifest(noteManifest); 
+            
+            await this.manifestManager.updateNoteManifest(noteId, (manifest) => {
+                if (manifest.versions[versionId]) {
+                    delete manifest.versions[versionId];
+                    manifest.lastModified = new Date().toISOString();
+                }
+                return manifest;
+            });
             
             if (await this.app.vault.adapter.exists(versionFilePath)) {
                 await this.app.vault.adapter.remove(versionFilePath);
@@ -295,43 +333,40 @@ export class VersionManager {
         }
         try {
             const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
-            if (!noteManifest) {
-                console.log("VC: No version history found for this note to delete.");
-                await this.manifestManager.deleteNoteEntry(noteId); // Cleanup central manifest
-                return true; 
-            }
+            const liveFilePath = noteManifest?.notePath; // Get path before deleting manifest data
 
-            const liveFilePath = noteManifest.notePath;
-            const liveFile = this.app.vault.getAbstractFileByPath(liveFilePath); 
-
-            if (liveFile instanceof TFile) {
-                const fileCache = this.app.metadataCache.getFileCache(liveFile);
-                const idFromFrontmatter = fileCache?.frontmatter?.[NOTE_FRONTMATTER_KEY] ?? null;
-
-                if (idFromFrontmatter === noteId) {
-                    try {
-                        await this.app.fileManager.processFrontMatter(liveFile, (frontmatter: FrontMatterCache) => {
-                            delete frontmatter[NOTE_FRONTMATTER_KEY];
-                        });
-                        console.log(`VC: Removed vc-id from frontmatter of "${liveFile.path}" before deleting history.`);
-                    } catch (fmError) {
-                        console.error(`VC: CRITICAL: Could not clean vc-id from frontmatter of "${liveFile.path}". Aborting history deletion. Fix frontmatter and retry.`, fmError);
-                        throw new Error(`Could not remove vc-id from "${liveFile.basename}". History deletion aborted. Check frontmatter.`);
-                    }
-                } else {
-                    console.log(`VC: Skipped frontmatter cleanup for "${liveFile.path}". Its vc-id ("${idFromFrontmatter}") doesn't match history being deleted ("${noteId}").`);
-                }
-            } else {
-                console.log(`VC: Note at path "${liveFilePath}" (from manifest) not found. Proceeding to delete history data for ID ${noteId}.`);
-            }
-
+            // Step 1: Delete the core data and central manifest entry. This is the critical part.
+            // This will throw if it fails, preventing the frontmatter from being changed.
             await this.manifestManager.deleteNoteEntry(noteId);
+            
+            // Step 2: If data deletion was successful, clean up the frontmatter in the live file.
+            if (liveFilePath) {
+                const liveFile = this.app.vault.getAbstractFileByPath(liveFilePath);
+                if (liveFile instanceof TFile) {
+                    const fileCache = this.app.metadataCache.getFileCache(liveFile);
+                    const idFromFrontmatter = fileCache?.frontmatter?.[NOTE_FRONTMATTER_KEY] ?? null;
+
+                    if (idFromFrontmatter === noteId) {
+                        try {
+                            await this.app.fileManager.processFrontMatter(liveFile, (frontmatter: FrontMatterCache) => {
+                                delete frontmatter[NOTE_FRONTMATTER_KEY];
+                            });
+                            console.log(`VC: Removed vc-id from frontmatter of "${liveFile.path}" after deleting history.`);
+                        } catch (fmError) {
+                            // This is not a critical failure. The data is gone. Log a clear message for the user.
+                            console.error(`VC: WARNING: Could not clean vc-id from frontmatter of "${liveFile.path}" after history deletion. Please remove it manually. This is not a data-loss issue.`, fmError);
+                            // We don't re-throw here. The main operation succeeded.
+                        }
+                    }
+                }
+            }
+            
             this.eventBus.trigger('history-deleted', noteId);
             return true;
 
         } catch (error) {
             console.error(`VC: Failed to delete all versions for note ${noteId}.`, error);
-            throw error;
+            throw error; // Re-throw so the thunk can catch it and show an error notice.
         }
     }
 }

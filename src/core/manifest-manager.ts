@@ -11,7 +11,8 @@ export class ManifestManager {
     private noteManifestCache: Map<string, NoteManifest> = new Map();
     private pathToIdMap: Map<string, string> | null = null;
 
-    private centralManifestWriteQueue: Promise<void> = Promise.resolve();
+    private centralManifestWriteQueue: Promise<any> = Promise.resolve();
+    private noteManifestWriteQueues = new Map<string, Promise<any>>();
 
     constructor(app: App) {
         this.app = app;
@@ -94,10 +95,61 @@ export class ManifestManager {
         return loaded;
     }
 
-    async saveNoteManifest(manifest: NoteManifest): Promise<void> {
-        const manifestPath = this.getNoteManifestPath(manifest.noteId);
-        await this._atomicSaveManifest(manifestPath, manifest);
-        this.noteManifestCache.set(manifest.noteId, manifest);
+    /**
+     * Atomically updates a note's manifest file by queueing the operation.
+     * This method is the single, safe entry point for all note manifest modifications.
+     * @param noteId The ID of the note whose manifest is to be updated.
+     * @param updateFn A function that receives the current manifest, modifies it, and returns the updated version.
+     * @returns A promise that resolves with the updated manifest.
+     */
+    public async updateNoteManifest(
+        noteId: string,
+        updateFn: (manifest: NoteManifest) => NoteManifest | Promise<NoteManifest>
+    ): Promise<NoteManifest> {
+        let updatedManifestResult: NoteManifest | null = null;
+
+        const task = async () => {
+            // Load the most recent version of the manifest inside the queued task
+            const manifest = await this.loadNoteManifest(noteId);
+            if (!manifest) {
+                throw new Error(`Cannot update manifest for non-existent note ID: ${noteId}`);
+            }
+
+            // Apply the modifications from the provided function
+            const updatedManifest = await Promise.resolve(updateFn(manifest));
+
+            // Save the result atomically
+            const manifestPath = this.getNoteManifestPath(noteId);
+            await this._atomicSaveManifest(manifestPath, updatedManifest);
+            
+            // Update the cache with the newly saved manifest
+            this.noteManifestCache.set(noteId, updatedManifest);
+            updatedManifestResult = updatedManifest;
+        };
+
+        // Get the current promise chain for this noteId, or start a new one
+        let queue = this.noteManifestWriteQueues.get(noteId) || Promise.resolve();
+
+        // Add our task to the end of the chain
+        const newQueuePromise = queue.then(task).catch(err => {
+            console.error(`VC: Error during queued update of note manifest for ${noteId}.`, err);
+            // Invalidate cache on error to force a fresh read next time
+            this.invalidateNoteManifestCache(noteId);
+            // Re-throw to ensure the original caller's promise is rejected
+            throw err;
+        });
+
+        // Store the new promise chain
+        this.noteManifestWriteQueues.set(noteId, newQueuePromise);
+
+        // Wait for our specific task to complete
+        await newQueuePromise;
+
+        if (!updatedManifestResult) {
+            // This should be unreachable if the promise resolves without error
+            throw new Error("Update task completed but result was not captured.");
+        }
+        return updatedManifestResult;
     }
     
     public invalidateNoteManifestCache(noteId: string): void {
@@ -165,28 +217,10 @@ export class ManifestManager {
             console.error(`VC: CRITICAL: Failed to save manifest to ${path}. Attempting restore.`, error);
             try {
                 if (await this.vault.adapter.exists(backupPath)) {
-                    let needsRestore = false;
-                    if (!await this.vault.adapter.exists(path)) {
-                        needsRestore = true;
-                    } else {
-                        try {
-                            const stats = await this.vault.adapter.stat(path);
-                            if (stats?.size === 0) {
-                                needsRestore = true;
-                            }
-                        } catch (statError) {
-                            if (statError.code === 'ENOENT') {
-                                // File was deleted between exists() and stat(), so it needs restore.
-                                needsRestore = true;
-                            } else {
-                                // For other errors, log it but don't block the restore attempt.
-                                console.warn(`VC: Could not stat file ${path} during restore check. Assuming it needs restore.`, statError);
-                                needsRestore = true;
-                            }
-                        }
-                    }
-
-                    if (needsRestore) {
+                    // If the original path doesn't exist or is empty, restore from backup.
+                    const originalExists = await this.vault.adapter.exists(path);
+                    if (!originalExists || (await this.vault.adapter.stat(path))?.size === 0) {
+                        if (originalExists) await this.vault.adapter.remove(path); // remove empty file
                         await this.vault.adapter.rename(backupPath, path);
                         console.log(`VC: Successfully restored manifest ${path} from backup after save failure.`);
                     }
@@ -211,8 +245,9 @@ export class ManifestManager {
     ): Promise<T> {
         const taskPromise = new Promise<T>((resolve, reject) => {
             this.centralManifestWriteQueue = this.centralManifestWriteQueue
-                .then(async () => {
-                    const manifest = await this.loadCentralManifest(true); // Force reload
+                .then(async (previousManifest: CentralManifest | undefined) => {
+                    // Use the manifest from the previous task in the queue if available, otherwise load fresh.
+                    const manifest = previousManifest ?? await this.loadCentralManifest(true);
                     const { newManifest, result } = await task(manifest);
                     await this._atomicSaveManifest(CENTRAL_MANIFEST_PATH, newManifest);
                     
@@ -220,10 +255,13 @@ export class ManifestManager {
                     this.rebuildPathToIdMap(); // Update map
                     
                     resolve(result);
+                    return newManifest; // Pass the updated manifest to the next task in the chain
                 })
                 .catch(err => {
                     console.error("VC: Error during queued central manifest operation.", err);
-                    reject(err); 
+                    this.invalidateCentralManifestCache(); // Invalidate on error to force reload next time
+                    reject(err);
+                    return undefined; // Ensure the chain continues with a clean slate
                 });
         });
         return taskPromise;
@@ -250,7 +288,10 @@ export class ManifestManager {
             const newNoteManifest: NoteManifest = {
                 noteId, notePath, versions: {}, totalVersions: 0, createdAt: now, lastModified: now,
             };
-            await this.saveNoteManifest(newNoteManifest);
+            // Do an initial save without the queue, as this is a new entry.
+            await this._atomicSaveManifest(this.getNoteManifestPath(noteId), newNoteManifest);
+            this.noteManifestCache.set(noteId, newNoteManifest);
+
 
             await this._enqueueCentralManifestTask(async (centralManifest) => {
                 centralManifest.notes[noteId] = {
@@ -279,14 +320,14 @@ export class ManifestManager {
     async updateNotePath(noteId: string, newPath: string): Promise<void> {
         const now = new Date().toISOString();
         
-        const noteManifest = await this.loadNoteManifest(noteId);
-        if (noteManifest) {
-            noteManifest.notePath = newPath;
-            noteManifest.lastModified = now;
-            await this.saveNoteManifest(noteManifest);
-        } else {
-            console.warn(`VC: Attempted to update path for non-existent note manifest: ${noteId}`);
-        }
+        await this.updateNoteManifest(noteId, (manifest) => {
+            manifest.notePath = newPath;
+            manifest.lastModified = now;
+            return manifest;
+        }).catch(err => {
+            // This can happen if the note manifest doesn't exist, which is a valid scenario.
+            console.warn(`VC: Attempted to update path for non-existent note manifest: ${noteId}. Error: ${err.message}`);
+        });
 
         await this._enqueueCentralManifestTask(async (manifest) => {
             if (manifest.notes[noteId]) {
@@ -301,36 +342,44 @@ export class ManifestManager {
 
     async deleteNoteEntry(noteId: string): Promise<void> {
         try {
+            // Step 1: Update the manifest first. This is the most critical atomic operation.
+            // If this fails, we abort, and no data is lost.
             await this._enqueueCentralManifestTask(async (manifest) => {
                 if (manifest.notes[noteId]) {
                     delete manifest.notes[noteId];
                 } else {
-                    console.warn(`VC: deleteNoteEntry: Note ID ${noteId} not found in central manifest. No central update needed.`);
+                    console.warn(`VC: deleteNoteEntry: Note ID ${noteId} not found in central manifest. It might have been removed in a concurrent operation.`);
                 }
                 return { newManifest: manifest, result: undefined };
             });
 
+            // Step 2: If manifest update was successful, delete the data directory.
+            // If this fails, it's not critical. An orphan cleanup can find it later.
             const noteDbPath = this.getNoteDbPath(noteId);
             if (await this.vault.adapter.exists(noteDbPath)) {
                 try {
                     await this.vault.adapter.rmdir(noteDbPath, true);
                 } catch (rmdirError) {
                     if (rmdirError.code === 'ENOENT') {
-                        // This is okay. It means the directory was already deleted,
-                        // which is the desired state. This can happen in race conditions.
                         console.log(`VC: Directory ${noteDbPath} was already gone during deletion. Ignoring ENOENT.`);
                     } else {
-                        // A different error occurred (e.g., permissions), so we should re-throw it
-                        // to be handled by the outer catch block.
-                        throw rmdirError;
+                        // Log this failure but don't throw, as the primary operation (manifest update) succeeded.
+                        console.error(`VC: Failed to remove data directory ${noteDbPath} for deleted note ID ${noteId}. It can be cleaned up later by the orphan cleanup process.`, rmdirError);
                     }
                 }
             }
+
+            // Step 3: Invalidate caches.
             this.invalidateNoteManifestCache(noteId);
+            this.noteManifestWriteQueues.delete(noteId); // Clear any pending queue for the deleted note
+            // The central manifest cache is updated automatically by _enqueueCentralManifestTask
             console.log(`VC: Successfully deleted note entry and data for ID ${noteId}.`);
+
         } catch (error) {
-            console.error(`VC: Failed to delete note entry and data for ID ${noteId}`, error);
-            throw new Error(`Failed to delete version history for a note. Some files may remain.`);
+            // This will catch errors from the manifest task, which is the critical failure point.
+            console.error(`VC: Failed to complete deletion for note entry ID ${noteId}`, error);
+            // Re-throw to let the caller (e.g., VersionManager) know it failed.
+            throw new Error(`Failed to delete version history for a note. The operation may be incomplete.`);
         }
     }
 

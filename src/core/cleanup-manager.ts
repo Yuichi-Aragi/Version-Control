@@ -72,14 +72,17 @@ export class CleanupManager {
             return;
         }
 
+        const versionsToDelete = new Set<string>();
+
+        // First, determine which versions to delete without holding a lock
         const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
         if (!noteManifest || Object.keys(noteManifest.versions).length <= 1) {
             return;
         }
 
         const versions = Object.entries(noteManifest.versions);
-        const versionsToDelete = new Set<string>();
 
+        // Determine versions to delete by age
         if (autoCleanupOldVersions && autoCleanupDays > 0) {
             const cutoffDate = moment().subtract(autoCleanupDays, 'days');
             versions.forEach(([versionId, versionData]) => {
@@ -89,6 +92,7 @@ export class CleanupManager {
             });
         }
 
+        // Determine versions to delete by count
         if (maxVersionsPerNote > 0) {
             const remainingVersions = versions.filter(([versionId]) => !versionsToDelete.has(versionId));
             if (remainingVersions.length > maxVersionsPerNote) {
@@ -102,49 +106,31 @@ export class CleanupManager {
 
         if (versionsToDelete.size > 0) {
             console.log(`VC: Identified ${versionsToDelete.size} old versions to cleanup for note ${noteId}.`);
-            await this.deleteMultipleVersions(noteManifest, Array.from(versionsToDelete));
-        }
-    }
+            
+            // Now, perform the manifest update atomically using the queue
+            await this.manifestManager.updateNoteManifest(noteId, (manifest) => {
+                for (const versionId of versionsToDelete) {
+                    delete manifest.versions[versionId];
+                }
+                manifest.lastModified = new Date().toISOString();
+                return manifest;
+            });
 
-    private async deleteMultipleVersions(noteManifest: NoteManifest, versionIdsToDelete: string[]): Promise<void> {
-        let deletedCount = 0;
-        const deletionPromises: Promise<void>[] = [];
-        const failedFileDeletions: string[] = [];
+            // After the manifest is safely updated, delete the files.
+            // This is not critical if it fails; orphan cleanup can get them later.
+            const deletionPromises = Array.from(versionsToDelete).map(versionId => {
+                const versionFilePath = this.manifestManager.getNoteVersionPath(noteId, versionId);
+                return this.app.vault.adapter.exists(versionFilePath)
+                    .then(exists => exists ? this.app.vault.adapter.remove(versionFilePath) : Promise.resolve())
+                    .catch(fileError => {
+                        console.error(`VC: Failed to delete version file ${versionFilePath} during cleanup.`, fileError);
+                    });
+            });
 
-        for (const versionId of versionIdsToDelete) {
-            const versionData = noteManifest.versions[versionId];
-            if (versionData) {
-                delete noteManifest.versions[versionId];
-                deletedCount++;
-                
-                deletionPromises.push(
-                    (async () => {
-                        try {
-                            const versionFilePath = this.manifestManager.getNoteVersionPath(noteManifest.noteId, versionId);
-                            if (await this.app.vault.adapter.exists(versionFilePath)) {
-                                await this.app.vault.adapter.remove(versionFilePath);
-                            }
-                        } catch (fileError) {
-                            const versionFilePath = this.manifestManager.getNoteVersionPath(noteManifest.noteId, versionId);
-                            failedFileDeletions.push(versionFilePath);
-                            console.error(`VC: Failed to delete version file ${versionFilePath} during cleanup.`, fileError);
-                        }
-                    })()
-                );
-            }
-        }
+            await Promise.allSettled(deletionPromises);
 
-        await Promise.allSettled(deletionPromises);
-
-        if (failedFileDeletions.length > 0) {
-            console.error(`VC: Failed to delete ${failedFileDeletions.length} version files during cleanup for note ${noteManifest.noteId}. Paths:`, failedFileDeletions);
-        }
-
-        if (deletedCount > 0) {
-            noteManifest.lastModified = new Date().toISOString();
-            await this.manifestManager.saveNoteManifest(noteManifest);
-            this.eventBus.trigger('version-deleted', noteManifest.noteId);
-            console.log(`VC: Successfully cleaned up ${deletedCount} old versions for note ${noteManifest.noteId}.`);
+            this.eventBus.trigger('version-deleted', noteId);
+            console.log(`VC: Successfully cleaned up ${versionsToDelete.size} old versions for note ${noteId}.`);
         }
     }
 

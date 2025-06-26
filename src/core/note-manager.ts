@@ -83,31 +83,28 @@ export class NoteManager {
             return existingId;
         }
 
+        // Safer order: Create manifest entry first, then write to frontmatter.
         const newId = generateUniqueId();
-        const writeSuccess = await this.writeNoteIdToFrontmatter(file, newId);
+        try {
+            // Step 1: Create the manifest entry. This is the critical operation.
+            await this.manifestManager.createNoteEntry(newId, file.path);
 
-        if (writeSuccess) {
-            try {
-                await this.manifestManager.createNoteEntry(newId, file.path);
-                return newId;
-            } catch (manifestError) {
-                console.error(`VC: Wrote vc-id ${newId} to frontmatter but failed to create manifest entry for "${file.path}". Rolling back frontmatter.`, manifestError);
-                
-                try {
-                    await this.app.fileManager.processFrontMatter(file, (frontmatter: FrontMatterCache) => {
-                        if (frontmatter[NOTE_FRONTMATTER_KEY] === newId) {
-                            delete frontmatter[NOTE_FRONTMATTER_KEY];
-                        }
-                    });
-                    console.log(`VC: Successfully rolled back vc-id write from frontmatter of "${file.path}".`);
-                } catch (rollbackError) {
-                    console.error(`VC: CRITICAL: Failed to roll back vc-id from frontmatter of "${file.path}". Note may be inconsistent. Manually remove "vc-id: ${newId}".`, rollbackError);
-                    throw new Error(`CRITICAL! Failed to clean vc-id in "${file.basename}". Remove it manually.`);
-                }
-                throw new Error(`Failed to initialize version history for "${file.basename}". Rolled back.`);
+            // Step 2: If manifest creation succeeds, write the ID to the note's frontmatter.
+            const writeSuccess = await this.writeNoteIdToFrontmatter(file, newId);
+            if (!writeSuccess) {
+                // This is a non-critical failure. The history exists but is "orphaned".
+                // It can be reconciled later. Log a clear warning.
+                console.warn(`VC: Created manifest for note "${file.path}" (ID: ${newId}) but failed to write vc-id to its frontmatter. The history is saved but the note needs reconciliation.`);
+                throw new Error(`Failed to initialize version history for "${file.basename}". History was created but could not be linked to the note.`);
             }
+            return newId;
+
+        } catch (error) {
+            console.error(`VC: Failed to get or create note ID for "${file.path}".`, error);
+            // The manifest manager's createNoteEntry already handles its own rollback.
+            // We just need to re-throw the error to the caller.
+            throw new Error(`Failed to initialize version history for "${file.basename}". Please try again.`);
         }
-        return null; // Failed to write to frontmatter
     }
 
     async writeNoteIdToFrontmatter(file: TFile, noteId: string): Promise<boolean> {
