@@ -1,4 +1,4 @@
-import { App, normalizePath } from "obsidian"; // Added normalizePath
+import { App, normalizePath } from "obsidian";
 
 /**
  * Removes a specific key from a note's frontmatter.
@@ -44,13 +44,12 @@ export async function generateUniqueFilePath(app: App, baseName: string, parentP
     const extension = '.md';
     const folderPath = parentPath && parentPath !== '/' ? parentPath : ''; // Treat '/' as root, meaning no prefix
     
-    let fileName = baseName + extension;
-    let filePath = folderPath ? normalizePath(`${folderPath}/${fileName}`) : normalizePath(fileName);
-    let counter = 1;
-
-    // Sanitize baseName once before loop to avoid repeated sanitization of growing string
+    // Sanitize baseName once before the loop.
     const sanitizedBaseName = baseName.replace(/[\\/:*?"<>|]/g, '_').trim();
 
+    let fileName = sanitizedBaseName + extension;
+    let filePath = folderPath ? normalizePath(`${folderPath}/${fileName}`) : normalizePath(fileName);
+    let counter = 1;
 
     while (await app.vault.adapter.exists(filePath)) {
         fileName = `${sanitizedBaseName} ${counter}${extension}`;
