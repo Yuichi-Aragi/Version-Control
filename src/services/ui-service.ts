@@ -1,8 +1,8 @@
 import { App, Menu, Notice, TFolder, MouseEvent as ObsidianMouseEvent, Component } from 'obsidian';
 import { Store } from '../state/store';
-import { DiffTarget, VersionHistoryEntry, VersionActionConfig } from '../types';
+import { DiffTarget, VersionHistoryEntry } from '../types';
 import { FolderSuggest, VersionSuggest } from '../ui/suggesters';
-import { versionActions } from '../ui/VersionActions';
+import { versionActions, VersionActionConfig } from '../ui/VersionActions';
 import { thunks } from '../state/thunks';
 import { SortDirection, SortOrder, SortProperty } from '../state/state';
 import { actions } from '../state/actions';
@@ -54,10 +54,13 @@ export class UIService extends Component {
     }
 
     /**
-     * Shows a context menu with "Preview in Panel" and "Preview in New Tab" options.
+     * Shows the full context menu for a specific version.
+     * This menu is now flatter and more direct.
      */
-    showPreviewOptions(version: VersionHistoryEntry, event: ObsidianMouseEvent): void {
+    showVersionContextMenu(version: VersionHistoryEntry, event: ObsidianMouseEvent): void {
         const menu = new Menu();
+
+        // Direct Preview Actions
         menu.addItem((item) =>
             item
                 .setTitle("Preview in Panel")
@@ -70,27 +73,9 @@ export class UIService extends Component {
                 .setIcon("file-text")
                 .onClick(() => this.store.dispatch(thunks.viewVersionInNewTab(version)))
         );
-        menu.showAtMouseEvent(event);
-    }
-
-    /**
-     * Shows the full context menu for a specific version.
-     */
-    showVersionContextMenu(version: VersionHistoryEntry, event: ObsidianMouseEvent): void {
-        const menu = new Menu();
-
-        // View Content (which opens a sub-menu)
-        menu.addItem((item) =>
-            item
-                .setTitle("View Content")
-                .setIcon("eye")
-                .onClick((mouseEvent) => {
-                    this.showPreviewOptions(version, mouseEvent as ObsidianMouseEvent);
-                })
-        );
         menu.addSeparator();
 
-        // Standard Actions
+        // Standard Actions from versionActions config
         const standardActions = versionActions.filter(action => !action.isDanger);
         standardActions.forEach(actionConfig => {
             this.addMenuItem(menu, actionConfig, version);
