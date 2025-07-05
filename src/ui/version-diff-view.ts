@@ -1,7 +1,7 @@
 import { ItemView, WorkspaceLeaf, moment, App } from "obsidian";
 import { VIEW_TYPE_VERSION_DIFF } from "../constants";
 import { Store } from "../state/store";
-import { DiffViewDisplayState } from "../types";
+import { DiffViewDisplayState, VersionHistoryEntry } from "../types";
 import { renderDiffLines } from "./utils/diff-renderer";
 
 export class VersionDiffView extends ItemView {
@@ -25,7 +25,8 @@ export class VersionDiffView extends ItemView {
         if (this.currentDisplayState) {
             const { version1, version2, noteName } = this.currentDisplayState;
             const v1Label = `V${version1.versionNumber}`;
-            const v2Label = version2.id === 'current' ? 'Current' : `V${(version2 as any).versionNumber}`;
+            // Type guard to safely access properties
+            const v2Label = version2.id === 'current' ? 'Current' : `V${version2.versionNumber}`;
             return `Diff: ${noteName} (${v2Label} vs ${v1Label})`;
         }
         return "Version Diff";
@@ -45,7 +46,7 @@ export class VersionDiffView extends ItemView {
 
     async onOpen() {
         this.containerEl.addClass("version-diff-view");
-        this.tabContentEl = this.contentEl.createDiv("v-preview-panel-tab-content"); // Reuse class for consistent padding
+        this.tabContentEl = this.contentEl.createDiv("v-tab-view-content"); // Use semantic class
         
         if (this.currentDisplayState) {
             this.render();
@@ -69,7 +70,11 @@ export class VersionDiffView extends ItemView {
         // Header
         const headerEl = this.tabContentEl.createDiv("v-panel-header");
         const v1Label = version1.name ? `"${version1.name}" (V${version1.versionNumber})` : `Version ${version1.versionNumber}`;
-        const v2Label = version2.id === 'current' ? 'Current Note State' : (version2.name ? `"${version2.name}" (V${(version2 as any).versionNumber})` : `Version ${(version2 as any).versionNumber}`);
+        
+        // Type guard to safely access properties for v2Label
+        const v2Label = version2.id === 'current' 
+            ? 'Current Note State' 
+            : (version2.name ? `"${version2.name}" (V${version2.versionNumber})` : `Version ${version2.versionNumber}`);
         
         headerEl.createEl("h3", { text: `Comparing versions of "${noteName}"` });
         headerEl.createDiv({

@@ -1,7 +1,7 @@
 import { ItemView, WorkspaceLeaf, App } from "obsidian";
 import { VIEW_TYPE_VERSION_CONTROL } from "../constants";
 import { Store } from "../state/store";
-import { AppState, AppStatus } from "../state/state";
+import { AppState, AppStatus, VersionControlSettings } from "../state/state";
 
 import { PlaceholderComponent } from "./components/PlaceholderComponent";
 import { ActionBarComponent } from "./components/ActionBarComponent";
@@ -70,12 +70,15 @@ export class VersionControlView extends ItemView {
     }
 
     private initComponents() {
+        // Action bar is now a direct child of mainContainer, initialized first.
+        this.actionBarComponent = this.addChild(new ActionBarComponent(this.mainContainer, this.store));
+        
         this.placeholderComponent = this.addChild(new PlaceholderComponent(this.mainContainer));
         this.errorDisplayComponent = this.addChild(new ErrorDisplayComponent(this.mainContainer, this.store, this.app));
         
+        // readyStateContainer now holds only the history list and panels
         this.readyStateContainer = this.mainContainer.createDiv('v-ready-state-container');
         
-        this.actionBarComponent = this.addChild(new ActionBarComponent(this.readyStateContainer, this.store));
         this.settingsPanelComponent = this.addChild(new SettingsPanelComponent(this.readyStateContainer, this.store));
         this.historyListComponent = this.addChild(new HistoryListComponent(this.readyStateContainer, this.store));
         
@@ -88,49 +91,59 @@ export class VersionControlView extends ItemView {
         const isAppProcessing = state.status === AppStatus.READY && state.isProcessing;
         this.contentEl.classList.toggle('is-processing', isAppProcessing);
 
-        const showPlaceholder = state.status === AppStatus.INITIALIZING || state.status === AppStatus.PLACEHOLDER;
-        const showError = state.status === AppStatus.ERROR;
-        const showReadyOrLoading = state.status === AppStatus.READY || state.status === AppStatus.LOADING;
-
-        this.placeholderComponent.getContainer().toggle(showPlaceholder);
-        this.errorDisplayComponent.getContainer().toggle(showError);
-        this.readyStateContainer.toggle(showReadyOrLoading);
+        // Hide all major components by default and selectively show them.
+        this.placeholderComponent.getContainer().hide();
+        this.errorDisplayComponent.getContainer().hide();
+        this.actionBarComponent.getContainer().hide();
+        this.readyStateContainer.hide();
 
         switch (state.status) {
             case AppStatus.INITIALIZING:
                 this.placeholderComponent.render("Initializing Version Control...", "sync");
+                this.placeholderComponent.getContainer().show();
                 break;
 
             case AppStatus.PLACEHOLDER:
-                this.placeholderComponent.render();
+                this.placeholderComponent.render(); // Renders default "Open a note..." message
+                this.placeholderComponent.getContainer().show();
                 break;
 
             case AppStatus.ERROR:
                 this.errorDisplayComponent.render(state.error);
+                this.errorDisplayComponent.getContainer().show();
                 break;
 
             case AppStatus.LOADING:
-                this.actionBarComponent.getContainer().hide();
+                // In loading state, we show the container for the skeleton list
+                this.readyStateContainer.show();
+                this.historyListComponent.renderAsLoading(state.settings); // Pass settings for accurate skeleton
+                // Ensure panels are hidden
                 this.settingsPanelComponent.getContainer().hide();
                 this.previewPanelComponent.getContainer().hide();
                 this.diffPanelComponent.getContainer().hide();
                 this.confirmationPanelComponent.getContainer().hide();
-                
-                this.historyListComponent.renderAsLoading();
-                this.historyListComponent.getContainer().show();
                 break;
 
             case AppStatus.READY:
+                // Action bar is always visible in the READY state.
                 this.actionBarComponent.getContainer().show();
-                this.historyListComponent.getContainer().show();
-
                 this.actionBarComponent.render(state);
-                this.historyListComponent.render(state);
-                
-                this.settingsPanelComponent.render(state.panel?.type === 'settings', state);
-                this.previewPanelComponent.render(state.panel?.type === 'preview' ? state.panel : null);
-                this.diffPanelComponent.render(state.panel?.type === 'diff' ? state.panel : null);
-                this.confirmationPanelComponent.render(state.panel?.type === 'confirmation' ? state.panel : null);
+
+                if (state.history.length === 0) {
+                    // Active note, but no versions. Show a specific placeholder.
+                    this.placeholderComponent.render("No versions saved yet.", "inbox");
+                    this.placeholderComponent.getContainer().show();
+                } else {
+                    // Active note with versions. Show the history list and panels.
+                    this.readyStateContainer.show();
+                    this.historyListComponent.getContainer().show();
+                    this.historyListComponent.render(state);
+                    
+                    this.settingsPanelComponent.render(state.panel?.type === 'settings', state);
+                    this.previewPanelComponent.render(state.panel?.type === 'preview' ? state.panel : null);
+                    this.diffPanelComponent.render(state.panel?.type === 'diff' ? state.panel : null);
+                    this.confirmationPanelComponent.render(state.panel?.type === 'confirmation' ? state.panel : null);
+                }
                 break;
             
             default:

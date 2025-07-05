@@ -150,7 +150,7 @@ export class VersionPreviewView extends ItemView {
 
     async onOpen() {
         this.containerEl.addClass("version-preview-view"); 
-        this.tabContentEl = this.contentEl.createDiv("v-preview-panel-tab-content");
+        this.tabContentEl = this.contentEl.createDiv("v-tab-view-content");
         
         if (this.currentDisplayState) {
             this.render(); 
