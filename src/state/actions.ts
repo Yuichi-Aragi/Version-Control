@@ -42,6 +42,9 @@ export enum ActionType {
     DIFF_GENERATION_SUCCEEDED = 'DIFF_GENERATION_SUCCEEDED',
     DIFF_GENERATION_FAILED = 'DIFF_GENERATION_FAILED',
     CLEAR_DIFF_REQUEST = 'CLEAR_DIFF_REQUEST',
+
+    // Watch Mode UI action
+    SET_WATCH_MODE_COUNTDOWN = 'SET_WATCH_MODE_COUNTDOWN',
 }
 
 // ===================================================================================
@@ -79,6 +82,9 @@ export interface DiffGenerationSucceededAction { type: ActionType.DIFF_GENERATIO
 export interface DiffGenerationFailedAction { type: ActionType.DIFF_GENERATION_FAILED; payload: { version1Id: string; version2Id: string }; }
 export interface ClearDiffRequestAction { type: ActionType.CLEAR_DIFF_REQUEST; }
 
+// Watch Mode UI interface
+export interface SetWatchModeCountdownAction { type: ActionType.SET_WATCH_MODE_COUNTDOWN; payload: number | null; }
+
 
 /**
  * @type Action
@@ -107,7 +113,8 @@ export type Action =
     | StartDiffGenerationAction
     | DiffGenerationSucceededAction
     | DiffGenerationFailedAction
-    | ClearDiffRequestAction;
+    | ClearDiffRequestAction
+    | SetWatchModeCountdownAction;
 
 // ===================================================================================
 // ACTION CREATORS
@@ -148,4 +155,7 @@ export const actions = {
     diffGenerationSucceeded: (payload: { version1Id: string; version2Id: string; diffChanges: Change[] }): DiffGenerationSucceededAction => ({ type: ActionType.DIFF_GENERATION_SUCCEEDED, payload }),
     diffGenerationFailed: (payload: { version1Id: string; version2Id: string }): DiffGenerationFailedAction => ({ type: ActionType.DIFF_GENERATION_FAILED, payload }),
     clearDiffRequest: (): ClearDiffRequestAction => ({ type: ActionType.CLEAR_DIFF_REQUEST }),
+
+    // Watch Mode UI action creator
+    setWatchModeCountdown: (countdown: number | null): SetWatchModeCountdownAction => ({ type: ActionType.SET_WATCH_MODE_COUNTDOWN, payload: countdown }),
 };

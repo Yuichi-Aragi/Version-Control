@@ -95,6 +95,9 @@ export interface ReadyState {
 
     // Diff properties
     diffRequest: DiffRequest | null;
+
+    // Watch Mode properties
+    watchModeCountdown: number | null;
 }
 
 export interface ErrorState {

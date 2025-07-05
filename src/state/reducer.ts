@@ -149,6 +149,9 @@ const readyStateReducer = (state: ReadyState, action: Action): AppState => {
         case ActionType.CLEAR_DIFF_REQUEST:
             return { ...state, diffRequest: null };
 
+        case ActionType.SET_WATCH_MODE_COUNTDOWN:
+            return { ...state, watchModeCountdown: action.payload };
+
         default:
             return state;
     }
@@ -215,6 +218,7 @@ export const rootReducer = (state: AppState, action: Action): AppState => {
                         sortOrder: defaultSortOrder,
                         diffRequest: null,
                         expandedTagIds: [],
+                        watchModeCountdown: null,
                     };
                 }
             }
