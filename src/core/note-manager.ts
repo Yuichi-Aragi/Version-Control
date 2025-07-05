@@ -7,6 +7,7 @@ import { generateUniqueId } from "../utils/id";
 export class NoteManager {
     private app: App;
     private manifestManager: ManifestManager;
+    private idCreationLocks = new Map<string, Promise<string | null>>();
 
     constructor(app: App, manifestManager: ManifestManager) {
         this.app = app;
@@ -83,27 +84,44 @@ export class NoteManager {
             return existingId;
         }
 
-        // Safer order: Create manifest entry first, then write to frontmatter.
-        const newId = generateUniqueId();
-        try {
-            // Step 1: Create the manifest entry. This is the critical operation.
-            await this.manifestManager.createNoteEntry(newId, file.path);
+        // Check for an existing lock to prevent race conditions
+        if (this.idCreationLocks.has(file.path)) {
+            return this.idCreationLocks.get(file.path)!;
+        }
 
-            // Step 2: If manifest creation succeeds, write the ID to the note's frontmatter.
-            const writeSuccess = await this.writeNoteIdToFrontmatter(file, newId);
-            if (!writeSuccess) {
-                // This is a non-critical failure. The history exists but is "orphaned".
-                // It can be reconciled later. Log a clear warning.
-                console.warn(`VC: Created manifest for note "${file.path}" (ID: ${newId}) but failed to write vc-id to its frontmatter. The history is saved but the note needs reconciliation.`);
-                throw new Error(`Failed to initialize version history for "${file.basename}". History was created but could not be linked to the note.`);
+        // Create a lock
+        const creationPromise = (async (): Promise<string | null> => {
+            // Safer order: Create manifest entry first, then write to frontmatter.
+            const newId = generateUniqueId();
+            try {
+                // Step 1: Create the manifest entry. This is the critical operation.
+                await this.manifestManager.createNoteEntry(newId, file.path);
+
+                // Step 2: If manifest creation succeeds, write the ID to the note's frontmatter.
+                const writeSuccess = await this.writeNoteIdToFrontmatter(file, newId);
+                if (!writeSuccess) {
+                    // This is a non-critical failure. The history exists but is "orphaned".
+                    // It can be reconciled later. Log a clear warning.
+                    console.warn(`VC: Created manifest for note "${file.path}" (ID: ${newId}) but failed to write vc-id to its frontmatter. The history is saved but the note needs reconciliation.`);
+                    throw new Error(`Failed to initialize version history for "${file.basename}". History was created but could not be linked to the note.`);
+                }
+                return newId;
+
+            } catch (error) {
+                console.error(`VC: Failed to get or create note ID for "${file.path}".`, error);
+                // The manifest manager's createNoteEntry already handles its own rollback.
+                // We just need to re-throw the error to the caller.
+                throw new Error(`Failed to initialize version history for "${file.basename}". Please try again.`);
             }
-            return newId;
+        })();
 
-        } catch (error) {
-            console.error(`VC: Failed to get or create note ID for "${file.path}".`, error);
-            // The manifest manager's createNoteEntry already handles its own rollback.
-            // We just need to re-throw the error to the caller.
-            throw new Error(`Failed to initialize version history for "${file.basename}". Please try again.`);
+        this.idCreationLocks.set(file.path, creationPromise);
+
+        try {
+            return await creationPromise;
+        } finally {
+            // Always remove the lock once the operation is complete
+            this.idCreationLocks.delete(file.path);
         }
     }
 

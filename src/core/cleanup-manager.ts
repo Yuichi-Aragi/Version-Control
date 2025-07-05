@@ -1,19 +1,22 @@
-import { App, TFile, moment } from "obsidian";
+import { App, TFile, moment, Component } from "obsidian";
 import { ManifestManager } from "./manifest-manager";
 import { VersionControlSettings, NoteManifest } from "../types";
 import { NOTE_FRONTMATTER_KEY } from "../constants";
 import { PluginEvents } from "./plugin-events";
+import { PathService } from "./storage/path-service";
 
 /**
  * Manages all cleanup operations, such as removing old versions based on
  * retention policies and cleaning up data for orphaned (deleted) notes.
  * It operates in a decoupled manner by listening to events from the PluginEvents bus.
+ * Extends Component to leverage automatic event listener cleanup.
  */
-export class CleanupManager {
+export class CleanupManager extends Component {
     private app: App;
     private manifestManager: ManifestManager;
     private settingsProvider: () => VersionControlSettings;
     private eventBus: PluginEvents;
+    private pathService: PathService;
     
     private cleanupPromises = new Map<string, Promise<void>>();
     private isOrphanCleanupRunning = false;
@@ -22,12 +25,15 @@ export class CleanupManager {
         app: App, 
         manifestManager: ManifestManager, 
         settingsProvider: () => VersionControlSettings,
-        eventBus: PluginEvents
+        eventBus: PluginEvents,
+        pathService: PathService
     ) {
+        super();
         this.app = app;
         this.manifestManager = manifestManager;
         this.settingsProvider = settingsProvider;
         this.eventBus = eventBus;
+        this.pathService = pathService;
     }
 
     /**
@@ -35,7 +41,7 @@ export class CleanupManager {
      * once during plugin initialization.
      */
     public initialize(): void {
-        this.eventBus.on('version-saved', this.handleVersionSaved);
+        this.registerEvent(this.eventBus.on('version-saved', this.handleVersionSaved));
     }
 
     /**
@@ -119,7 +125,7 @@ export class CleanupManager {
             // After the manifest is safely updated, delete the files.
             // This is not critical if it fails; orphan cleanup can get them later.
             const deletionPromises = Array.from(versionsToDelete).map(versionId => {
-                const versionFilePath = this.manifestManager.getNoteVersionPath(noteId, versionId);
+                const versionFilePath = this.pathService.getNoteVersionPath(noteId, versionId);
                 return this.app.vault.adapter.exists(versionFilePath)
                     .then(exists => exists ? this.app.vault.adapter.remove(versionFilePath) : Promise.resolve())
                     .catch(fileError => {
@@ -152,8 +158,20 @@ export class CleanupManager {
                 return { count: 0, success: true };
             }
 
-            const allVaultFilePaths = new Set(this.app.vault.getMarkdownFiles().map(f => f.path));
+            // Build a map of all vc-ids and a set of all paths in a single pass for efficiency.
+            const allVcIdsInVault = new Map<string, string>();
+            const allVaultFilePaths = new Set<string>();
+            for (const file of this.app.vault.getMarkdownFiles()) {
+                allVaultFilePaths.add(file.path);
+                const cache = this.app.metadataCache.getFileCache(file);
+                const vcId = cache?.frontmatter?.[NOTE_FRONTMATTER_KEY];
+                if (typeof vcId === 'string' && vcId.trim() !== '') {
+                    allVcIdsInVault.set(vcId, file.path);
+                }
+            }
+
             const orphanedNoteIdsToDelete: string[] = [];
+            const pathsToUpdate: { noteId: string, newPath: string }[] = [];
 
             for (const [noteId, noteData] of Object.entries(centralManifest.notes)) {
                 if (!noteData || typeof noteData.notePath !== 'string') {
@@ -164,10 +182,8 @@ export class CleanupManager {
 
                 const noteFileExists = allVaultFilePaths.has(noteData.notePath);
 
-                if (!noteFileExists) {
-                    console.log(`VC (Orphan): File not found for note ID ${noteId} at path "${noteData.notePath}". Scheduling data deletion.`);
-                    orphanedNoteIdsToDelete.push(noteId);
-                } else {
+                if (noteFileExists) {
+                    // File exists at the path we expect. Verify its vc-id matches.
                     const file = this.app.vault.getAbstractFileByPath(noteData.notePath) as TFile;
                     const fileCache = this.app.metadataCache.getFileCache(file);
                     let idFromFrontmatter = fileCache?.frontmatter?.[NOTE_FRONTMATTER_KEY] ?? null;
@@ -176,10 +192,30 @@ export class CleanupManager {
                     }
 
                     if (idFromFrontmatter !== noteId) {
+                        // The file at the path is no longer associated with this history.
                         console.log(`VC (Orphan): Mismatched vc-id for note ID ${noteId} at path "${noteData.notePath}". Manifest ID: ${noteId}, File FM ID: "${idFromFrontmatter}". Scheduling data deletion.`);
                         orphanedNoteIdsToDelete.push(noteId);
                     }
+                } else {
+                    // File does NOT exist at the path. Check if it was renamed.
+                    const newPathForId = allVcIdsInVault.get(noteId);
+                    if (newPathForId) {
+                        // The file was renamed! Self-heal by updating the path.
+                        console.log(`VC (Orphan): Detected renamed file for note ID ${noteId}. Old path: "${noteData.notePath}", New path: "${newPathForId}". Scheduling path update.`);
+                        pathsToUpdate.push({ noteId, newPath: newPathForId });
+                    } else {
+                        // The file is truly gone.
+                        console.log(`VC (Orphan): File not found for note ID ${noteId} at path "${noteData.notePath}" and ID not found elsewhere. Scheduling data deletion.`);
+                        orphanedNoteIdsToDelete.push(noteId);
+                    }
                 }
+            }
+
+            // Perform updates and deletions
+            if (pathsToUpdate.length > 0) {
+                const updatePromises = pathsToUpdate.map(update => this.manifestManager.updateNotePath(update.noteId, update.newPath));
+                await Promise.allSettled(updatePromises);
+                console.log(`VC: Orphan cleanup self-healed ${pathsToUpdate.length} renamed file path(s).`);
             }
 
             if (orphanedNoteIdsToDelete.length > 0) {
