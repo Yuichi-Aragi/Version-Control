@@ -134,6 +134,19 @@ export class SettingsPanelComponent extends BasePanelComponent {
         const { settings } = state; 
 
         new Setting(parent)
+            .setName('Apply settings globally')
+            .setDesc('ON: Changes apply to all notes. OFF: Changes apply only to the current note (if it has a version history).')
+            .addToggle(toggle => toggle
+                .setValue(settings.applySettingsGlobally)
+                .onChange(async (value) => {
+                    // The thunk will handle saving globally and updating the effective state.
+                    // The component will re-render automatically from the store subscription.
+                    await this.store.dispatch(thunks.updateSettings({ applySettingsGlobally: value }));
+                }));
+        
+        parent.createEl('hr', { cls: 'v-settings-divider' });
+
+        new Setting(parent)
             .setName('Enable version naming')
             .setDesc('If enabled, prompts for a version name when saving a new version.')
             .addToggle(toggle => toggle
@@ -195,7 +208,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
 
         new Setting(parent)
             .setName('Auto-cleanup orphaned versions')
-            .setDesc('On startup and periodically, remove version data for notes that no longer exist or are no longer linked via vc-id.')
+            .setDesc('On startup and periodically, remove version data for notes that no longer exist or are no longer linked via vc-id. This setting is always global.')
             .addToggle(toggle => toggle
                 .setValue(settings.autoCleanupOrphanedVersions)
                 .onChange(async (value) => {

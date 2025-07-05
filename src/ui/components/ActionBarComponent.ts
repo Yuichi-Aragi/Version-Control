@@ -3,6 +3,7 @@ import { Store } from "../../state/store";
 import { ReadyState, AppStatus, SortOrder } from "../../state/state";
 import { actions } from "../../state/actions";
 import { thunks } from "../../state/thunks/index";
+import { VersionControlSettings } from "src/types";
 
 export class ActionBarComponent extends Component {
     private container: HTMLElement;
@@ -20,6 +21,7 @@ export class ActionBarComponent extends Component {
     private settingsButton: HTMLButtonElement;
     private searchIconEl: HTMLElement;
     private filterButton: HTMLButtonElement;
+    private watchModeTimerEl: HTMLElement;
 
     constructor(parent: HTMLElement, store: Store) {
         super();
@@ -35,9 +37,14 @@ export class ActionBarComponent extends Component {
     private buildDefaultActions() {
         this.defaultActionsEl = this.container.createDiv("v-top-actions");
         
-        this.saveButton = this.defaultActionsEl.createEl("button", { text: "Save New Version", cls: "v-save-button" });
+        const leftGroup = this.defaultActionsEl.createDiv('v-top-actions-left-group');
+
+        this.saveButton = leftGroup.createEl("button", { text: "Save New Version", cls: "v-save-button" });
         this.saveButton.setAttribute("aria-label", "Save a new version of the current note");
         this.saveButton.addEventListener("click", () => this.handleSaveVersionClick());
+
+        this.watchModeTimerEl = leftGroup.createDiv('v-watch-mode-timer');
+        this.watchModeTimerEl.hide();
 
         const rightGroup = this.defaultActionsEl.createDiv('v-top-actions-right-group');
 
@@ -138,7 +145,7 @@ export class ActionBarComponent extends Component {
     }
 
     render(state: ReadyState) {
-        const { isSearchActive, searchQuery, isSearchCaseSensitive, isProcessing, diffRequest } = state;
+        const { isSearchActive, searchQuery, isSearchCaseSensitive, isProcessing, diffRequest, settings, watchModeCountdown } = state;
         
         this.container.classList.toggle('is-searching', isSearchActive);
         this.searchContainerEl.classList.toggle('is-query-active', searchQuery.trim().length > 0);
@@ -150,6 +157,7 @@ export class ActionBarComponent extends Component {
         this.settingsButton.classList.toggle('is-active', state.panel?.type === 'settings');
 
         this.renderDiffIndicator(diffRequest);
+        this.renderWatchModeTimer(settings.enableWatchMode, watchModeCountdown, isProcessing);
 
         if (this.searchInput.value !== searchQuery) {
             this.searchInput.value = searchQuery;
@@ -184,6 +192,15 @@ export class ActionBarComponent extends Component {
                 setIcon(this.diffIndicatorButton, "diff");
                 this.diffIndicatorButton.setAttribute("aria-label", "Diff is ready. Click to view.");
                 break;
+        }
+    }
+
+    private renderWatchModeTimer(isWatchModeEnabled: boolean, countdown: number | null, isProcessing: boolean) {
+        if (isWatchModeEnabled && countdown !== null && !isProcessing) {
+            this.watchModeTimerEl.setText(`(${countdown}s)`);
+            this.watchModeTimerEl.show();
+        } else {
+            this.watchModeTimerEl.hide();
         }
     }
 
