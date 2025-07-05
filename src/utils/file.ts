@@ -1,38 +1,6 @@
 import { App, normalizePath } from "obsidian";
 
 /**
- * Removes a specific key from a note's frontmatter.
- * @param content The content of the note.
- * @param key The key to remove.
- * @returns The content with the key removed.
- */
-export function removeFrontmatterKey(content: string, key: string): string {
-    const frontmatterRegex = /^---\s*\r?\n([\s\S]*?)\r?\n---/;
-    const match = content.match(frontmatterRegex);
-    
-    if (!match) {
-        return content;
-    }
-
-    const frontmatterContent = match[1];
-    // Regex to match the key, ensuring it's at the start of a line and handles various spacings and comments.
-    // This is a simplified version; a full YAML parser would be more robust but heavier.
-    const keyRegex = new RegExp(`^${key}:.*(\\n|$)`, 'm'); // 'm' for multiline
-    
-    let lines = frontmatterContent.split(/\r?\n/);
-    lines = lines.filter(line => !keyRegex.test(line));
-    
-    const newFrontmatter = lines.filter(line => line.trim() !== '').join('\n');
-
-    if (newFrontmatter.trim() === '') {
-        // Remove entire frontmatter block if empty
-        return content.replace(frontmatterRegex, '').trimStart(); // trimStart to keep leading content if FM was at very top
-    }
-
-    return content.replace(frontmatterRegex, `---\n${newFrontmatter}\n---`);
-}
-
-/**
  * Generates a unique file path to avoid conflicts when creating new files.
  * Ensures the path is normalized.
  * @param app The Obsidian App instance.
