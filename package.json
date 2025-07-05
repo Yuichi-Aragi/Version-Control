@@ -4,6 +4,8 @@
   "description": "A local, snapshot-based version control system. Lets you create finite number of versions of any note.",
   "main": "main.js",
   "scripts": {
+    "prebuild": "node esbuild.worker.mjs",
+    "predev": "node esbuild.worker.mjs",
     "dev": "node esbuild.config.mjs --watch",
     "build": "node esbuild.config.mjs --production"
   },
