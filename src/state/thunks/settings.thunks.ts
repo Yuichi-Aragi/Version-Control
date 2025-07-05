@@ -4,30 +4,88 @@ import { VersionControlSettings, VersionHistoryEntry, VersionData } from '../../
 import { AppStatus } from '../state';
 import { customSanitizeFileName } from '../../utils/file';
 import { SERVICE_NAMES } from '../../constants';
-import VersionControlPlugin from '../../main';
 import { UIService } from '../../services/ui-service';
 import { ManifestManager } from '../../core/manifest-manager';
 import { ExportManager } from '../../services/export-manager';
 import { VersionManager } from '../../core/version-manager';
+import { BackgroundTaskManager } from '../../core/BackgroundTaskManager';
 
 /**
  * Thunks for updating settings and handling export functionality.
  */
 
 export const updateSettings = (settingsUpdate: Partial<VersionControlSettings>): Thunk => async (dispatch, getState, container) => {
-    const plugin = container.resolve<VersionControlPlugin>(SERVICE_NAMES.PLUGIN);
     const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
+    const globalSettingsManager = container.resolve<{ get: () => VersionControlSettings, save: (s: VersionControlSettings) => Promise<void> }>(SERVICE_NAMES.GLOBAL_SETTINGS_MANAGER);
+    const backgroundTaskManager = container.resolve<BackgroundTaskManager>(SERVICE_NAMES.BACKGROUND_TASK_MANAGER);
+    const manifestManager = container.resolve<ManifestManager>(SERVICE_NAMES.MANIFEST_MANAGER);
 
-    dispatch(actions.updateSettings(settingsUpdate));
-    const fullNewSettings = getState().settings;
-    try {
-        await plugin.saveData(fullNewSettings); 
-        plugin.managePeriodicOrphanCleanup();
-        plugin.manageWatchModeInterval();
-    } catch (error) {
-        console.error("Version Control: CRITICAL: Could not save settings to disk.", error);
-        uiService.showNotice("VC: Error: Could not save settings. Check console.");
+    const currentGlobalSettings = globalSettingsManager.get();
+    let newGlobalSettings = { ...currentGlobalSettings };
+    let perNoteUpdate = { ...settingsUpdate };
+    let needsGlobalSave = false;
+
+    // --- Step 1: Handle Always-Global Settings ---
+    // The orphan cleanup setting is ALWAYS global.
+    if ('autoCleanupOrphanedVersions' in settingsUpdate) {
+        newGlobalSettings.autoCleanupOrphanedVersions = settingsUpdate.autoCleanupOrphanedVersions!;
+        delete perNoteUpdate.autoCleanupOrphanedVersions; // Remove from per-note consideration
+        needsGlobalSave = true;
     }
+
+    // The global toggle itself is ALWAYS global.
+    if ('applySettingsGlobally' in settingsUpdate) {
+        newGlobalSettings.applySettingsGlobally = settingsUpdate.applySettingsGlobally!;
+        delete perNoteUpdate.applySettingsGlobally; // Remove from per-note consideration
+        needsGlobalSave = true;
+    }
+
+    // --- Step 2: Determine where to save the rest of the settings ---
+    if (newGlobalSettings.applySettingsGlobally) {
+        // If global mode is on, all other changes also apply globally.
+        if (Object.keys(perNoteUpdate).length > 0) {
+            newGlobalSettings = { ...newGlobalSettings, ...perNoteUpdate };
+            needsGlobalSave = true;
+        }
+    } else {
+        // Global mode is OFF. Save other changes to the current note's manifest.
+        const state = getState();
+        if (state.status === AppStatus.READY && state.noteId) {
+            if (Object.keys(perNoteUpdate).length > 0) {
+                await manifestManager.updateNoteManifest(state.noteId, (manifest) => {
+                    manifest.settings = { ...(manifest.settings || {}), ...perNoteUpdate };
+                    return manifest;
+                });
+            }
+        } else if (Object.keys(perNoteUpdate).length > 0) {
+            // Tried to change a per-note setting without an active note.
+            uiService.showNotice("Cannot save setting: No note is active.", 3000);
+            return; // Abort without saving or updating state
+        }
+    }
+
+    // --- Step 3: Save global settings if anything changed ---
+    if (needsGlobalSave) {
+        await globalSettingsManager.save(newGlobalSettings);
+    }
+
+    // --- Step 4: Update the effective settings in the Redux state ---
+    // Recalculate the final effective settings for the UI to display.
+    const state = getState();
+    let finalEffectiveSettings = { ...newGlobalSettings }; // Start with the new global state
+    if (!newGlobalSettings.applySettingsGlobally && state.status === AppStatus.READY && state.noteId) {
+        // If global is off and we have a note, merge its settings
+        const noteManifest = await manifestManager.loadNoteManifest(state.noteId);
+        if (noteManifest?.settings) {
+            finalEffectiveSettings = { ...finalEffectiveSettings, ...noteManifest.settings };
+        }
+    }
+    
+    dispatch(actions.updateSettings(finalEffectiveSettings));
+
+    // --- Step 5: Trigger side-effects ---
+    backgroundTaskManager.managePeriodicOrphanCleanup();
+    backgroundTaskManager.manageWatchModeInterval();
 };
 
 export const requestExportAllVersions = (): Thunk => (dispatch, getState, container) => {
@@ -56,7 +114,7 @@ export const exportAllVersions = (noteId: string, format: 'md' | 'json' | 'ndjso
     const exportManager = container.resolve<ExportManager>(SERVICE_NAMES.EXPORT_MANAGER);
 
     const initialState = getState();
-    if (initialState.status !== AppStatus.READY && initialState.noteId !== noteId) {
+    if (initialState.status !== AppStatus.READY || initialState.noteId !== noteId) {
         uiService.showNotice("VC: Export cancelled. View context changed.", 3000);
         return;
     }
@@ -84,6 +142,13 @@ export const exportAllVersions = (noteId: string, format: 'md' | 'json' | 'ndjso
         const selectedFolder = await uiService.promptForFolder();
         if (!selectedFolder) {
             uiService.showNotice("Export cancelled.", 2000);
+            return;
+        }
+
+        // Re-validate context after await
+        const latestState = getState();
+        if (latestState.status !== AppStatus.READY || latestState.noteId !== initialState.noteId) {
+            uiService.showNotice("VC: Note context changed during folder selection. Export cancelled.");
             return;
         }
 
@@ -159,6 +224,13 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: '
         const selectedFolder = await uiService.promptForFolder();
         if (!selectedFolder) {
             uiService.showNotice("Export cancelled.", 2000);
+            return;
+        }
+        
+        // Re-validate context after await
+        const latestState = getState();
+        if (latestState.status !== AppStatus.READY || latestState.noteId !== initialState.noteId) {
+            uiService.showNotice("VC: Note context changed during folder selection. Export cancelled.");
             return;
         }
         

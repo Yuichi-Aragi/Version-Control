@@ -66,25 +66,25 @@ export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: Dif
 
     if (mode === 'tab') {
         uiService.showNotice("Generating diff for new tab...", 2000);
-        const diffChanges = await diffManager.generateDiff(noteId, version1, version2);
-        if (diffChanges === null) {
+        try {
+            const diffChanges = await diffManager.generateDiff(noteId, version1, version2);
+            const leaf = app.workspace.getLeaf('tab');
+            await leaf.setViewState({
+                type: VIEW_TYPE_VERSION_DIFF,
+                active: true,
+                state: {
+                    version1,
+                    version2,
+                    diffChanges,
+                    noteName: file.basename,
+                    notePath: file.path,
+                }
+            });
+            app.workspace.revealLeaf(leaf);
+        } catch (error) {
+            console.error("Version Control: Error generating diff for tab.", error);
             uiService.showNotice("Failed to generate diff. Check console for details.");
-            return;
         }
-
-        const leaf = app.workspace.getLeaf('tab');
-        await leaf.setViewState({
-            type: VIEW_TYPE_VERSION_DIFF,
-            active: true,
-            state: {
-                version1,
-                version2,
-                diffChanges,
-                noteName: file.basename,
-                notePath: file.path,
-            }
-        });
-        app.workspace.revealLeaf(leaf);
         return;
     }
 
@@ -102,10 +102,6 @@ export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: Dif
             return;
         }
         
-        if (diffChanges === null) {
-            throw new Error("Diff generation returned null.");
-        }
-
         dispatch(actions.diffGenerationSucceeded({ version1Id: version1.id, version2Id: version2.id, diffChanges }));
         uiService.showNotice("Diff is ready. Click the indicator to view.", 4000);
 

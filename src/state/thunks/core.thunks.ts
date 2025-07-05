@@ -1,7 +1,7 @@
 import { TFile, WorkspaceLeaf, MetadataCache, App } from 'obsidian';
 import { Thunk } from '../store';
 import { actions } from '../actions';
-import { AppError } from '../../types';
+import { AppError, VersionControlSettings } from '../../types';
 import { AppStatus } from '../state';
 import { NOTE_FRONTMATTER_KEY, SERVICE_NAMES } from '../../constants';
 import { NoteManager } from '../../core/note-manager';
@@ -9,14 +9,41 @@ import { UIService } from '../../services/ui-service';
 import { VersionManager } from '../../core/version-manager';
 import { ManifestManager } from '../../core/manifest-manager';
 import { CleanupManager } from '../../core/cleanup-manager';
+import { BackgroundTaskManager } from '../../core/BackgroundTaskManager';
 
 /**
  * Thunks related to the core application lifecycle, such as view initialization and history loading.
  */
 
+/**
+ * Calculates the effective settings for a given note (or global if no note) and applies them to the state.
+ * @param noteId The ID of the note, or null to apply global settings.
+ */
+const applyEffectiveSettingsForNote = (noteId: string | null): Thunk => async (dispatch, getState, container) => {
+    const globalSettingsManager = container.resolve<{ get: () => VersionControlSettings }>(SERVICE_NAMES.GLOBAL_SETTINGS_MANAGER);
+    const manifestManager = container.resolve<ManifestManager>(SERVICE_NAMES.MANIFEST_MANAGER);
+    const globalSettings = globalSettingsManager.get();
+
+    let effectiveSettings = { ...globalSettings };
+    if (noteId && !globalSettings.applySettingsGlobally) {
+        const noteManifest = await manifestManager.loadNoteManifest(noteId);
+        if (noteManifest?.settings) {
+            // The Omit in types.ts ensures we don't override the global-only settings.
+            effectiveSettings = { ...effectiveSettings, ...noteManifest.settings };
+        }
+    }
+
+    // Only dispatch if settings have actually changed to avoid unnecessary re-renders.
+    if (JSON.stringify(getState().settings) !== JSON.stringify(effectiveSettings)) {
+        dispatch(actions.updateSettings(effectiveSettings));
+    }
+};
+
+
 export const initializeView = (leaf?: WorkspaceLeaf | null): Thunk => async (dispatch, _getState, container) => {
     const app = container.resolve<App>(SERVICE_NAMES.APP);
     const noteManager = container.resolve<NoteManager>(SERVICE_NAMES.NOTE_MANAGER);
+    const backgroundTaskManager = container.resolve<BackgroundTaskManager>(SERVICE_NAMES.BACKGROUND_TASK_MANAGER);
 
     try {
         const targetLeaf = leaf ?? app.workspace.activeLeaf;
@@ -30,6 +57,10 @@ export const initializeView = (leaf?: WorkspaceLeaf | null): Thunk => async (dis
         
         if (activeNoteInfo.file) {
             dispatch(loadHistory(activeNoteInfo.file));
+        } else {
+            // No file is active, revert to global settings and ensure watch mode is off.
+            dispatch(applyEffectiveSettingsForNote(null));
+            backgroundTaskManager.manageWatchModeInterval();
         }
     } catch (error) {
         console.error("Version Control: CRITICAL: Failed to initialize view.", error);
@@ -62,6 +93,7 @@ export const loadHistory = (file: TFile): Thunk => async (dispatch, _getState, c
     const noteManager = container.resolve<NoteManager>(SERVICE_NAMES.NOTE_MANAGER);
     const manifestManager = container.resolve<ManifestManager>(SERVICE_NAMES.MANIFEST_MANAGER);
     const versionManager = container.resolve<VersionManager>(SERVICE_NAMES.VERSION_MANAGER);
+    const backgroundTaskManager = container.resolve<BackgroundTaskManager>(SERVICE_NAMES.BACKGROUND_TASK_MANAGER);
 
     try {
         let noteId = await noteManager.getNoteId(file); 
@@ -69,8 +101,13 @@ export const loadHistory = (file: TFile): Thunk => async (dispatch, _getState, c
             noteId = await manifestManager.getNoteIdByPath(file.path);
         }
         
+        dispatch(applyEffectiveSettingsForNote(noteId));
+        
         const history = noteId ? await versionManager.getVersionHistory(noteId) : [];
         dispatch(actions.historyLoadedSuccess({ file, noteId, history }));
+        
+        // After history is loaded and state is READY, manage the watch mode timer.
+        backgroundTaskManager.manageWatchModeInterval();
 
     } catch (error) {
         console.error(`Version Control: Failed to load version history for "${file.path}".`, error);
@@ -85,9 +122,14 @@ export const loadHistory = (file: TFile): Thunk => async (dispatch, _getState, c
 
 export const loadHistoryForNoteId = (file: TFile, noteId: string): Thunk => async (dispatch, _getState, container) => {
     const versionManager = container.resolve<VersionManager>(SERVICE_NAMES.VERSION_MANAGER);
+    const backgroundTaskManager = container.resolve<BackgroundTaskManager>(SERVICE_NAMES.BACKGROUND_TASK_MANAGER);
     try {
+        dispatch(applyEffectiveSettingsForNote(noteId));
         const history = await versionManager.getVersionHistory(noteId);
         dispatch(actions.historyLoadedSuccess({ file, noteId, history }));
+        
+        // After history is loaded and state is READY, manage the watch mode timer.
+        backgroundTaskManager.manageWatchModeInterval();
     } catch (error) {
         console.error(`Version Control: Failed to load version history for note ID "${noteId}" ("${file.path}").`, error);
         const appError: AppError = {

@@ -8,7 +8,8 @@ import { loadHistoryForNoteId, initializeView } from './core.thunks';
 import { VersionManager } from '../../core/version-manager';
 import { NoteManager } from '../../core/note-manager';
 import { UIService } from '../../services/ui-service';
-import VersionControlPlugin from '../../main';
+import { parseNameAndTags } from '../../utils/version-parser';
+import { BackgroundTaskManager } from '../../core/BackgroundTaskManager';
 
 /**
  * Thunks for direct version management (CRUD operations).
@@ -19,7 +20,7 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): Thunk => asy
     const versionManager = container.resolve<VersionManager>(SERVICE_NAMES.VERSION_MANAGER);
     const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
     const app = container.resolve<App>(SERVICE_NAMES.APP);
-    const plugin = container.resolve<VersionControlPlugin>(SERVICE_NAMES.PLUGIN);
+    const backgroundTaskManager = container.resolve<BackgroundTaskManager>(SERVICE_NAMES.BACKGROUND_TASK_MANAGER);
 
     const initialState = getState();
     if (initialState.status !== AppStatus.READY) {
@@ -75,7 +76,7 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): Thunk => asy
         }
         dispatch(initializeView(app.workspace.activeLeaf));
     } finally {
-        plugin.manageWatchModeInterval(); // Reset the timer after any save attempt.
+        backgroundTaskManager.manageWatchModeInterval(); // Reset the timer after any save attempt.
         const finalState = getState();
         if (finalState.status === AppStatus.READY) {
             dispatch(actions.setProcessing(false));
@@ -94,16 +95,8 @@ export const updateVersionDetails = (versionId: string, nameAndTags: string): Th
     const noteId = state.noteId;
 
     // Optimistic UI update
-    const tagsRegex = /(?:^|\s)#([^\s#]+)/g;
-    const tags: string[] = [];
-    let match;
-    const cleanInput = nameAndTags;
-    while ((match = tagsRegex.exec(cleanInput)) !== null) {
-        tags.push(match[1]);
-    }
-    const name = nameAndTags.replace(tagsRegex, '').trim();
-    const finalTags = [...new Set(tags)].slice(0, 5);
-    dispatch(actions.updateVersionDetailsInState(versionId, name || undefined, finalTags.length > 0 ? finalTags : undefined));
+    const { name, tags } = parseNameAndTags(nameAndTags);
+    dispatch(actions.updateVersionDetailsInState(versionId, name || undefined, tags.length > 0 ? tags : undefined));
 
     try {
         await versionManager.updateVersionDetails(noteId, versionId, nameAndTags);
@@ -140,7 +133,7 @@ export const restoreVersion = (versionId: string): Thunk => async (dispatch, get
     const noteManager = container.resolve<NoteManager>(SERVICE_NAMES.NOTE_MANAGER);
     const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
     const app = container.resolve<App>(SERVICE_NAMES.APP);
-    const plugin = container.resolve<VersionControlPlugin>(SERVICE_NAMES.PLUGIN);
+    const backgroundTaskManager = container.resolve<BackgroundTaskManager>(SERVICE_NAMES.BACKGROUND_TASK_MANAGER);
     
     const initialState = getState();
     if (initialState.status !== AppStatus.READY) return;
@@ -178,7 +171,7 @@ export const restoreVersion = (versionId: string): Thunk => async (dispatch, get
         uiService.showNotice(`Restore failed: ${message}`, 7000);
         dispatch(initializeView(app.workspace.activeLeaf));
     } finally {
-        plugin.manageWatchModeInterval();
+        backgroundTaskManager.manageWatchModeInterval();
     }
 };
 

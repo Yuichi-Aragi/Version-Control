@@ -87,11 +87,12 @@ export const createDeviation = (version: VersionHistoryEntry): Thunk => async (d
     const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
     const versionManager = container.resolve<VersionManager>(SERVICE_NAMES.VERSION_MANAGER);
     const app = container.resolve<App>(SERVICE_NAMES.APP);
-    const state = getState();
-
-    if (state.status !== AppStatus.READY || !state.noteId) return;
     
-    if (state.noteId !== version.noteId) {
+    const initialState = getState();
+
+    if (initialState.status !== AppStatus.READY || !initialState.noteId) return;
+    
+    if (initialState.noteId !== version.noteId) {
         uiService.showNotice("VC: Note context changed. Cannot create deviation from this version now.");
         return;
     }
@@ -103,13 +104,15 @@ export const createDeviation = (version: VersionHistoryEntry): Thunk => async (d
             return;
         }
 
+        // Re-validate context after await
         const latestState = getState();
-        if (latestState.status !== AppStatus.READY || latestState.noteId !== version.noteId) {
-            uiService.showNotice("VC: Note context changed. Deviation cancelled.");
+        if (latestState.status !== AppStatus.READY || latestState.noteId !== initialState.noteId) {
+            uiService.showNotice("VC: Note context changed during folder selection. Deviation cancelled.");
             return;
         }
         
-        const newFile = await versionManager.createDeviation(latestState.noteId, version.id, selectedFolder);
+        // Proceed with the original noteId, which we've confirmed is still valid for the current context.
+        const newFile = await versionManager.createDeviation(initialState.noteId, version.id, selectedFolder);
         if (newFile) {
             uiService.showNotice(`Created new note "${newFile.basename}" from version ${version.id.substring(0,6)}...`, 5000);
             await app.workspace.getLeaf(true).openFile(newFile);
