@@ -18,6 +18,7 @@ export const DEFAULT_SETTINGS: VersionControlSettings = {
   autoCleanupOrphanedVersions: false,
   enableWatchMode: false,
   watchModeInterval: 60, // 60 seconds
+  applySettingsGlobally: true, // NEW
 };
 
 // Service names for the DI container
@@ -25,7 +26,9 @@ export const SERVICE_NAMES = {
     APP: 'app',
     PLUGIN: 'plugin',
     SETTINGS_PROVIDER: 'settingsProvider',
-    EVENT_BUS: 'eventBus', // The new central event bus
+    EVENT_BUS: 'eventBus',
+    
+    // High-level Managers/Services
     MANIFEST_MANAGER: 'manifestManager',
     NOTE_MANAGER: 'noteManager',
     CLEANUP_MANAGER: 'cleanupManager',
@@ -34,4 +37,14 @@ export const SERVICE_NAMES = {
     DIFF_MANAGER: 'diffManager',
     UI_SERVICE: 'uiService',
     STORE: 'store',
+    BACKGROUND_TASK_MANAGER: 'backgroundTaskManager',
+    GLOBAL_SETTINGS_MANAGER: 'globalSettingsManager', // NEW
+
+    // Low-level Storage Services & Repositories
+    PATH_SERVICE: 'pathService',
+    ATOMIC_FILE_IO: 'atomicFileIO',
+    WRITE_QUEUE: 'writeQueue',
+    CENTRAL_MANIFEST_REPO: 'centralManifestRepo',
+    NOTE_MANIFEST_REPO: 'noteManifestRepo',
+    VERSION_CONTENT_REPO: 'versionContentRepo',
 };

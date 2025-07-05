@@ -13,6 +13,7 @@ export interface VersionControlSettings {
   autoCleanupOrphanedVersions: boolean;
   enableWatchMode: boolean;
   watchModeInterval: number; // in seconds
+  applySettingsGlobally: boolean; // NEW
 }
 
 export interface CentralManifest {
@@ -42,6 +43,8 @@ export interface NoteManifest {
   totalVersions: number;
   createdAt: string;
   lastModified: string;
+  // Per-note settings can override any global setting EXCEPT the global toggle itself and the orphan cleanup setting.
+  settings?: Partial<Omit<VersionControlSettings, 'applySettingsGlobally' | 'autoCleanupOrphanedVersions'>>;
 }
 
 export interface VersionData {
