@@ -1,8 +1,9 @@
 import { App, TFile, Component } from 'obsidian';
-import { diffLines, Change } from 'diff';
+import { Change } from 'diff';
 import { VersionManager } from '../core/version-manager';
 import { VersionHistoryEntry, DiffTarget } from '../types';
 import { PluginEvents } from '../core/plugin-events';
+import { diffWorkerString } from '../workers/diff.worker.string';
 
 export class DiffManager extends Component {
     private app: App;
@@ -33,47 +34,91 @@ export class DiffManager extends Component {
         this.invalidateCacheForNote(noteId);
     }
 
-    public async generateDiff(
+    public generateDiff(
         noteId: string,
         version1: VersionHistoryEntry,
         version2: DiffTarget
-    ): Promise<Change[] | null> {
-        const cacheKey = this.getCacheKey(noteId, version1.id, version2.id);
+    ): Promise<Change[]> {
+        return new Promise(async (resolve, reject) => {
+            const cacheKey = this.getCacheKey(noteId, version1.id, version2.id);
 
-        if (version2.id !== 'current' && this.diffCache.has(cacheKey)) {
-            return this.diffCache.get(cacheKey)!;
-        }
+            if (version2.id !== 'current' && this.diffCache.has(cacheKey)) {
+                resolve(this.diffCache.get(cacheKey)!);
+                return;
+            }
 
-        try {
-            const content1 = await this.versionManager.getVersionContent(noteId, version1.id);
-            let content2: string | null;
+            let worker: Worker | null = null;
+            let workerUrl: string | null = null;
 
-            if (version2.id === 'current') {
-                const file = this.app.vault.getAbstractFileByPath(version2.notePath);
-                if (file instanceof TFile) {
-                    content2 = await this.app.vault.read(file);
-                } else {
-                    throw new Error(`Could not find the current note file at path "${version2.notePath}" to generate diff.`);
+            const cleanup = () => {
+                if (worker) {
+                    worker.terminate();
+                    worker = null;
                 }
-            } else {
-                content2 = await this.versionManager.getVersionContent(noteId, version2.id);
+                if (workerUrl) {
+                    URL.revokeObjectURL(workerUrl);
+                    workerUrl = null;
+                }
+            };
+
+            try {
+                const content1 = await this.versionManager.getVersionContent(noteId, version1.id);
+                let content2: string | null;
+
+                if (version2.id === 'current') {
+                    const file = this.app.vault.getAbstractFileByPath(version2.notePath);
+                    if (file instanceof TFile) {
+                        content2 = await this.app.vault.read(file);
+                    } else {
+                        throw new Error(`Could not find the current note file at path "${version2.notePath}" to generate diff.`);
+                    }
+                } else {
+                    content2 = await this.versionManager.getVersionContent(noteId, version2.id);
+                }
+
+                if (content1 === null || content2 === null) {
+                    throw new Error("Could not retrieve content for one or both versions.");
+                }
+
+                // Create worker from blob containing the bundled worker code
+                const blob = new Blob([diffWorkerString], { type: 'application/javascript' });
+                workerUrl = URL.createObjectURL(blob);
+                worker = new Worker(workerUrl);
+
+                worker.onmessage = (event: MessageEvent<{ status: 'success' | 'error', changes?: Change[], error?: any }>) => {
+                    cleanup();
+                    if (event.data.status === 'success' && event.data.changes) {
+                        if (version2.id !== 'current') {
+                            this.diffCache.set(cacheKey, event.data.changes);
+                        }
+                        resolve(event.data.changes);
+                    } else {
+                        console.error("Version Control: Diff worker returned an error.", event.data.error);
+                        reject(new Error(event.data.error?.message || "Unknown worker error"));
+                    }
+                };
+
+                worker.onerror = (error: ErrorEvent) => {
+                    cleanup();
+                    console.error("Version Control: An error occurred in the diff worker.", error);
+                    reject(error);
+                };
+                
+                worker.onmessageerror = (event: MessageEvent) => {
+                    cleanup();
+                    console.error("Version Control: A message error occurred in the diff worker.", event);
+                    reject(new Error("Worker message error"));
+                };
+
+                // Start the worker by posting the content to it
+                worker.postMessage({ content1, content2 });
+
+            } catch (error) {
+                cleanup();
+                console.error("Version Control: Error setting up diff worker", error);
+                reject(error);
             }
-
-            if (content1 === null || content2 === null) {
-                throw new Error("Could not retrieve content for one or both versions.");
-            }
-
-            const changes = diffLines(content1, content2, { newlineIsToken: true });
-
-            if (version2.id !== 'current') {
-                this.diffCache.set(cacheKey, changes);
-            }
-
-            return changes;
-        } catch (error) {
-            console.error("Version Control: Error generating diff", error);
-            return null;
-        }
+        });
     }
 
     private getCacheKey(noteId: string, id1: string, id2: string): string {
