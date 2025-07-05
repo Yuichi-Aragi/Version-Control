@@ -46,6 +46,12 @@
     transition: background-color 0.2s ease;
 }
 
+.v-settings-divider {
+    border: none;
+    border-top: 1px solid var(--background-modifier-border);
+    margin: var(--size-4-2) 0;
+}
+
 .v-settings-section {
     margin-bottom: var(--size-4-4);
 }

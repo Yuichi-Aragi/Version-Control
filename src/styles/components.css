@@ -36,21 +36,26 @@
 }
 
 /* Skeleton Loader Component */
-.v-history-entry.is-skeleton {
-    pointer-events: none;
-}
-.is-skeleton .v-skeleton-item {
-    background-color: var(--background-secondary) !important; 
-    opacity: 0.7 !important;
+.v-skeleton-item {
+    background-color: var(--background-secondary-alt);
+    position: relative;
+    overflow: hidden;
     border-radius: var(--radius-s);
-    animation: v-pulse 1.5s infinite ease-in-out;
+    color: transparent !important; /* Hide any accidental text */
+    user-select: none;
 }
-.is-skeleton .v-entry-header { margin-bottom: var(--size-4-2); }
-.is-skeleton .v-version-id { width: 40px; height: 20px; color: transparent; }
-.is-skeleton .v-version-name { height: 16px; width: 60%; }
-.is-skeleton .v-version-timestamp { height: 14px; width: 80px; }
-.is-skeleton .v-version-content { height: 14px; width: 40%; margin-top: var(--size-4-1); }
-.is-skeleton .v-entry-footer { display: none; }
+
+.v-skeleton-item::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, var(--background-modifier-hover), transparent);
+    transform: translateX(-100%);
+    animation: v-shimmer 1.5s infinite;
+}
 
 /* Error Display Component */
 .v-error-display .v-placeholder-icon {

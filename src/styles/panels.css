@@ -11,7 +11,6 @@
     backdrop-filter: blur(2px);
     padding: 0;
     animation: v-fade-in 0.25s ease;
-    will-change: opacity;
 }
 
 .v-panel-container.is-active {
@@ -46,7 +45,6 @@
     background-color: var(--background-primary);
     border-radius: var(--radius-l); 
     box-shadow: var(--shadow-l); 
-    will-change: transform, opacity;
 }
 
 .v-panel-header {

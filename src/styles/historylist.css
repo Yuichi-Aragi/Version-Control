@@ -47,7 +47,6 @@
     background-color: var(--background-secondary);
     border: 1px solid var(--background-modifier-border);
     transition: transform 0.2s ease-out, box-shadow 0.2s ease-out, border-color 0.2s ease-out;
-    will-change: transform, box-shadow, border-color;
 }
 /* Only animate entries when not doing a full rebuild (e.g., on sort/filter) */
 .v-history-list:not(.is-rebuilding) .v-history-entry {
@@ -217,7 +216,6 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    will-change: transform, background-color, color;
 }
 .v-action-btn:hover {
     background-color: var(--background-modifier-hover);
@@ -305,3 +303,30 @@
     font-style: italic;
     opacity: 1;
 }
+
+/* --- Skeleton Styles for History List --- */
+.v-history-entry.is-skeleton {
+    pointer-events: none;
+    background-color: var(--background-secondary);
+    border-color: transparent;
+    box-shadow: none;
+    transform: none;
+}
+.v-history-entry.is-skeleton:hover {
+    transform: none;
+}
+
+/* Card View Skeleton Layout */
+.v-history-entry.is-skeleton:not(.is-list-view) .v-version-id { width: 40px; height: 24px; }
+.v-history-entry.is-skeleton:not(.is-list-view) .v-version-name { width: 60%; height: 18px; }
+.v-history-entry.is-skeleton:not(.is-list-view) .v-version-timestamp { width: 80px; height: 16px; }
+.v-history-entry.is-skeleton:not(.is-list-view) .v-version-content { width: 40%; height: 16px; margin-top: var(--size-4-1); }
+.v-history-entry.is-skeleton:not(.is-list-view) .v-version-tags { display: flex; gap: var(--size-4-1); margin-top: var(--size-4-2); }
+.v-history-entry.is-skeleton:not(.is-list-view) .v-version-tag { width: 60px; height: 20px; }
+.v-history-entry.is-skeleton:not(.is-list-view) .v-version-tag:nth-child(2) { width: 80px; }
+
+/* List View Skeleton Layout */
+.v-history-entry.is-skeleton.is-list-view .v-version-id { width: 40px; height: 24px; flex-shrink: 0; }
+.v-history-entry.is-skeleton.is-list-view .v-entry-main-info { flex-basis: 0; flex-grow: 1; }
+.v-history-entry.is-skeleton.is-list-view .v-version-name { width: 70%; height: 18px; }
+.v-history-entry.is-skeleton.is-list-view .v-version-timestamp { width: 80px; height: 16px; flex-shrink: 0; }

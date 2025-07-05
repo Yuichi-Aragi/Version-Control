@@ -19,7 +19,6 @@
     align-items: center;
     transform: translateY(-50%);
     transition: opacity 0.2s ease-in-out;
-    will-change: opacity;
 }
 
 .v-top-actions {
@@ -46,6 +45,19 @@
     pointer-events: auto;
 }
 
+.v-top-actions-left-group {
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-2);
+}
+
+.v-watch-mode-timer {
+    font-size: var(--font-ui-small);
+    color: var(--text-muted);
+    font-family: var(--font-monospace);
+    flex-shrink: 0;
+}
+
 .v-top-actions-right-group {
     display: flex;
     align-items: center;
@@ -61,7 +73,7 @@
     box-shadow: none;
     font-weight: var(--font-semibold);
     transition: transform 0.2s ease-out, border-color 0.2s ease-out, background-color 0.2s ease-out;
-    will-change: transform, border-color, background-color;
+    flex-shrink: 0;
 }
 .v-top-actions .v-save-button:hover {
     background-color: var(--background-modifier-hover);
@@ -178,7 +190,6 @@
     align-items: center;
     justify-content: center;
     transition: transform 0.3s ease-in-out, filter 0.3s ease-in-out;
-    will-change: transform, filter;
 }
 
 .v-diff-indicator.is-generating .svg-icon {

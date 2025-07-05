@@ -4,8 +4,8 @@
     flex-direction: column;
     height: 100%;
 }
-.version-preview-view .v-preview-panel-tab-content,
-.version-diff-view .v-preview-panel-tab-content { 
+.version-preview-view .v-tab-view-content,
+.version-diff-view .v-tab-view-content { 
     padding: var(--size-4-6); 
     height: 100%;
     overflow-y: auto;
