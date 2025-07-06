@@ -78,37 +78,46 @@ export class CleanupManager extends Component {
             return;
         }
 
-        const versionsToDelete = new Set<string>();
-
-        // First, determine which versions to delete without holding a lock
         const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
         if (!noteManifest || Object.keys(noteManifest.versions).length <= 1) {
             return;
         }
 
-        const versions = Object.entries(noteManifest.versions);
+        // --- Start of new unified cleanup logic ---
+        const versions = Object.entries(noteManifest.versions)
+            .sort(([, a], [, b]) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()); // Newest first
 
-        // Determine versions to delete by age
-        if (autoCleanupOldVersions && autoCleanupDays > 0) {
-            const cutoffDate = moment().subtract(autoCleanupDays, 'days');
-            versions.forEach(([versionId, versionData]) => {
-                if (versions.length - versionsToDelete.size > 1 && moment(versionData.timestamp).isBefore(cutoffDate)) {
-                    versionsToDelete.add(versionId);
-                }
-            });
+        // Don't run cleanup if there's only one version to preserve.
+        if (versions.length <= 1) {
+            return;
         }
 
-        // Determine versions to delete by count
-        if (maxVersionsPerNote > 0) {
-            const remainingVersions = versions.filter(([versionId]) => !versionsToDelete.has(versionId));
-            if (remainingVersions.length > maxVersionsPerNote) {
-                remainingVersions.sort(([, a], [, b]) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-                const numberToExceedCount = remainingVersions.length - maxVersionsPerNote;
-                for (let i = 0; i < numberToExceedCount; i++) {
-                    versionsToDelete.add(remainingVersions[i][0]);
-                }
+        const versionsToDelete = new Set<string>();
+        const versionsToKeep = new Set<string>();
+        const cutoffDate = moment().subtract(autoCleanupDays, 'days');
+
+        // Iterate through versions from newest to oldest, deciding which to keep.
+        for (const [versionId, versionData] of versions) {
+            // Rule 1: Check if we have room to keep more versions based on count.
+            const canKeepByCount = maxVersionsPerNote <= 0 || versionsToKeep.size < maxVersionsPerNote;
+            
+            // Rule 2: Check if the version is recent enough to be kept.
+            const canKeepByAge = !autoCleanupOldVersions || autoCleanupDays <= 0 || moment(versionData.timestamp).isSameOrAfter(cutoffDate);
+
+            if (canKeepByCount && canKeepByAge) {
+                versionsToKeep.add(versionId);
+            } else {
+                versionsToDelete.add(versionId);
             }
         }
+
+        // Final check: ensure at least one version is kept.
+        // If all versions were marked for deletion (e.g., all are too old), we rescue the newest one.
+        if (versionsToKeep.size === 0 && versions.length > 0) {
+            const newestVersionId = versions[0][0];
+            versionsToDelete.delete(newestVersionId);
+        }
+        // --- End of new unified cleanup logic ---
 
         if (versionsToDelete.size > 0) {
             console.log(`VC: Identified ${versionsToDelete.size} old versions to cleanup for note ${noteId}.`);
