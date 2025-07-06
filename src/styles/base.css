@@ -67,7 +67,8 @@
 .v-diff-panel-content .v-version-content-preview::-webkit-scrollbar,
 .v-settings-panel-content-wrapper::-webkit-scrollbar,
 .version-preview-view .v-tab-view-content::-webkit-scrollbar,
-.version-diff-view .v-tab-view-content::-webkit-scrollbar { 
+.version-diff-view .v-tab-view-content::-webkit-scrollbar,
+.v-version-tags::-webkit-scrollbar { 
     width: 6px;
 }
 .v-history-list::-webkit-scrollbar-thumb,
@@ -75,18 +76,8 @@
 .v-diff-panel-content .v-version-content-preview::-webkit-scrollbar-thumb,
 .v-settings-panel-content-wrapper::-webkit-scrollbar-thumb,
 .version-preview-view .v-tab-view-content::-webkit-scrollbar-thumb,
-.version-diff-view .v-tab-view-content::-webkit-scrollbar-thumb {
+.version-diff-view .v-tab-view-content::-webkit-scrollbar-thumb,
+.v-version-tags::-webkit-scrollbar-thumb {
     background-color: var(--scrollbar-thumb-bg);
     border-radius: 3px;
-}
-
-/* Touch hover effects */
-@media (hover: hover) and (pointer: coarse) {
-    .v-history-entry:hover {
-        transform: translateY(-1px) !important;
-        box-shadow: 0 3px 8px rgba(0,0,0,0.05) !important;
-    }
-    .v-action-btn:hover {
-        transform: translateY(-1px) !important;
-    }
 }

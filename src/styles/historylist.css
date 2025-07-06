@@ -4,7 +4,8 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    padding: var(--size-4-2);
+    /* FIX: Horizontal padding removed to fix alignment with action bar */
+    padding: var(--size-4-2) 0;
 }
 
 .v-history-header {
@@ -16,6 +17,9 @@
     font-size: var(--font-ui-medium);
     padding-bottom: var(--size-4-2);
     border-bottom: 1px solid var(--background-modifier-border);
+    /* FIX: Add horizontal padding here to match action bar */
+    padding-left: var(--size-4-2);
+    padding-right: var(--size-4-2);
 }
 
 .v-history-count {
@@ -30,9 +34,25 @@
     overflow-y: auto;
     min-height: 0;
     padding-top: var(--size-4-2);
-    display: flex;
-    flex-direction: column;
-    gap: var(--size-4-2);
+    position: relative; /* Required for virtual list absolute positioning */
+    /* FIX: Add horizontal padding to the scroll viewport */
+    padding-left: var(--size-4-2);
+    padding-right: var(--size-4-2);
+
+    /* FEATURE: Hide scrollbar */
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+}
+/* FEATURE: Hide scrollbar for WebKit browsers */
+.v-history-list::-webkit-scrollbar {
+    display: none;
+}
+
+
+.v-history-list-sizer {
+    position: relative;
+    width: 100%;
+    height: 0; /* Will be set by JS */
 }
 
 .v-history-list.hide-timestamps .v-version-timestamp {
@@ -46,18 +66,49 @@
     border-radius: var(--radius-m);
     background-color: var(--background-secondary);
     border: 1px solid var(--background-modifier-border);
-    transition: transform 0.2s ease-out, box-shadow 0.2s ease-out, border-color 0.2s ease-out;
-}
-/* Only animate entries when not doing a full rebuild (e.g., on sort/filter) */
-.v-history-list:not(.is-rebuilding) .v-history-entry {
-    animation: v-fade-in 0.3s ease-out forwards;
+    
+    /* For Virtualization */
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    will-change: top, height;
+    box-sizing: border-box;
+
+    /* FIX: Add transform and transition for smooth hover/active effects */
+    transform: translateY(0);
+    transition: box-shadow 0.2s ease-out, border-color 0.2s ease-out, transform 0.2s ease-out, background-color 0.2s ease-out;
 }
 
-.v-history-entry:hover {
-    border-color: var(--interactive-accent);
-    transform: translateY(-3px);
-    box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+/* FIX: Replace unscoped hover with specific, scoped rules for cards and list items */
+/* Card hover/active effects */
+@media (hover: hover) and (pointer: fine) {
+    .v-history-entry:not(.is-list-view):hover {
+        border-color: var(--interactive-accent);
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+        z-index: 10;
+    }
 }
+.v-history-entry:not(.is-list-view):active {
+    /* Make active state match hover state for a consistent touch/click experience */
+    border-color: var(--interactive-accent);
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+    z-index: 10;
+}
+
+/* List view hover/active effects */
+@media (hover: hover) and (pointer: fine) {
+    .v-history-entry.is-list-view:hover {
+        background-color: var(--background-modifier-hover);
+    }
+}
+.v-history-entry.is-list-view:active {
+    background-color: var(--background-modifier-active);
+}
+
+
 .v-history-entry.is-error {
     border-color: var(--color-red);
 }
@@ -66,7 +117,8 @@
     margin-left: auto;
 }
 .v-history-entry.is-highlighted {
-    box-shadow: 0 0 0 2px var(--interactive-accent);
+    /* Make highlight slimmer and more subtle */
+    box-shadow: 0 0 0 1.5px var(--interactive-accent);
     transition: box-shadow 0.5s ease-out;
 }
 
@@ -94,6 +146,11 @@
     flex-shrink: 1; 
     min-width: 0; 
 }
+.v-version-name.is-empty {
+    /* This is a placeholder to maintain alignment in list view when a name is absent */
+    visibility: hidden;
+    flex-grow: 1;
+}
 .v-version-timestamp {
     font-size: var(--font-ui-smaller);
     color: var(--text-muted);
@@ -104,97 +161,6 @@
 .v-version-content {
     font-size: var(--font-ui-smaller);
     color: var(--text-muted);
-}
-
-/* Tag Styles */
-.v-version-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--size-4-1);
-    margin-top: var(--size-4-2);
-    padding-bottom: var(--size-4-2);
-    transition: max-height 0.3s ease-in-out;
-}
-/* CARD VIEW collapsed tags */
-.v-history-entry:not(.is-list-view) .v-version-tags {
-    max-height: 2.2em;
-    overflow: hidden;
-    cursor: pointer;
-    position: relative;
-}
-/* CARD VIEW ellipsis */
-.v-history-entry:not(.is-list-view) .v-version-tags:not(:hover)::after {
-    content: '...';
-    position: absolute;
-    bottom: 5px;
-    right: 5px;
-    background-color: var(--background-secondary);
-    padding-left: 4px;
-    color: var(--text-muted);
-    font-weight: bold;
-}
-/* GLOBAL expanded state hides name */
-.v-history-entry.is-tags-expanded .v-version-name {
-    display: none;
-}
-
-/* CARD VIEW expanded tags */
-.v-history-entry:not(.is-list-view).is-tags-expanded .v-version-tags {
-    max-height: 10em;
-}
-.v-history-entry:not(.is-list-view).is-tags-expanded .v-version-tags::after {
-    display: none;
-}
-
-.v-version-tag {
-    background-color: var(--color-purple-alpha);
-    color: var(--color-purple);
-    padding: 2px 6px;
-    border-radius: var(--radius-s);
-    font-size: var(--font-ui-smaller);
-    font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 25ch;
-}
-
-/* LIST VIEW collapsed tags */
-.v-version-tags.is-list-view {
-    margin-top: 0;
-    padding-bottom: 0;
-    flex-shrink: 1;
-    min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    position: relative;
-    cursor: pointer;
-    align-items: center;
-}
-
-/* LIST VIEW ellipsis */
-.v-history-entry.is-list-view .v-version-tags::after {
-    content: '...';
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    right: 0;
-    background: var(--background-secondary);
-    padding: 0 2px 0 6px;
-    color: var(--text-muted);
-    font-weight: bold;
-    pointer-events: none;
-}
-
-/* LIST VIEW expanded tags */
-.v-history-entry.is-list-view.is-tags-expanded .v-version-tags {
-    flex-wrap: wrap;
-    white-space: normal;
-    overflow: visible;
-    cursor: default;
-}
-.v-history-entry.is-list-view.is-tags-expanded .v-version-tags::after {
-    display: none;
 }
 
 .v-entry-footer {
@@ -217,13 +183,13 @@
     align-items: center;
     justify-content: center;
 }
+/* FIX: Remove transform from button hover to prevent overflow */
 .v-action-btn:hover {
     background-color: var(--background-modifier-hover);
     color: var(--text-normal);
-    transform: translateY(-2px);
 }
 .v-action-btn:active {
-    transform: translateY(0);
+    transform: translateY(1px); /* Add a subtle press-in effect */
 }
 .v-action-btn.danger:hover {
     background-color: var(--background-modifier-error);
@@ -261,8 +227,9 @@
 }
 
 .v-history-entry.is-naming {
+    /* Make naming indicator slimmer and sharper */
     border-color: var(--interactive-accent);
-    box-shadow: 0 0 0 2px var(--interactive-accent-rgb-0.4);
+    box-shadow: 0 0 0 1px var(--interactive-accent);
     transform: translateY(0);
 }
 .v-history-entry.is-naming:hover {
@@ -305,6 +272,14 @@
 }
 
 /* --- Skeleton Styles for History List --- */
+/* Skeletons are not virtualized, so they are positioned statically */
+.v-history-list .v-history-entry.is-skeleton {
+    position: static;
+    transform: none;
+    margin-bottom: var(--size-4-2);
+    animation: v-fade-in 0.3s ease-out forwards;
+}
+
 .v-history-entry.is-skeleton {
     pointer-events: none;
     background-color: var(--background-secondary);
@@ -317,15 +292,14 @@
 }
 
 /* Card View Skeleton Layout */
+.v-history-entry.is-skeleton:not(.is-list-view) { height: 110px; } /* Match new card height */
 .v-history-entry.is-skeleton:not(.is-list-view) .v-version-id { width: 40px; height: 24px; }
 .v-history-entry.is-skeleton:not(.is-list-view) .v-version-name { width: 60%; height: 18px; }
 .v-history-entry.is-skeleton:not(.is-list-view) .v-version-timestamp { width: 80px; height: 16px; }
 .v-history-entry.is-skeleton:not(.is-list-view) .v-version-content { width: 40%; height: 16px; margin-top: var(--size-4-1); }
-.v-history-entry.is-skeleton:not(.is-list-view) .v-version-tags { display: flex; gap: var(--size-4-1); margin-top: var(--size-4-2); }
-.v-history-entry.is-skeleton:not(.is-list-view) .v-version-tag { width: 60px; height: 20px; }
-.v-history-entry.is-skeleton:not(.is-list-view) .v-version-tag:nth-child(2) { width: 80px; }
 
 /* List View Skeleton Layout */
+.v-history-entry.is-skeleton.is-list-view { height: 44px; } /* Match list item height */
 .v-history-entry.is-skeleton.is-list-view .v-version-id { width: 40px; height: 24px; flex-shrink: 0; }
 .v-history-entry.is-skeleton.is-list-view .v-entry-main-info { flex-basis: 0; flex-grow: 1; }
 .v-history-entry.is-skeleton.is-list-view .v-version-name { width: 70%; height: 18px; }
