@@ -12,22 +12,12 @@ export function getFilteredAndSortedHistory(state: ReadyState): VersionHistoryEn
     let history = [...state.history];
     const { searchQuery, isSearchCaseSensitive } = state;
 
-    if (searchQuery.trim().toLowerCase().startsWith('tag:')) {
-        const tagsToSearch = searchQuery.replace(/tag:/i, '').trim().split(/\s+/).filter(t => t);
-        if (tagsToSearch.length > 0) {
-            history = history.filter(v => {
-                if (!v.tags || v.tags.length === 0) return false;
-                const versionTags = new Set(v.tags.map(t => isSearchCaseSensitive ? t : t.toLowerCase()));
-                return tagsToSearch.every(searchTag => versionTags.has(isSearchCaseSensitive ? searchTag : searchTag.toLowerCase()));
-            });
-        }
-    } else if (searchQuery.trim() !== '') {
+    if (searchQuery.trim() !== '') {
         const query = searchQuery.trim();
         history = history.filter(v => {
             const searchableString = [
                 `V${v.versionNumber}`,
                 v.name || '',
-                ...(v.tags || []).map(t => `#${t}`),
                 moment(v.timestamp).fromNow(true),
                 moment(v.timestamp).format("LLLL"),
                 formatFileSize(v.size)

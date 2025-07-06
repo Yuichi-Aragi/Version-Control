@@ -26,10 +26,6 @@ export function renderSkeletonEntry(parent: ObsidianHTMLElement, isListView: boo
         header.createDiv({ cls: "v-version-timestamp v-skeleton-item" });
 
         entryEl.createDiv({ cls: "v-version-content v-skeleton-item" });
-
-        const tagsContainer = entryEl.createDiv('v-version-tags');
-        tagsContainer.createDiv({ cls: 'v-version-tag v-skeleton-item' });
-        tagsContainer.createDiv({ cls: 'v-version-tag v-skeleton-item' });
     }
 }
 
