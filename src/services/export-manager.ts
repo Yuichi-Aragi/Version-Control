@@ -36,7 +36,6 @@ export class ExportManager {
                     versionNumber: versionEntry.versionNumber,
                     timestamp: versionEntry.timestamp,
                     name: versionEntry.name,
-                    tags: versionEntry.tags,
                     size: versionEntry.size,
                     content: content || "", // Ensure content is always a string
                 };
@@ -55,8 +54,7 @@ export class ExportManager {
         switch (format) {
             case 'md':
                 exportContent = versionsData.map(v => {
-                    const tagsYaml = (v.tags && v.tags.length > 0) ? `tags: [${v.tags.join(', ')}]\n` : '';
-                    return `---\nversion_id: ${v.id}\nversion_number: ${v.versionNumber}\ntimestamp: "${v.timestamp}"\nname: "${v.name || ''}"\n${tagsYaml}size_bytes: ${v.size}\n---\n\n${v.content}`;
+                    return `---\nversion_id: ${v.id}\nversion_number: ${v.versionNumber}\ntimestamp: "${v.timestamp}"\nname: "${v.name || ''}"\nsize_bytes: ${v.size}\n---\n\n${v.content}`;
                 }).join(versionsData.length > 1 ? '\n\n<!-- --- VERSION SEPARATOR --- -->\n\n' : '');
                 break;
             case 'json':
@@ -71,8 +69,7 @@ export class ExportManager {
                 break;
             case 'txt':
                 exportContent = versionsData.map(v => {
-                    const tagsText = (v.tags && v.tags.length > 0) ? `Tags: ${v.tags.map(t => `#${t}`).join(' ')}\n` : '';
-                    return `Version ID: ${v.id}\nVersion Number: ${v.versionNumber}\nTimestamp: ${v.timestamp}\nName: ${v.name || 'N/A'}\n${tagsText}Size: ${v.size} bytes\n\n${v.content}`;
+                    return `Version ID: ${v.id}\nVersion Number: ${v.versionNumber}\nTimestamp: ${v.timestamp}\nName: ${v.name || 'N/A'}\nSize: ${v.size} bytes\n\n${v.content}`;
                 }).join(versionsData.length > 1 ? '\n\n<<<<< VERSION END >>>>>\n\n<<<<< NEW VERSION START >>>>>\n\n' : '');
                 break;
             default:
