@@ -8,7 +8,6 @@ import { loadHistoryForNoteId, initializeView } from './core.thunks';
 import { VersionManager } from '../../core/version-manager';
 import { NoteManager } from '../../core/note-manager';
 import { UIService } from '../../services/ui-service';
-import { parseNameAndTags } from '../../utils/version-parser';
 import { BackgroundTaskManager } from '../../core/BackgroundTaskManager';
 
 /**
@@ -84,7 +83,7 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): Thunk => asy
     }
 };
 
-export const updateVersionDetails = (versionId: string, nameAndTags: string): Thunk => async (dispatch, getState, container) => {
+export const updateVersionDetails = (versionId: string, name: string): Thunk => async (dispatch, getState, container) => {
     const versionManager = container.resolve<VersionManager>(SERVICE_NAMES.VERSION_MANAGER);
     const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
     const state = getState();
@@ -95,13 +94,13 @@ export const updateVersionDetails = (versionId: string, nameAndTags: string): Th
     const noteId = state.noteId;
 
     // Optimistic UI update
-    const { name, tags } = parseNameAndTags(nameAndTags);
-    dispatch(actions.updateVersionDetailsInState(versionId, name || undefined, tags.length > 0 ? tags : undefined));
+    const version_name = name.trim();
+    dispatch(actions.updateVersionDetailsInState(versionId, version_name || undefined));
 
     try {
-        await versionManager.updateVersionDetails(noteId, versionId, nameAndTags);
+        await versionManager.updateVersionDetails(noteId, versionId, version_name);
     } catch (error) {
-        console.error(`VC: Failed to save name/tag update for version ${versionId}. Reverting UI.`, error);
+        console.error(`VC: Failed to save name update for version ${versionId}. Reverting UI.`, error);
         uiService.showNotice("VC: Error: Could not save version details. Reverting changes.", 5000);
         // On failure, reload history to revert the optimistic update
         dispatch(loadHistoryForNoteId(state.file, noteId));
