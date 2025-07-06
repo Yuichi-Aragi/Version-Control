@@ -49,7 +49,7 @@ const readyStateReducer = (state: ReadyState, action: Action): AppState => {
 
         case ActionType.UPDATE_VERSION_DETAILS_IN_STATE: {
             const newHistory = state.history.map(v => 
-                v.id === action.payload.versionId ? { ...v, name: action.payload.name, tags: action.payload.tags } : v
+                v.id === action.payload.versionId ? { ...v, name: action.payload.name } : v
             );
             return { ...state, history: newHistory };
         }
@@ -64,7 +64,6 @@ const readyStateReducer = (state: ReadyState, action: Action): AppState => {
                     panel: null,
                     namingVersionId: null,
                     highlightedVersionId: null,
-                    expandedTagIds: [], // Reset on history load
                 };
             }
             return state;
@@ -100,17 +99,6 @@ const readyStateReducer = (state: ReadyState, action: Action): AppState => {
 
         case ActionType.SET_SORT_ORDER:
             return { ...state, sortOrder: action.payload };
-
-        case ActionType.TOGGLE_TAG_EXPANSION: {
-            const { versionId } = action.payload;
-            const newExpandedIds = new Set(state.expandedTagIds);
-            if (newExpandedIds.has(versionId)) {
-                newExpandedIds.delete(versionId);
-            } else {
-                newExpandedIds.add(versionId);
-            }
-            return { ...state, expandedTagIds: Array.from(newExpandedIds) };
-        }
 
         case ActionType.SET_HIGHLIGHTED_VERSION:
             return { ...state, highlightedVersionId: action.payload.versionId };
@@ -217,7 +205,6 @@ export const rootReducer = (state: AppState, action: Action): AppState => {
                         isSearchCaseSensitive: false,
                         sortOrder: defaultSortOrder,
                         diffRequest: null,
-                        expandedTagIds: [],
                         watchModeCountdown: null,
                     };
                 }

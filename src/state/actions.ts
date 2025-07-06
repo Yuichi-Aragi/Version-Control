@@ -34,7 +34,6 @@ export enum ActionType {
     SET_SEARCH_QUERY = 'SET_SEARCH_QUERY',
     SET_SEARCH_CASE_SENSITIVITY = 'SET_SEARCH_CASE_SENSITIVITY',
     SET_SORT_ORDER = 'SET_SORT_ORDER',
-    TOGGLE_TAG_EXPANSION = 'TOGGLE_TAG_EXPANSION',
 
     // Diff actions
     SET_HIGHLIGHTED_VERSION = 'SET_HIGHLIGHTED_VERSION',
@@ -66,14 +65,13 @@ export interface UpdateNoteIdInStateAction { type: ActionType.UPDATE_NOTE_ID_IN_
 export interface AddVersionSuccessAction { type: ActionType.ADD_VERSION_SUCCESS; payload: { newVersion: VersionHistoryEntry }; }
 export interface StartVersionEditingAction { type: ActionType.START_VERSION_EDITING; payload: { versionId: string }; }
 export interface StopVersionEditingAction { type: ActionType.STOP_VERSION_EDITING; }
-export interface UpdateVersionDetailsInStateAction { type: ActionType.UPDATE_VERSION_DETAILS_IN_STATE; payload: { versionId: string; name?: string; tags?: string[] }; }
+export interface UpdateVersionDetailsInStateAction { type: ActionType.UPDATE_VERSION_DETAILS_IN_STATE; payload: { versionId: string; name?: string; }; }
 
 // Search/sort interfaces
 export interface ToggleSearchAction { type: ActionType.TOGGLE_SEARCH; payload: boolean; }
 export interface SetSearchQueryAction { type: ActionType.SET_SEARCH_QUERY; payload: string; }
 export interface SetSearchCaseSensitivityAction { type: ActionType.SET_SEARCH_CASE_SENSITIVITY; payload: boolean; }
 export interface SetSortOrderAction { type: ActionType.SET_SORT_ORDER; payload: SortOrder; }
-export interface ToggleTagExpansionAction { type: ActionType.TOGGLE_TAG_EXPANSION; payload: { versionId: string }; }
 
 // Diff interfaces
 export interface SetHighlightedVersionAction { type: ActionType.SET_HIGHLIGHTED_VERSION; payload: { versionId: string | null }; }
@@ -108,7 +106,6 @@ export type Action =
     | SetSearchQueryAction
     | SetSearchCaseSensitivityAction
     | SetSortOrderAction
-    | ToggleTagExpansionAction
     | SetHighlightedVersionAction
     | StartDiffGenerationAction
     | DiffGenerationSucceededAction
@@ -140,14 +137,13 @@ export const actions = {
     addVersionSuccess: (newVersion: VersionHistoryEntry): AddVersionSuccessAction => ({ type: ActionType.ADD_VERSION_SUCCESS, payload: { newVersion } }),
     startVersionEditing: (versionId: string): StartVersionEditingAction => ({ type: ActionType.START_VERSION_EDITING, payload: { versionId } }),
     stopVersionEditing: (): StopVersionEditingAction => ({ type: ActionType.STOP_VERSION_EDITING }),
-    updateVersionDetailsInState: (versionId: string, name?: string, tags?: string[]): UpdateVersionDetailsInStateAction => ({ type: ActionType.UPDATE_VERSION_DETAILS_IN_STATE, payload: { versionId, name, tags } }),
+    updateVersionDetailsInState: (versionId: string, name?: string): UpdateVersionDetailsInStateAction => ({ type: ActionType.UPDATE_VERSION_DETAILS_IN_STATE, payload: { versionId, name } }),
 
     // Search/sort action creators
     toggleSearch: (isActive: boolean): ToggleSearchAction => ({ type: ActionType.TOGGLE_SEARCH, payload: isActive }),
     setSearchQuery: (query: string): SetSearchQueryAction => ({ type: ActionType.SET_SEARCH_QUERY, payload: query }),
     setSearchCaseSensitivity: (isCaseSensitive: boolean): SetSearchCaseSensitivityAction => ({ type: ActionType.SET_SEARCH_CASE_SENSITIVITY, payload: isCaseSensitive }),
     setSortOrder: (sortOrder: SortOrder): SetSortOrderAction => ({ type: ActionType.SET_SORT_ORDER, payload: sortOrder }),
-    toggleTagExpansion: (versionId: string): ToggleTagExpansionAction => ({ type: ActionType.TOGGLE_TAG_EXPANSION, payload: { versionId } }),
 
     // Diff action creators
     setHighlightedVersion: (versionId: string | null): SetHighlightedVersionAction => ({ type: ActionType.SET_HIGHLIGHTED_VERSION, payload: { versionId } }),

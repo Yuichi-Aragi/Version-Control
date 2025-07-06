@@ -91,7 +91,6 @@ export interface ReadyState {
     searchQuery: string;
     isSearchCaseSensitive: boolean;
     sortOrder: SortOrder;
-    expandedTagIds: string[]; // IDs of versions whose tags are expanded
 
     // Diff properties
     diffRequest: DiffRequest | null;
