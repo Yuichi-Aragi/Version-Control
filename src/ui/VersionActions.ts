@@ -36,9 +36,9 @@ export const versionActions: VersionActionConfig[] = [
     },
     {
         id: 'edit',
-        title: 'Edit Name & Tags',
+        title: 'Edit Name',
         icon: 'edit-3',
-        tooltip: 'Edit the name and tags for this version',
+        tooltip: 'Edit the name for this version',
         actionHandler: (version, store) => store.dispatch(thunks.requestEditVersion(version)),
     },
     {
