@@ -11,7 +11,7 @@ export const DEFAULT_SETTINGS: VersionControlSettings = {
   autoCleanupOldVersions: false,
   autoCleanupDays: 30,
   defaultExportFormat: 'md',
-  showTimestamps: true,
+  useRelativeTimestamps: true, // FIX: Renamed from showTimestamps
   enableVersionNaming: true,
   isListView: false,
   renderMarkdownInPreview: true,

@@ -6,7 +6,7 @@ export interface VersionControlSettings {
   autoCleanupOldVersions: boolean;
   autoCleanupDays: number;
   defaultExportFormat: 'md' | 'json' | 'ndjson' | 'txt';
-  showTimestamps: boolean;
+  useRelativeTimestamps: boolean; // FIX: Renamed from showTimestamps for clarity
   enableVersionNaming: boolean;
   isListView: boolean;
   renderMarkdownInPreview: boolean;
@@ -36,7 +36,6 @@ export interface NoteManifest {
       versionNumber: number;
       timestamp: string;
       name?: string;
-      tags?: string[]; // Added for tagging
       size: number;
     };
   };
@@ -53,7 +52,6 @@ export interface VersionData {
   versionNumber: number;
   timestamp: string;
   name?: string;
-  tags?: string[]; // Added for tagging
   content: string;
   size: number;
 }
@@ -65,7 +63,6 @@ export interface VersionHistoryEntry {
     versionNumber: number;
     timestamp: string;
     name?: string;
-    tags?: string[]; // Added for tagging
     size: number;
 }
 
