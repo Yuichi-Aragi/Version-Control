@@ -21,12 +21,8 @@ export class ConfirmationPanelComponent extends BasePanelComponent {
             return;
         }
         
-        if (this.innerPanel.hasChildNodes() && this.innerPanel.dataset.confirmationTitle === panelState.title) {
-            const confirmBtn = this.innerPanel.querySelector('button.mod-warning') as HTMLButtonElement;
-            confirmBtn?.focus();
-            return;
-        }
-
+        // FIX: The insufficient render guard has been removed. The panel will now always
+        // re-render when a new confirmation is requested, ensuring the message and action are correct.
         this.innerPanel.empty();
         this.innerPanel.dataset.confirmationTitle = panelState.title;
 
@@ -42,6 +38,7 @@ export class ConfirmationPanelComponent extends BasePanelComponent {
             if (currentState.status === AppStatus.READY && !currentState.isProcessing) {
                 this.store.dispatch(panelState.onConfirmAction);
             } else {
+                // If the state is no longer ready, just close the panel.
                 this.store.dispatch(actions.closePanel());
             }
         });
@@ -52,6 +49,7 @@ export class ConfirmationPanelComponent extends BasePanelComponent {
             this.store.dispatch(actions.closePanel());
         });
 
+        // Focus the confirm button for better accessibility.
         confirmBtn.focus();
     }
 }

@@ -119,6 +119,7 @@ export class PreviewPanelComponent extends BasePanelComponent {
     onunload() {
         this.lastRenderedVersionId = undefined;
         this.previewContentEl = null;
+        // FIX: Correctly call the parent's cleanup logic.
         super.onunload();
     }
 }

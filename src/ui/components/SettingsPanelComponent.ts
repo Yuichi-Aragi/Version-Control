@@ -165,12 +165,12 @@ export class SettingsPanelComponent extends BasePanelComponent {
                 }));
         
         new Setting(parent)
-            .setName('Show relative timestamps in list')
-            .setDesc('E.g., "2 hours ago". Full timestamp on hover. If off, shows full date/time.')
+            .setName('Use relative timestamps')
+            .setDesc("ON: Show relative times (e.g., '2 hours ago'). OFF: Show full date and time.")
             .addToggle(toggle => toggle 
-                .setValue(settings.showTimestamps)
+                .setValue(settings.useRelativeTimestamps)
                 .onChange(async (value) => {
-                    await this.store.dispatch(thunks.updateSettings({ showTimestamps: value }));
+                    await this.store.dispatch(thunks.updateSettings({ useRelativeTimestamps: value }));
                 }));
         
         new Setting(parent)
@@ -263,6 +263,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
         }
         this.innerPanel.removeEventListener('click', this.resetAutoCloseTimer, { capture: true });
         this.innerPanel.removeEventListener('input', this.resetAutoCloseTimer, { capture: true });
+        // FIX: Correctly call the parent's cleanup logic.
         super.onunload(); 
     }
 }

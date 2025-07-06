@@ -63,6 +63,7 @@ export class DiffPanelComponent extends BasePanelComponent {
 
     onunload() {
         this.lastRenderedKey = null;
+        // FIX: Correctly call the parent's cleanup logic.
         super.onunload();
     }
 }
