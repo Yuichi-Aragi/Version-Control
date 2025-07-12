@@ -1,4 +1,5 @@
 import { App, normalizePath } from "obsidian";
+import { trim, trimStart, trimEnd, isEmpty } from 'lodash-es';
 
 /**
  * Generates a unique file path to avoid conflicts when creating new files.
@@ -41,7 +42,7 @@ export async function generateUniqueFilePath(app: App, baseName: string, parentP
  * @returns A sanitized string suitable for use as a filename (without extension).
  */
 export function customSanitizeFileName(name: string): string {
-    if (!name || name.trim() === "") {
+    if (!name || trim(name) === "") {
         return "Untitled Export";
     }
 
@@ -72,20 +73,16 @@ export function customSanitizeFileName(name: string): string {
     }
     
     // 5. Remove leading/trailing dots, spaces, and underscores
-    sanitized = sanitized.trim();
-    while (sanitized.startsWith('.') || sanitized.startsWith(' ') || sanitized.startsWith('_')) {
-        sanitized = sanitized.substring(1);
-    }
-    while (sanitized.endsWith('.') || sanitized.endsWith(' ') || sanitized.endsWith('_')) {
-        sanitized = sanitized.substring(0, sanitized.length - 1);
-    }
-    sanitized = sanitized.trim(); // Trim again after potential removals
+    sanitized = trim(sanitized);
+    sanitized = trimStart(sanitized, '._ ');
+    sanitized = trimEnd(sanitized, '._ ');
+    sanitized = trim(sanitized); // Trim again after potential removals
 
     // 6. Replace multiple consecutive underscores with a single one
     sanitized = sanitized.replace(/_+/g, '_');
 
     // 7. If the name becomes empty or just underscores/dots after sanitization
-    if (sanitized === "" || /^[_.]+$/.test(sanitized)) {
+    if (isEmpty(sanitized) || /^[_.]+$/.test(sanitized)) {
         return "Untitled Export";
     }
 
