@@ -1,33 +1,42 @@
 import { App, TFile, Component } from 'obsidian';
-import { Change } from 'diff';
+import type { Change } from 'diff';
+import { sortBy } from 'lodash-es';
+import { injectable, inject } from 'inversify';
 import { VersionManager } from '../core/version-manager';
-import { VersionHistoryEntry, DiffTarget } from '../types';
+import type { VersionHistoryEntry, DiffTarget } from '../types';
 import { PluginEvents } from '../core/plugin-events';
 import { diffWorkerString } from '../workers/diff.worker.string';
+import { TYPES } from '../types/inversify.types';
 
+@injectable()
 export class DiffManager extends Component {
-    private app: App;
-    private versionManager: VersionManager;
-    private eventBus: PluginEvents;
     private diffCache: Map<string, Change[]> = new Map();
 
-    constructor(app: App, versionManager: VersionManager, eventBus: PluginEvents) {
+    constructor(
+        @inject(TYPES.App) private app: App, 
+        @inject(TYPES.VersionManager) private versionManager: VersionManager, 
+        @inject(TYPES.EventBus) private eventBus: PluginEvents
+    ) {
         super();
-        this.app = app;
-        this.versionManager = versionManager;
-        this.eventBus = eventBus;
     }
 
     onload() {
-        this.registerEvent(this.eventBus.on('version-saved', this.handleHistoryChange));
-        this.registerEvent(this.eventBus.on('version-deleted', this.handleHistoryChange));
-        this.registerEvent(this.eventBus.on('history-deleted', this.handleHistoryChange));
-        console.log("Version Control: DiffManager is now listening for history changes.");
+        // FIX: Use the component's `register` method for automatic cleanup of event listeners.
+        // This is more robust than manually unsubscribing in `onunload` and is consistent
+        // with other components like CleanupManager.
+        this.eventBus.on('version-saved', this.handleHistoryChange);
+        this.register(() => this.eventBus.off('version-saved', this.handleHistoryChange));
+
+        this.eventBus.on('version-deleted', this.handleHistoryChange);
+        this.register(() => this.eventBus.off('version-deleted', this.handleHistoryChange));
+
+        this.eventBus.on('history-deleted', this.handleHistoryChange);
+        this.register(() => this.eventBus.off('history-deleted', this.handleHistoryChange));
     }
 
     onunload() {
+        // The event listeners are now cleaned up automatically by the `register` calls in `onload`.
         this.diffCache.clear();
-        console.log("Version Control: DiffManager unloaded, cache cleared.");
     }
 
     private handleHistoryChange = (noteId: string): void => {
@@ -122,7 +131,7 @@ export class DiffManager extends Component {
     }
 
     private getCacheKey(noteId: string, id1: string, id2: string): string {
-        const sortedIds = [id1, id2].sort();
+        const sortedIds = sortBy([id1, id2]);
         return `${noteId}:${sortedIds[0]}:${sortedIds[1]}`;
     }
 
@@ -135,7 +144,6 @@ export class DiffManager extends Component {
         }
         if (keysToDelete.length > 0) {
             keysToDelete.forEach(key => this.diffCache.delete(key));
-            console.log(`Version Control: Invalidated ${keysToDelete.length} diff cache entries for note ${noteId}.`);
         }
     }
 }

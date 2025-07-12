@@ -1,20 +1,20 @@
 import { App, TFolder, normalizePath } from "obsidian"; 
+import { injectable, inject } from 'inversify';
 import { VersionManager } from "../core/version-manager";
-import { VersionData, VersionHistoryEntry } from "../types";
+import type { VersionData, VersionHistoryEntry } from "../types";
+import { TYPES } from "../types/inversify.types";
 
 /**
  * Manages the business logic of exporting version history, such as data fetching,
  * formatting, and file writing. This class is a pure service and does not
  * create any UI elements.
  */
+@injectable()
 export class ExportManager {
-    private app: App;
-    private versionManager: VersionManager;
-
-    constructor(app: App, versionManager: VersionManager) {
-        this.app = app;
-        this.versionManager = versionManager;
-    }
+    constructor(
+        @inject(TYPES.App) private app: App, 
+        @inject(TYPES.VersionManager) private versionManager: VersionManager
+    ) {}
 
     /**
      * Fetches all version data (including content) for a given note.
@@ -73,7 +73,7 @@ export class ExportManager {
                 }).join(versionsData.length > 1 ? '\n\n<<<<< VERSION END >>>>>\n\n<<<<< NEW VERSION START >>>>>\n\n' : '');
                 break;
             default:
-                const _exhaustiveCheck: never = format; 
+                // FIX: Removed the unused '_exhaustiveCheck' variable to resolve the TS6133 error.
                 console.error(`Version Control: Unknown export format encountered: ${format}`);
                 return null;
         }
@@ -93,7 +93,7 @@ export class ExportManager {
         
         try {
             if (await this.app.vault.adapter.exists(filePath)) {
-                console.log(`VC: File "${fileName}" already exists. Overwriting.`);
+                console.warn(`VC: File "${fileName}" already exists. Overwriting.`);
             }
             // `create` can overwrite, which is what we want.
             await this.app.vault.create(filePath, content);

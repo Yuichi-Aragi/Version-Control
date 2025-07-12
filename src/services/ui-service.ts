@@ -1,19 +1,25 @@
-import { App, Menu, Notice, TFolder, MouseEvent as ObsidianMouseEvent, Component } from 'obsidian';
-import { Store } from '../state/store';
-import { DiffTarget, VersionHistoryEntry } from '../types';
+import { App, Menu, Notice, TFolder, Component } from 'obsidian';
+import { injectable, inject } from 'inversify';
+import type { AppStore } from '../state/store';
+import type { DiffTarget, VersionHistoryEntry } from '../types';
 import { FolderSuggest, VersionSuggest } from '../ui/suggesters';
-import { versionActions, VersionActionConfig } from '../ui/VersionActions';
+import { versionActions, type VersionActionConfig } from '../ui/VersionActions';
 import { thunks } from '../state/thunks';
-import { SortDirection, SortOrder, SortProperty } from '../state/state';
-import { actions } from '../state/actions';
+import type { SortDirection, SortOrder, SortProperty } from '../state/state';
+import { actions } from '../state/appSlice';
+import { TYPES } from '../types/inversify.types';
 
 /**
  * A dedicated service for managing all UI interactions, such as notices,
  * modals, and context menus. This decouples the business logic (thunks)
  * from the Obsidian-specific UI APIs.
  */
+@injectable()
 export class UIService extends Component {
-    constructor(private app: App, private store: Store) {
+    constructor(
+        @inject(TYPES.App) private app: App, 
+        @inject(TYPES.Store) private store: AppStore
+    ) {
         super();
     }
 
@@ -57,7 +63,7 @@ export class UIService extends Component {
      * Shows the full context menu for a specific version.
      * This menu is now flatter and more direct.
      */
-    showVersionContextMenu(version: VersionHistoryEntry, event: ObsidianMouseEvent): void {
+    showVersionContextMenu(version: VersionHistoryEntry, event: MouseEvent): void {
         const menu = new Menu();
 
         // Direct Preview Actions
@@ -111,10 +117,9 @@ export class UIService extends Component {
         if (event) {
             menu.showAtMouseEvent(event);
         } else {
-            // Show in the middle of the active leaf if no event is provided
-            const activeLeaf = this.app.workspace.activeLeaf?.containerEl;
-            if (activeLeaf) {
-                const rect = activeLeaf.getBoundingClientRect();
+            const activeLeafView = this.app.workspace.activeLeaf?.view;
+            if (activeLeafView) {
+                const rect = activeLeafView.containerEl.getBoundingClientRect();
                 menu.showAtPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 3 });
             } else {
                 menu.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
@@ -160,7 +165,6 @@ export class UIService extends Component {
                 .setTitle(config.title)
                 .setIcon(config.icon)
                 .onClick(() => {
-                    // The action handler in VersionActions now just dispatches a thunk
                     config.actionHandler(version, this.store);
                 });
             if (isDanger) {
