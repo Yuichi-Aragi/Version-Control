@@ -1,11 +1,18 @@
-import { Vault } from "obsidian";
+import { App, Vault } from "obsidian";
+import { injectable, inject } from 'inversify';
+import { TYPES } from "../../types/inversify.types";
 
 /**
  * Provides safe, atomic file I/O operations for JSON data,
  * handling temporary files and backups to prevent data corruption.
  */
+@injectable()
 export class AtomicFileIO {
-    constructor(private vault: Vault) {}
+    private vault: Vault;
+
+    constructor(@inject(TYPES.App) app: App) {
+        this.vault = app.vault;
+    }
 
     /**
      * Atomically writes data to a JSON file.
@@ -80,7 +87,6 @@ export class AtomicFileIO {
                 if (!originalExists || (await this.vault.adapter.stat(path))?.size === 0) {
                     if (originalExists) await this.vault.adapter.remove(path);
                     await this.vault.adapter.rename(backupPath, path);
-                    console.log(`VC: Successfully restored manifest ${path} from backup after save failure.`);
                 }
             }
         } catch (restoreError) {

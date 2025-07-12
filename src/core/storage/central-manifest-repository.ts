@@ -1,21 +1,24 @@
+import { injectable, inject } from 'inversify';
 import { CentralManifest } from "../../types";
 import { AtomicFileIO } from "./atomic-file-io";
 import { PathService } from "./path-service";
 import { WriteQueue } from "./write-queue";
+import { TYPES } from '../../types/inversify.types';
 
 /**
  * Repository for managing the central manifest file.
  * Handles all CRUD operations and caching for the list of versioned notes.
  */
+@injectable()
 export class CentralManifestRepository {
     private cache: CentralManifest | null = null;
     private pathToIdMap: Map<string, string> | null = null;
     private manifestPath: string;
 
     constructor(
-        private atomicFileIO: AtomicFileIO,
-        private pathService: PathService,
-        private writeQueue: WriteQueue
+        @inject(TYPES.AtomicFileIO) private atomicFileIO: AtomicFileIO,
+        @inject(TYPES.PathService) private pathService: PathService,
+        @inject(TYPES.WriteQueue) private writeQueue: WriteQueue
     ) {
         this.manifestPath = this.pathService.getCentralManifestPath();
     }
@@ -24,10 +27,15 @@ export class CentralManifestRepository {
         if (this.cache && !forceReload) {
             return this.cache;
         }
-        const defaultManifest: CentralManifest = { version: "1.0.0", notes: {} };
+        // FIX: Add globalSettings to the default manifest structure.
+        const defaultManifest: CentralManifest = { version: "1.0.0", globalSettings: {}, notes: {} };
         const loaded = await this.atomicFileIO.readJsonFile<CentralManifest>(this.manifestPath, defaultManifest);
         
         this.cache = (loaded && typeof loaded.notes === 'object') ? loaded : defaultManifest;
+        // Ensure globalSettings object exists
+        if (!this.cache.globalSettings) {
+            this.cache.globalSettings = {};
+        }
         this.rebuildPathToIdMap();
         return this.cache;
     }
@@ -35,7 +43,6 @@ export class CentralManifestRepository {
     public invalidateCache(): void {
         this.cache = null;
         this.pathToIdMap = null;
-        console.debug("VC: Central manifest cache invalidated.");
     }
 
     public async getNoteIdByPath(path: string): Promise<string | null> {
@@ -75,6 +82,13 @@ export class CentralManifestRepository {
             } else {
                 console.warn(`VC: deleteNoteEntry: Note ID ${noteId} not found in central manifest. It might have been removed in a concurrent operation.`);
             }
+            return manifest;
+        });
+    }
+
+    public async updateGlobalSettings(updateFn: (settings: CentralManifest['globalSettings']) => CentralManifest['globalSettings']): Promise<CentralManifest> {
+        return this.update((manifest) => {
+            manifest.globalSettings = updateFn(manifest.globalSettings || {});
             return manifest;
         });
     }

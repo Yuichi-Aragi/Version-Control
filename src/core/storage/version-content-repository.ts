@@ -1,13 +1,19 @@
-import { App, TFile } from "obsidian";
+import { App } from "obsidian";
+import { injectable, inject } from 'inversify';
 import { PathService } from "./path-service";
 import { NoteManifest } from "../../types";
+import { TYPES } from "../../types/inversify.types";
 
 /**
  * Repository for managing the content of individual versions.
  * Handles reading, writing, and deleting the actual version files.
  */
+@injectable()
 export class VersionContentRepository {
-    constructor(private app: App, private pathService: PathService) {}
+    constructor(
+        @inject(TYPES.App) private app: App, 
+        @inject(TYPES.PathService) private pathService: PathService
+    ) {}
 
     public async read(noteId: string, versionId: string): Promise<string | null> {
         if (!noteId || !versionId) return null;

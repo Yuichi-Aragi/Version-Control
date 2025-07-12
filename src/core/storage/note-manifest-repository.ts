@@ -1,19 +1,22 @@
+import { injectable, inject } from 'inversify';
 import { NoteManifest } from "../../types";
 import { AtomicFileIO } from "./atomic-file-io";
 import { PathService } from "./path-service";
 import { WriteQueue } from "./write-queue";
+import { TYPES } from '../../types/inversify.types';
 
 /**
  * Repository for managing individual note manifest files.
  * Handles all CRUD operations and caching for a single note's version metadata.
  */
+@injectable()
 export class NoteManifestRepository {
     private cache = new Map<string, NoteManifest>();
 
     constructor(
-        private atomicFileIO: AtomicFileIO,
-        private pathService: PathService,
-        private writeQueue: WriteQueue
+        @inject(TYPES.AtomicFileIO) private atomicFileIO: AtomicFileIO,
+        @inject(TYPES.PathService) private pathService: PathService,
+        @inject(TYPES.WriteQueue) private writeQueue: WriteQueue
     ) {}
 
     public async load(noteId: string): Promise<NoteManifest | null> {

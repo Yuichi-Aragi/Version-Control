@@ -1,7 +1,10 @@
+import { injectable } from 'inversify';
+
 /**
  * A generic, keyed queue to serialize asynchronous write operations.
  * This prevents race conditions when multiple operations try to modify the same resource.
  */
+@injectable()
 export class WriteQueue {
     private queues = new Map<string, Promise<any>>();
 

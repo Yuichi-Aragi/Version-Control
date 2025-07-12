@@ -1,10 +1,12 @@
 import { normalizePath } from "obsidian";
+import { injectable } from 'inversify';
 import { DB_PATH } from "../../constants";
 
 /**
  * A centralized service for generating all database-related file and folder paths.
  * This ensures consistency and makes it easy to change the DB structure in one place.
  */
+@injectable()
 export class PathService {
     public getDbRoot(): string {
         return DB_PATH;
