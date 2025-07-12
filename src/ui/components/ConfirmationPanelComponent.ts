@@ -1,16 +1,17 @@
-import { Store } from "../../state/store";
+import { AppStore } from "../../state/store";
 import { ConfirmationPanel as ConfirmationPanelState, AppStatus } from "../../state/state";
-import { actions } from "../../state/actions";
+import { actions } from "../../state/appSlice";
 import { BasePanelComponent } from "./BasePanelComponent";
 
 export class ConfirmationPanelComponent extends BasePanelComponent {
     private innerPanel: HTMLElement;
 
-    constructor(parent: HTMLElement, store: Store) {
+    constructor(parent: HTMLElement, store: AppStore) {
         super(parent, store, ["v-panel-container"]); 
         this.innerPanel = this.container.createDiv({ cls: "v-inline-panel v-confirmation-panel" });
     }
 
+    // FIX: Removed unused 'appState' parameter and its 'AppState' type import to resolve TS6133 error.
     render(panelState: ConfirmationPanelState | null) {
         this.toggle(!!panelState);
         
@@ -21,8 +22,6 @@ export class ConfirmationPanelComponent extends BasePanelComponent {
             return;
         }
         
-        // FIX: The insufficient render guard has been removed. The panel will now always
-        // re-render when a new confirmation is requested, ensuring the message and action are correct.
         this.innerPanel.empty();
         this.innerPanel.dataset.confirmationTitle = panelState.title;
 

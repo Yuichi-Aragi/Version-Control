@@ -1,14 +1,14 @@
 import { setIcon, App, Component } from "obsidian";
-import { Store } from "../../state/store";
+import { AppStore } from "../../state/store";
 import { AppError } from "../../types";
 import { thunks } from "../../state/thunks/index";
 
 export class ErrorDisplayComponent extends Component {
     private container: HTMLElement;
-    private store: Store;
+    private store: AppStore;
     private app: App;
 
-    constructor(parent: HTMLElement, store: Store, app: App) {
+    constructor(parent: HTMLElement, store: AppStore, app: App) {
         super();
         this.container = parent.createDiv({ cls: "v-placeholder v-error-display" }); 
         this.store = store;

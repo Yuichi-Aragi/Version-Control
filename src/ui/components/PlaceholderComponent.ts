@@ -1,12 +1,12 @@
-import { setIcon, HTMLElement as ObsidianHTMLElement, Component } from "obsidian";
+import { setIcon, Component } from "obsidian";
 
 export class PlaceholderComponent extends Component {
-    private container: ObsidianHTMLElement;
+    private container: HTMLElement;
     private currentTitle: string | undefined;
     private currentIcon: string | undefined;
 
 
-    constructor(parent: ObsidianHTMLElement) {
+    constructor(parent: HTMLElement) {
         super();
         this.container = parent.createDiv({ cls: "v-placeholder" });
         this.container.hide();
@@ -43,7 +43,7 @@ export class PlaceholderComponent extends Component {
         // this.container.show(); // Visibility is controlled by VersionControlView
     }
 
-    public getContainer(): ObsidianHTMLElement {
+    public getContainer(): HTMLElement {
         return this.container;
     }
 

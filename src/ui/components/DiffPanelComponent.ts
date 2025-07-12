@@ -1,16 +1,16 @@
 import { setIcon } from "obsidian";
-import { Store } from "../../state/store";
+import { AppStore } from "../../state/store";
 import { DiffPanel as DiffPanelState } from "../../state/state";
-import { actions } from "../../state/actions";
+import { actions } from "../../state/appSlice";
 import { BasePanelComponent } from "./BasePanelComponent";
-import { Change } from "diff";
+// FIX: Removed unused 'Change' import to resolve TS6133 error.
 import { renderDiffLines } from "../utils/diff-renderer";
 
 export class DiffPanelComponent extends BasePanelComponent {
     private innerPanel: HTMLElement;
     private lastRenderedKey: string | null = null;
 
-    constructor(parent: HTMLElement, store: Store) {
+    constructor(parent: HTMLElement, store: AppStore) {
         super(parent, store, ["v-panel-container"]);
         this.innerPanel = this.container.createDiv({ cls: "v-inline-panel v-diff-panel" });
     }
@@ -63,7 +63,6 @@ export class DiffPanelComponent extends BasePanelComponent {
 
     onunload() {
         this.lastRenderedKey = null;
-        // FIX: Correctly call the parent's cleanup logic.
         super.onunload();
     }
 }

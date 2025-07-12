@@ -1,29 +1,32 @@
-import { setIcon, debounce, Menu, Component } from "obsidian";
-import { Store } from "../../state/store";
-import { ReadyState, AppStatus, SortOrder } from "../../state/state";
-import { actions } from "../../state/actions";
+import { setIcon, Component } from "obsidian";
+import { debounce } from 'lodash-es';
+import { AppStore } from "../../state/store";
+import { AppState, AppStatus } from "../../state/state";
+import { actions } from "../../state/appSlice";
 import { thunks } from "../../state/thunks/index";
-import { VersionControlSettings } from "src/types";
+// FIX: Removed unused imports for Menu, SortOrder, and VersionControlSettings.
 
 export class ActionBarComponent extends Component {
     private container: HTMLElement;
-    protected store: Store;
+    protected store: AppStore;
 
     // Element references
-    private defaultActionsEl: HTMLElement;
-    private searchContainerEl: HTMLElement;
-    private searchInput: HTMLInputElement;
-    private caseButton: HTMLButtonElement;
-    private clearButton: HTMLButtonElement;
-    private saveButton: HTMLButtonElement;
-    private searchToggleButton: HTMLButtonElement;
-    private diffIndicatorButton: HTMLButtonElement;
-    private settingsButton: HTMLButtonElement;
-    private searchIconEl: HTMLElement;
-    private filterButton: HTMLButtonElement;
-    private watchModeTimerEl: HTMLElement;
+    // FIX: Use definite assignment assertion '!' for all properties that are
+    // correctly initialized in methods called from the constructor.
+    private defaultActionsEl!: HTMLElement;
+    private searchContainerEl!: HTMLElement;
+    private searchInput!: HTMLInputElement;
+    private caseButton!: HTMLButtonElement;
+    private clearButton!: HTMLButtonElement;
+    private saveButton!: HTMLButtonElement;
+    private searchToggleButton!: HTMLButtonElement;
+    private diffIndicatorButton!: HTMLButtonElement;
+    private settingsButton!: HTMLButtonElement;
+    private searchIconEl!: HTMLElement;
+    private filterButton!: HTMLButtonElement;
+    private watchModeTimerEl!: HTMLElement;
 
-    constructor(parent: HTMLElement, store: Store) {
+    constructor(parent: HTMLElement, store: AppStore) {
         super();
         this.container = parent.createDiv("v-actions-container");
         this.store = store;
@@ -71,7 +74,7 @@ export class ActionBarComponent extends Component {
             if (currentState.panel?.type === 'settings') {
                 this.store.dispatch(actions.closePanel());
             } else {
-                this.store.dispatch(actions.openSettings());
+                this.store.dispatch(actions.openPanel({ type: 'settings' }));
             }
         });
     }
@@ -98,7 +101,7 @@ export class ActionBarComponent extends Component {
 
         const debouncedSearch = debounce((value: string) => {
             this.store.dispatch(actions.setSearchQuery(value));
-        }, 300, true);
+        }, 300, { leading: true, trailing: true });
 
         this.searchInput.addEventListener('input', () => {
             debouncedSearch(this.searchInput.value);
@@ -144,7 +147,13 @@ export class ActionBarComponent extends Component {
         });
     }
 
-    render(state: ReadyState) {
+    render(state: AppState) {
+        if (state.status !== AppStatus.READY) {
+            this.container.hide();
+            return;
+        }
+        this.container.show();
+
         const { isSearchActive, searchQuery, isSearchCaseSensitive, isProcessing, diffRequest, settings, watchModeCountdown } = state;
         
         this.container.classList.toggle('is-searching', isSearchActive);
@@ -170,7 +179,7 @@ export class ActionBarComponent extends Component {
         }
     }
 
-    private renderDiffIndicator(diffRequest: ReadyState['diffRequest']) {
+    private renderDiffIndicator(diffRequest: AppState['diffRequest']) {
         if (!diffRequest) {
             this.diffIndicatorButton.hide();
             this.diffIndicatorButton.className = "clickable-icon v-diff-indicator";

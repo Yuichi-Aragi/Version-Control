@@ -1,5 +1,5 @@
 import { Component } from "obsidian";
-import { Store } from "../../state/store";
+import { AppStore } from "../../state/store";
 
 /**
  * An abstract base class for UI panel components that typically overlay or integrate
@@ -8,9 +8,9 @@ import { Store } from "../../state/store";
  */
 export abstract class BasePanelComponent extends Component {
     protected container: HTMLElement;
-    protected store: Store;
+    protected store: AppStore;
 
-    constructor(parent: HTMLElement, store: Store, cssClasses: string[]) {
+    constructor(parent: HTMLElement, store: AppStore, cssClasses: string[]) {
         super();
         this.container = parent.createDiv({ cls: cssClasses });
         this.store = store;

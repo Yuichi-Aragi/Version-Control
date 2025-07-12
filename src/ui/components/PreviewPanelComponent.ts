@@ -1,27 +1,27 @@
-import { MarkdownRenderer, setIcon, App, moment, HTMLElement as ObsidianHTMLElement, Component } from "obsidian";
-import { Store } from "../../state/store";
-import { PreviewPanel as PreviewPanelState, AppStatus, ReadyState } from "../../state/state";
-import { actions } from "../../state/actions";
+import { MarkdownRenderer, setIcon, App, moment, Component } from "obsidian";
+import { AppStore } from "../../state/store";
+import { PreviewPanel as PreviewPanelState, AppState } from "../../state/state";
+import { actions } from "../../state/appSlice";
 import { BasePanelComponent } from "./BasePanelComponent";
 
 export class PreviewPanelComponent extends BasePanelComponent {
-    private innerPanel: ObsidianHTMLElement;
+    private innerPanel: HTMLElement;
     private lastRenderedVersionId: string | undefined;
     private app: App;
 
     // New properties for markdown toggle
     private localRenderMarkdown: boolean = false;
-    private previewContentEl: ObsidianHTMLElement | null = null;
+    private previewContentEl: HTMLElement | null = null;
     private currentContent: string = "";
     private currentNotePath: string = "";
 
-    constructor(parent: HTMLElement, store: Store, app: App) {
+    constructor(parent: HTMLElement, store: AppStore, app: App) {
         super(parent, store, ["v-panel-container"]);
         this.innerPanel = this.container.createDiv({ cls: "v-inline-panel v-preview-panel-content" });
         this.app = app;
     }
 
-    render(panelState: PreviewPanelState | null) {
+    render(panelState: PreviewPanelState | null, appState: AppState) {
         this.toggle(!!panelState);
 
         if (!panelState) {
@@ -42,12 +42,8 @@ export class PreviewPanelComponent extends BasePanelComponent {
 
         const { version, content } = panelState;
         this.currentContent = content; // Store content for re-rendering
-        const appState = this.store.getState();
         const settings = appState.settings; 
-        const currentFileInState = appState.status === AppStatus.READY 
-                                 ? (appState as ReadyState).file
-                                 : null;
-        this.currentNotePath = currentFileInState?.path ?? '';
+        this.currentNotePath = appState.file?.path ?? '';
 
         const header = this.innerPanel.createDiv("v-panel-header");
         const versionLabel = version.name
@@ -119,7 +115,6 @@ export class PreviewPanelComponent extends BasePanelComponent {
     onunload() {
         this.lastRenderedVersionId = undefined;
         this.previewContentEl = null;
-        // FIX: Correctly call the parent's cleanup logic.
         super.onunload();
     }
 }

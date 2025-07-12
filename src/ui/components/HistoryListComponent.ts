@@ -1,7 +1,7 @@
-import { setIcon, Component, HTMLElement as ObsidianHTMLElement } from "obsidian";
-import { Store } from "../../../state/store";
-import { ReadyState, VersionControlSettings } from "../../../state/state";
-import { VersionHistoryEntry } from "../../../types";
+import { setIcon, Component } from "obsidian";
+import { AppStore } from "../../state/store";
+import { AppState, AppStatus } from "../../state/state";
+import { VersionHistoryEntry, VersionControlSettings } from "../../types"; // FIX: Corrected import path for VersionControlSettings
 import { getFilteredAndSortedHistory } from "./history/HistoryProcessor";
 import { HistoryEntryRenderer } from "./history/HistoryEntryRenderer";
 import { renderSkeletonEntry, renderEmptyState } from "./history/HistoryListStates";
@@ -12,26 +12,30 @@ const CARD_ITEM_HEIGHT = 110; // Reduced from 140 after removing tags
 const CARD_ITEM_GAP = 8;      // Explicit gap between cards
 
 export class HistoryListComponent extends Component {
-    private container: ObsidianHTMLElement;
-    private listViewport: ObsidianHTMLElement | null = null;
-    private countEl: ObsidianHTMLElement | null = null;
-    private store: Store;
+    private container: HTMLElement;
+    private listViewport: HTMLElement | null = null;
+    private countEl: HTMLElement | null = null;
+    // FIX: Removed unused 'store' property to resolve TS6133 error.
     private entryRenderer: HistoryEntryRenderer;
     private virtualRenderer: VirtualHistoryListRenderer | null = null;
 
     private lastProcessedIds: string = "";
     private lastViewMode: boolean | null = null;
 
-    constructor(parent: ObsidianHTMLElement, store: Store) {
+    constructor(parent: HTMLElement, store: AppStore) {
         super();
         this.container = parent.createDiv("v-history-list-container");
-        this.store = store;
         this.entryRenderer = new HistoryEntryRenderer(store);
         this.buildSkeletonDOM(); // Build static elements once.
         this.container.hide();
     }
 
-    render(state: ReadyState): void {
+    render(state: AppState): void {
+        if (state.status !== AppStatus.READY) {
+            this.container.hide();
+            return;
+        }
+
         const newProcessedHistory = getFilteredAndSortedHistory(state);
         const newProcessedIds = newProcessedHistory.map(v => v.id).join(',');
         const newViewMode = state.settings.isListView;
@@ -72,7 +76,7 @@ export class HistoryListComponent extends Component {
         this.container.show();
     }
 
-    private rebuildList(state: ReadyState, processedHistory: VersionHistoryEntry[]): void {
+    private rebuildList(state: AppState, processedHistory: VersionHistoryEntry[]): void {
         this.destroyVirtualRenderer();
         
         if (!this.listViewport) return;
@@ -119,7 +123,7 @@ export class HistoryListComponent extends Component {
         }
     }
 
-    public getContainer(): ObsidianHTMLElement {
+    public getContainer(): HTMLElement {
         return this.container;
     }
 
