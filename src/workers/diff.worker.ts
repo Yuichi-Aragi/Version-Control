@@ -1,4 +1,5 @@
-import { diffLines, Change } from 'diff';
+import { diffLines } from 'diff';
+import { isString } from 'lodash-es';
 
 // This is a self-contained web worker.
 // It listens for messages, performs the CPU-intensive diff, and posts the result back.
@@ -7,7 +8,7 @@ self.onmessage = (event: MessageEvent<{ content1: string; content2: string }>) =
     try {
         const { content1, content2 } = event.data;
         
-        if (typeof content1 !== 'string' || typeof content2 !== 'string') {
+        if (!isString(content1) || !isString(content2)) {
             throw new Error("Worker received invalid data type for diffing.");
         }
 
