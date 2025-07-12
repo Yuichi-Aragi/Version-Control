@@ -6,18 +6,19 @@ export interface VersionControlSettings {
   autoCleanupOldVersions: boolean;
   autoCleanupDays: number;
   defaultExportFormat: 'md' | 'json' | 'ndjson' | 'txt';
-  useRelativeTimestamps: boolean; // FIX: Renamed from showTimestamps for clarity
+  useRelativeTimestamps: boolean;
   enableVersionNaming: boolean;
   isListView: boolean;
   renderMarkdownInPreview: boolean;
   autoCleanupOrphanedVersions: boolean;
   enableWatchMode: boolean;
   watchModeInterval: number; // in seconds
-  applySettingsGlobally: boolean; // NEW
 }
 
 export interface CentralManifest {
   version: string;
+  // NEW: Add a place for settings that are global to the entire version database.
+  globalSettings?: Partial<Pick<VersionControlSettings, 'autoCleanupOrphanedVersions'>>;
   notes: {
     [noteId: string]: {
       notePath: string;
@@ -42,8 +43,9 @@ export interface NoteManifest {
   totalVersions: number;
   createdAt: string;
   lastModified: string;
-  // Per-note settings can override any global setting EXCEPT the global toggle itself and the orphan cleanup setting.
-  settings?: Partial<Omit<VersionControlSettings, 'applySettingsGlobally' | 'autoCleanupOrphanedVersions'>>;
+  // Per-note settings can override any global setting EXCEPT the orphan cleanup setting.
+  // FIX: Removed 'applySettingsGlobally' from the Omit<> as the property is being removed entirely.
+  settings?: Partial<Omit<VersionControlSettings, 'autoCleanupOrphanedVersions'>>;
 }
 
 export interface VersionData {

@@ -1,88 +1,71 @@
+import 'reflect-metadata'; // Must be the first import
 import { Plugin, Notice } from 'obsidian';
-import { DependencyContainer } from './core/dependency-container';
-import { Store } from './state/store';
-import { actions } from './state/actions';
+import { get } from 'lodash-es';
+import type { Container } from 'inversify';
+import type { AppStore } from './state/store';
+import { appSlice } from './state/appSlice';
 import { thunks } from './state/thunks/index';
-import { VersionControlSettings } from './types';
-import { DEFAULT_SETTINGS, SERVICE_NAMES } from './constants';
-import { PluginEvents } from './core/plugin-events';
-import { CleanupManager } from './core/cleanup-manager';
-import { UIService } from './services/ui-service';
-import { ManifestManager } from './core/manifest-manager';
-import { DiffManager } from './services/diff-manager';
-import { BackgroundTaskManager } from './core/BackgroundTaskManager';
-import { registerServices } from './setup/ServiceRegistry';
+import type { CleanupManager } from './core/cleanup-manager';
+import type { UIService } from './services/ui-service';
+import type { ManifestManager } from './core/manifest-manager';
+import type { DiffManager } from './services/diff-manager';
+import type { BackgroundTaskManager } from './core/BackgroundTaskManager';
+import { configureServices } from './inversify.config';
 import { registerViews, addRibbonIcon, registerCommands } from './setup/UISetup';
 import { registerSystemEventListeners } from './setup/EventSetup';
+import { TYPES } from './types/inversify.types';
 
 export default class VersionControlPlugin extends Plugin {
-	private container: DependencyContainer;
-    private store: Store;
-    private cleanupManager: CleanupManager;
-    private eventBus: PluginEvents;
-    private backgroundTaskManager: BackgroundTaskManager;
+	private container!: Container;
+    private store!: AppStore;
+    private cleanupManager!: CleanupManager;
+    private backgroundTaskManager!: BackgroundTaskManager;
 
 	async onload() {
 		try {
-			const loadedSettings = await this.loadPluginData();
-            
-            this.container = new DependencyContainer();
-            registerServices(this.container, this, loadedSettings);
+			// The settings object is no longer loaded here.
+            // configureServices will handle setting up the initial state.
+            this.container = configureServices(this);
 
-            // Resolve key services needed for initialization
-            this.store = this.container.resolve<Store>(SERVICE_NAMES.STORE);
-            this.eventBus = this.container.resolve<PluginEvents>(SERVICE_NAMES.EVENT_BUS);
-            this.cleanupManager = this.container.resolve<CleanupManager>(SERVICE_NAMES.CLEANUP_MANAGER);
-            const uiService = this.container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
-            const manifestManager = this.container.resolve<ManifestManager>(SERVICE_NAMES.MANIFEST_MANAGER);
-            const diffManager = this.container.resolve<DiffManager>(SERVICE_NAMES.DIFF_MANAGER);
-            this.backgroundTaskManager = this.container.resolve<BackgroundTaskManager>(SERVICE_NAMES.BACKGROUND_TASK_MANAGER);
+            this.store = this.container.get<AppStore>(TYPES.Store);
+            this.cleanupManager = this.container.get<CleanupManager>(TYPES.CleanupManager);
+            const uiService = this.container.get<UIService>(TYPES.UIService);
+            const manifestManager = this.container.get<ManifestManager>(TYPES.ManifestManager);
+            const diffManager = this.container.get<DiffManager>(TYPES.DiffManager);
+            this.backgroundTaskManager = this.container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
 
-            // Initialize services that need to register listeners or have a lifecycle
             this.cleanupManager.initialize();
             this.addChild(this.cleanupManager);
             this.addChild(uiService); 
             this.addChild(diffManager);
+            this.addChild(this.backgroundTaskManager);
 
 			await manifestManager.initializeDatabase();
 
-            // Setup UI and event listeners using dedicated modules
 			registerViews(this, this.store);
 			addRibbonIcon(this, this.store);
 			registerCommands(this, this.store);
 			registerSystemEventListeners(this, this.store);
-			
-            // Handle initial view state once layout is ready
+
             const onLayoutReady = () => {
+                // This thunk will now load the correct settings for the active note (or defaults)
                 this.store.dispatch(thunks.initializeView(this.app.workspace.activeLeaf));
-                
-                if (this.store.getState().settings.autoCleanupOrphanedVersions) {
-                    // Dispatch thunk for initial cleanup instead of calling manager directly
-                    this.store.dispatch(thunks.cleanupOrphanedVersions(false));
-                }
             };
 
             if (this.app.workspace.layoutReady) {
                 onLayoutReady();
-            } else {
+            } else {             
                 this.app.workspace.onLayoutReady(onLayoutReady);
             }
-            
-            // Start background tasks
-			this.backgroundTaskManager.managePeriodicOrphanCleanup();
-            this.backgroundTaskManager.manageWatchModeInterval();
 			
 			this.addStatusBarItem().setText('VC Ready');
-			console.log("Version Control plugin loaded successfully.");
 
 		} catch (error) {
 			console.error("Version Control: CRITICAL: Plugin failed to load.", error);
-            const message = error instanceof Error ? error.message : "Unknown error during loading";
+            const message = get(error, 'message', "Unknown error during loading");
 			new Notice(`Version Control plugin failed to load. Please check the console for details.\nError: ${message}`, 0);
-            // **FIX M-01:** Add a null check before dispatching to the store.
-            // This prevents a secondary error if the store itself failed to initialize.
             if (this.store) {
-                this.store.dispatch(actions.reportError({
+                this.store.dispatch(appSlice.actions.reportError({
                     title: "Plugin Load Failed",
                     message: "The Version Control plugin encountered a critical error during loading.",
                     details: message,
@@ -92,26 +75,16 @@ export default class VersionControlPlugin extends Plugin {
 	}
 
 	async onunload() {
-        // The `addChild` calls in `onload` handle unloading components like CleanupManager, UIService, etc.
-        // We just need to wait for any pending operations to finish gracefully and clear intervals.
         await this.cleanupManager?.completePendingCleanups();
-        this.backgroundTaskManager?.clearAllIntervals();
-        console.log("Version Control plugin unloaded.");
 	}
 
-	async loadPluginData(): Promise<VersionControlSettings> {
-		try {
-			const loadedData = await this.loadData();
-			return Object.assign({}, DEFAULT_SETTINGS, loadedData);
-		} catch (error) {
-			console.error("Version Control: Could not load settings, using defaults.", error);
-			new Notice("Version Control: Could not load settings, using defaults.");
-			return { ...DEFAULT_SETTINGS };
-		}
+	// This method is no longer used for settings. It's kept for future plugin-wide data.
+	async loadPluginData(): Promise<any> {
+		return (await this.loadData()) || {};
 	}
 
-    // This method is part of the Plugin class contract for thunks to use.
-    async saveData(settings: VersionControlSettings): Promise<void> {
-        await super.saveData(settings);
+    // This method is no longer used for settings. It's kept for future plugin-wide data.
+    async saveData(data: any): Promise<void> {
+        await super.saveData(data);
     }
 }
