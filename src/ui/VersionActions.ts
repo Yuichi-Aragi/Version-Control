@@ -1,5 +1,5 @@
-import { Store } from '../state/store'; 
-import { VersionHistoryEntry } from '../types';
+import type { AppStore } from '../state/store'; 
+import type { VersionHistoryEntry } from '../types';
 import { thunks } from '../state/thunks/index';
 
 export interface VersionActionConfig {
@@ -12,7 +12,7 @@ export interface VersionActionConfig {
      * The action handler now only needs to know about the version and the store,
      * as it will dispatch a thunk to handle the operation.
      */
-    actionHandler: (version: VersionHistoryEntry, store: Store) => void;
+    actionHandler: (version: VersionHistoryEntry, store: AppStore) => void;
 }
 
 /**

@@ -1,7 +1,7 @@
 import { ItemView, WorkspaceLeaf, App } from "obsidian";
 import { VIEW_TYPE_VERSION_CONTROL } from "../constants";
-import { Store } from "../state/store";
-import { AppState, AppStatus, VersionControlSettings } from "../state/state";
+import type { AppStore } from "../state/store";
+import { type AppState, AppStatus } from "../state/state"; // FIX: Changed 'import type' to allow 'AppStatus' enum usage at runtime.
 
 import { PlaceholderComponent } from "./components/PlaceholderComponent";
 import { ActionBarComponent } from "./components/ActionBarComponent";
@@ -13,23 +13,25 @@ import { ConfirmationPanelComponent } from "./components/ConfirmationPanelCompon
 import { ErrorDisplayComponent } from "./components/ErrorDisplayComponent";
 
 export class VersionControlView extends ItemView {
-    store: Store;
+    store: AppStore;
     app: App;
-    private unsubscribeFromStore: () => void;
+    // FIX: Use definite assignment assertion '!' for all properties that are
+    // correctly initialized in the `onOpen` lifecycle method, not the constructor.
+    private unsubscribeFromStore!: () => void;
     
-    private placeholderComponent: PlaceholderComponent;
-    private actionBarComponent: ActionBarComponent;
-    private settingsPanelComponent: SettingsPanelComponent;
-    private historyListComponent: HistoryListComponent;
-    private previewPanelComponent: PreviewPanelComponent;
-    private diffPanelComponent: DiffPanelComponent;
-    private confirmationPanelComponent: ConfirmationPanelComponent;
-    private errorDisplayComponent: ErrorDisplayComponent;
+    private placeholderComponent!: PlaceholderComponent;
+    private actionBarComponent!: ActionBarComponent;
+    private settingsPanelComponent!: SettingsPanelComponent;
+    private historyListComponent!: HistoryListComponent;
+    private previewPanelComponent!: PreviewPanelComponent;
+    private diffPanelComponent!: DiffPanelComponent;
+    private confirmationPanelComponent!: ConfirmationPanelComponent;
+    private errorDisplayComponent!: ErrorDisplayComponent;
 
-    private mainContainer: HTMLElement;
-    private readyStateContainer: HTMLElement;
+    private mainContainer!: HTMLElement;
+    private readyStateContainer!: HTMLElement;
 
-    constructor(leaf: WorkspaceLeaf, store: Store, app: App) {
+    constructor(leaf: WorkspaceLeaf, store: AppStore, app: App) {
         super(leaf);
         this.store = store;
         this.app = app;
@@ -65,8 +67,11 @@ export class VersionControlView extends ItemView {
         if (this.unsubscribeFromStore) {
             this.unsubscribeFromStore();
         }
-        // Components are now children of this view, they will be unloaded automatically.
-        this.contentEl.empty();
+        // Components are now children of this view, and they will be unloaded automatically
+        // by the base Component's `unload` method. Their own `onunload` methods
+        // will handle removing their DOM elements. We should not call `empty()` here
+        // as it can cause errors if child components try to access their DOM during unload.
+        // this.contentEl.empty(); // REMOVED: This was the cause of the unload error.
     }
 
     private initComponents() {
@@ -140,8 +145,9 @@ export class VersionControlView extends ItemView {
                     this.historyListComponent.render(state);
                     
                     this.settingsPanelComponent.render(state.panel?.type === 'settings', state);
-                    this.previewPanelComponent.render(state.panel?.type === 'preview' ? state.panel : null);
+                    this.previewPanelComponent.render(state.panel?.type === 'preview' ? state.panel : null, state);
                     this.diffPanelComponent.render(state.panel?.type === 'diff' ? state.panel : null);
+                    // FIX: Removed second argument as it was unused in the component's render method.
                     this.confirmationPanelComponent.render(state.panel?.type === 'confirmation' ? state.panel : null);
                 }
                 break;

@@ -1,8 +1,8 @@
 import { ItemView, WorkspaceLeaf, MarkdownRenderer, Component, moment, TFile, App, setIcon } from "obsidian";
 import { VIEW_TYPE_VERSION_PREVIEW, NOTE_FRONTMATTER_KEY } from "../constants";
-import { VersionHistoryEntry } from "../types";
-import { Store } from "../state/store";
-import { AppStatus } from "../state/state"; 
+import type { VersionHistoryEntry } from "../types";
+import type { AppStore } from "../state/store";
+import { AppStatus } from "../state/state"; // FIX: Changed to a value import to use the enum at runtime.
 
 interface VersionPreviewViewDisplayState {
     version: VersionHistoryEntry;
@@ -13,7 +13,7 @@ interface VersionPreviewViewDisplayState {
 }
 
 export class VersionPreviewView extends ItemView {
-    store: Store;
+    store: AppStore;
     app: App;
     private currentDisplayState: VersionPreviewViewDisplayState | null = null;
     private unsubscribeFromStore: (() => void) | null = null;
@@ -27,7 +27,7 @@ export class VersionPreviewView extends ItemView {
     private currentContent: string = "";
     private currentNotePath: string = "";
 
-    constructor(leaf: WorkspaceLeaf, store: Store, app: App) {
+    constructor(leaf: WorkspaceLeaf, store: AppStore, app: App) {
         super(leaf);
         this.store = store;
         this.app = app;
@@ -145,7 +145,10 @@ export class VersionPreviewView extends ItemView {
     }
 
     private updateTabTitle() {
-        this.leaf.updateHeader(); 
+        // FIX: 'requestUpdateLayout' does not exist on Workspace.
+        // 'trigger("layout-change")' is the correct way to ask Obsidian to
+        // re-evaluate view titles.
+        this.app.workspace.trigger("layout-change");
     }
 
     async onOpen() {

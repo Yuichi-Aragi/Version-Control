@@ -1,5 +1,5 @@
 import { App, TFolder, FuzzySuggestModal, moment, FuzzyMatch } from "obsidian";
-import { DiffTarget, VersionHistoryEntry } from "../types";
+import type { DiffTarget } from "../types";
 
 export class FolderSuggest extends FuzzySuggestModal<TFolder> {
     onChoose: (result: TFolder) => void;
@@ -22,7 +22,7 @@ export class FolderSuggest extends FuzzySuggestModal<TFolder> {
         return item.isRoot() ? "/" : item.path;
     }
 
-    onChooseItem(item: TFolder, evt: MouseEvent | KeyboardEvent): void {
+    onChooseItem(item: TFolder, _evt: MouseEvent | KeyboardEvent): void {
         this.itemChosen = true;
         this.onChoose(item);
     }
@@ -54,14 +54,16 @@ export class VersionSuggest extends FuzzySuggestModal<DiffTarget> {
     }
 
     getItemText(target: DiffTarget): string {
-        if (target.id === 'current') {
+        // FIX: Use a more robust type guard by checking for a property unique to VersionHistoryEntry.
+        if ('versionNumber' in target) {
+            const version = target; // Now correctly typed as VersionHistoryEntry
+            const versionLabel = version.name ? `V${version.versionNumber}: ${version.name}` : `Version ${version.versionNumber}`;
+            const timeLabel = moment(version.timestamp).format('YYYY-MM-DD HH:mm:ss');
+            return `${versionLabel} (${timeLabel})`;
+        } else {
+            // It must be the CurrentNoteState type, where `name` is a required string.
             return target.name;
         }
-        
-        const version = target as VersionHistoryEntry;
-        const versionLabel = version.name ? `V${version.versionNumber}: ${version.name}` : `Version ${version.versionNumber}`;
-        const timeLabel = moment(version.timestamp).format('YYYY-MM-DD HH:mm:ss');
-        return `${versionLabel} (${timeLabel})`;
     }
 
     renderSuggestion(match: FuzzyMatch<DiffTarget>, el: HTMLElement): void {
@@ -71,18 +73,21 @@ export class VersionSuggest extends FuzzySuggestModal<DiffTarget> {
         const title = content.createDiv('suggestion-title');
         const note = content.createDiv('suggestion-note');
 
-        if (target.id === 'current') {
-            title.setText(target.name);
-            note.setText('The current, unsaved content of the note.');
-        } else {
-            const version = target as VersionHistoryEntry;
+        // FIX: Use a more robust type guard by checking for a property unique to one of the union types.
+        // The `in` operator provides a reliable way for TypeScript to discriminate the union.
+        if ('versionNumber' in target) {
+            const version = target; // TypeScript now knows this is a VersionHistoryEntry
             const versionLabel = version.name ? `V${version.versionNumber}: ${version.name}` : `Version ${version.versionNumber}`;
             title.setText(versionLabel);
             note.setText(moment(version.timestamp).format('LLLL'));
+        } else {
+            // It must be the CurrentNoteState type
+            title.setText(target.name);
+            note.setText('The current, unsaved content of the note.');
         }
     }
 
-    onChooseItem(item: DiffTarget, evt: MouseEvent | KeyboardEvent): void {
+    onChooseItem(item: DiffTarget, _evt: MouseEvent | KeyboardEvent): void {
         this.itemChosen = true;
         this.onChoose(item);
     }
