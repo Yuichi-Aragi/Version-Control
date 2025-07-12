@@ -1,24 +1,26 @@
-import { setIcon, moment, HTMLElement as ObsidianHTMLElement } from "obsidian";
+import { setIcon, moment } from "obsidian";
 import { VersionHistoryEntry } from "../../../types";
 import { formatFileSize } from "../../utils/dom";
-import { Store } from "../../../state/store";
-import { ReadyState } from "../../../state/state";
+import { AppStore } from "../../../state/store";
+import { AppState, AppStatus } from "../../../state/state";
 import { versionActions, VersionActionConfig } from "../../VersionActions";
 import { thunks } from "../../../state/thunks/index";
-import { actions } from "../../../state/actions";
+import { actions } from "../../../state/appSlice";
 import * as EventHandlers from "./HistoryEventHandlers";
 
 export class HistoryEntryRenderer {
-    constructor(private store: Store) {}
+    constructor(private store: AppStore) {}
 
-    public render(version: VersionHistoryEntry, state: ReadyState): HTMLElement {
+    public render(version: VersionHistoryEntry, state: AppState): HTMLElement {
         const entryEl = document.createElement('div');
         entryEl.className = 'v-history-entry';
         this.update(entryEl, version, state);
         return entryEl;
     }
 
-    public update(entryEl: HTMLElement, version: VersionHistoryEntry, state: ReadyState): void {
+    public update(entryEl: HTMLElement, version: VersionHistoryEntry, state: AppState): void {
+        if (state.status !== AppStatus.READY) return;
+
         const { settings, namingVersionId, highlightedVersionId } = state;
         const isNamingThisVersion = version.id === namingVersionId;
 
@@ -29,7 +31,6 @@ export class HistoryEntryRenderer {
         entryEl.setAttribute('role', 'listitem');
         entryEl.dataset.versionId = version.id;
         
-        // FIX: Update signature to use the renamed setting
         const signature = `${version.name || ''}|${isNamingThisVersion}|${settings.isListView}|${settings.useRelativeTimestamps}`;
         if (entryEl.dataset.signature === signature) {
             return; // No need to re-render DOM children if signature is the same
@@ -59,7 +60,6 @@ export class HistoryEntryRenderer {
         }
         
         const timestampEl = header.createSpan({ cls: "v-version-timestamp" });
-        // FIX: Correctly toggle between relative and absolute time based on the new setting.
         const timestampText = settings.useRelativeTimestamps
             ? moment(version.timestamp).fromNow()
             : moment(version.timestamp).format("YYYY-MM-DD HH:mm");
@@ -83,7 +83,7 @@ export class HistoryEntryRenderer {
         }
     }
 
-    public renderErrorEntry(parent: DocumentFragment | ObsidianHTMLElement, version: VersionHistoryEntry | null): void {
+    public renderErrorEntry(parent: DocumentFragment | HTMLElement, version: VersionHistoryEntry | null): void {
         const entryEl = parent.createDiv("v-history-entry is-error");
         entryEl.setAttribute('role', 'listitem');
         const header = entryEl.createDiv("v-entry-header");
@@ -138,7 +138,7 @@ export class HistoryEntryRenderer {
         });
     }
 
-    private createActionButtons(container: ObsidianHTMLElement, version: VersionHistoryEntry): void {
+    private createActionButtons(container: HTMLElement, version: VersionHistoryEntry): void {
         const viewBtn = container.createEl("button", {
             cls: "v-action-btn",
             attr: { "aria-label": "Preview in Panel", "title": "Preview in Panel" }

@@ -1,6 +1,7 @@
-import { Component, debounce, HTMLElement as ObsidianHTMLElement } from "obsidian";
+import { Component } from "obsidian";
+import { debounce } from 'lodash-es';
 import { VersionHistoryEntry } from "../../../types";
-import { ReadyState } from "../../../state/state";
+import { AppState } from "../../../state/state";
 import { HistoryEntryRenderer } from "./HistoryEntryRenderer";
 
 const RENDER_DEBOUNCE_MS = 20;
@@ -14,21 +15,21 @@ export class VirtualHistoryListRenderer extends Component {
     private renderedNodes: Map<string, HTMLElement> = new Map();
     private visibleNodeIds: Set<string> = new Set();
 
-    private lastScrollTop: number = -1;
+    // FIX: Removed unused 'lastScrollTop' property to resolve TS6133 error.
     private debouncedUpdate: () => void;
     private totalItemHeight: number;
 
     constructor(
-        private viewportEl: ObsidianHTMLElement,
+        private viewportEl: HTMLElement,
         private items: VersionHistoryEntry[],
         private itemHeight: number,
         private itemGap: number,
         private entryRenderer: HistoryEntryRenderer,
-        private state: ReadyState
+        private state: AppState
     ) {
         super();
         this.sizerEl = this.viewportEl.createDiv('v-history-list-sizer');
-        this.debouncedUpdate = debounce(this.update, RENDER_DEBOUNCE_MS, false);
+        this.debouncedUpdate = debounce(this.update, RENDER_DEBOUNCE_MS, { leading: false, trailing: true });
         this.totalItemHeight = this.itemHeight + this.itemGap;
     }
 
@@ -59,7 +60,7 @@ export class VirtualHistoryListRenderer extends Component {
      * @param newItemGap The new gap between items.
      * @param newState The new application state.
      */
-    public updateItems(newItems: VersionHistoryEntry[], newItemHeight: number, newItemGap: number, newState: ReadyState) {
+    public updateItems(newItems: VersionHistoryEntry[], newItemHeight: number, newItemGap: number, newState: AppState) {
         this.items = newItems;
         this.itemHeight = newItemHeight;
         this.itemGap = newItemGap;
@@ -80,7 +81,6 @@ export class VirtualHistoryListRenderer extends Component {
 
         const scrollTop = this.viewportEl.scrollTop;
         // No need to check lastScrollTop, as state changes can require a re-render at the same scroll position
-        this.lastScrollTop = scrollTop;
 
         const viewportHeight = this.viewportEl.offsetHeight;
         const buffer = this.totalItemHeight * 2; // Render a few items above and below viewport

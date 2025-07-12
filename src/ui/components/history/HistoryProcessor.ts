@@ -1,14 +1,19 @@
 import { moment } from "obsidian";
+import { orderBy } from 'lodash-es';
 import { VersionHistoryEntry } from "../../../types";
-import { ReadyState } from "../../../state/state";
+import { AppState, AppStatus } from "../../../state/state";
 import { formatFileSize } from "../../utils/dom";
 
 /**
  * Processes the history from the application state by filtering and sorting it.
- * @param state The current ReadyState of the application.
+ * @param state The current AppState of the application.
  * @returns A new array of VersionHistoryEntry, filtered and sorted.
  */
-export function getFilteredAndSortedHistory(state: ReadyState): VersionHistoryEntry[] {
+export function getFilteredAndSortedHistory(state: AppState): VersionHistoryEntry[] {
+    if (state.status !== AppStatus.READY) {
+        return [];
+    }
+
     let history = [...state.history];
     const { searchQuery, isSearchCaseSensitive } = state;
 
@@ -31,32 +36,21 @@ export function getFilteredAndSortedHistory(state: ReadyState): VersionHistoryEn
     }
 
     const { property, direction } = state.sortOrder;
-    history.sort((a, b) => {
-        let comparison = 0;
+
+    const iteratee = (v: VersionHistoryEntry): string | number | Date => {
         switch (property) {
             case 'name':
-                const nameA = a.name?.toLowerCase() || '\uffff'; // Sort empty names to the end
-                const nameB = b.name?.toLowerCase() || '\uffff';
-                if (nameA < nameB) comparison = -1;
-                if (nameA > nameB) comparison = 1;
-                break;
+                // Sort empty names to the end by using a high-value character
+                return v.name?.toLowerCase() || '\uffff';
             case 'size':
-                comparison = a.size - b.size;
-                break;
+                return v.size;
             case 'timestamp':
-                comparison = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
-                break;
+                return new Date(v.timestamp);
             case 'versionNumber':
             default:
-                comparison = a.versionNumber - b.versionNumber;
-                break;
+                return v.versionNumber;
         }
-        // For string-based sorts, direction is applied directly. For others, it's inverted for 'desc'.
-        if (property === 'timestamp' || property === 'versionNumber' || property === 'size') {
-             return direction === 'asc' ? comparison : comparison * -1;
-        }
-        return direction === 'desc' ? comparison * -1 : comparison;
-    });
+    };
 
-    return history;
+    return orderBy(history, [iteratee], [direction]);
 }

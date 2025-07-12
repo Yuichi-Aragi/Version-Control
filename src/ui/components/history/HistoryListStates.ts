@@ -1,11 +1,11 @@
-import { setIcon, HTMLElement as ObsidianHTMLElement } from "obsidian";
+import { setIcon } from "obsidian";
 
 /**
  * Renders a single skeleton placeholder entry for the loading state.
  * @param parent The parent element to append the skeleton entry to.
  * @param isListView True if the skeleton should be for the compact list view.
  */
-export function renderSkeletonEntry(parent: ObsidianHTMLElement, isListView: boolean): void {
+export function renderSkeletonEntry(parent: HTMLElement, isListView: boolean): void {
     const entryEl = parent.createDiv("v-history-entry is-skeleton");
     entryEl.toggleClass('is-list-view', isListView);
 
@@ -37,7 +37,7 @@ export function renderSkeletonEntry(parent: ObsidianHTMLElement, isListView: boo
  * @param subtitle An optional secondary message.
  */
 export function renderEmptyState(
-    listEl: ObsidianHTMLElement, 
+    listEl: HTMLElement, 
     iconName: string, 
     title: string, 
     subtitle?: string
