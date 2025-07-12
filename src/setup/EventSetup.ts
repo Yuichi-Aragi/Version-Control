@@ -1,5 +1,6 @@
-import { Plugin, TFile, WorkspaceLeaf, debounce, MetadataCache } from 'obsidian';
-import { Store } from '../state/store';
+import { Plugin, TFile, WorkspaceLeaf, CachedMetadata } from 'obsidian';
+import { debounce } from 'lodash-es';
+import { AppStore } from '../state/store';
 import { thunks } from '../state/thunks';
 import { VIEW_TYPE_VERSION_CONTROL, VIEW_TYPE_VERSION_PREVIEW, VIEW_TYPE_VERSION_DIFF } from '../constants';
 
@@ -8,10 +9,10 @@ import { VIEW_TYPE_VERSION_CONTROL, VIEW_TYPE_VERSION_PREVIEW, VIEW_TYPE_VERSION
  * @param plugin The plugin instance.
  * @param store The application state store.
  */
-export function registerSystemEventListeners(plugin: Plugin, store: Store): void {
+export function registerSystemEventListeners(plugin: Plugin, store: AppStore): void {
     const debouncedLeafChangeHandler = debounce((leaf: WorkspaceLeaf | null) => {
         store.dispatch(thunks.initializeView(leaf));
-    }, 100, false);
+    }, 100, { leading: false, trailing: true });
 
     plugin.registerEvent(plugin.app.workspace.on('active-leaf-change', (leaf) => {
         const view = leaf?.view;
@@ -22,7 +23,9 @@ export function registerSystemEventListeners(plugin: Plugin, store: Store): void
         debouncedLeafChangeHandler(leaf);
     }));
     
-    plugin.registerEvent(plugin.app.metadataCache.on('changed', (file: TFile, _data: string, cache: MetadataCache) => {
+    // FIX: The third parameter of the 'changed' event callback is `CachedMetadata`, not `MetadataCache`.
+    // Correcting this type resolves the TS2769 overload error and ensures the thunk receives the correct data.
+    plugin.registerEvent(plugin.app.metadataCache.on('changed', (file: TFile, _data: string, cache: CachedMetadata) => {
         store.dispatch(thunks.handleMetadataChange(file, cache));
     }));
 

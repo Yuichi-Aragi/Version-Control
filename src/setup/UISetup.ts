@@ -1,5 +1,5 @@
 import { Plugin, WorkspaceLeaf, MarkdownView } from 'obsidian';
-import { Store } from '../state/store';
+import { AppStore } from '../state/store';
 import { thunks } from '../state/thunks';
 import { VIEW_TYPE_VERSION_CONTROL, VIEW_TYPE_VERSION_PREVIEW, VIEW_TYPE_VERSION_DIFF } from '../constants';
 import { VersionControlView } from '../ui/version-control-view';
@@ -11,7 +11,7 @@ import { VersionDiffView } from '../ui/version-diff-view';
  * @param plugin The plugin instance.
  * @param store The application state store.
  */
-export function registerViews(plugin: Plugin, store: Store): void {
+export function registerViews(plugin: Plugin, store: AppStore): void {
     plugin.registerView(
         VIEW_TYPE_VERSION_CONTROL,
         (leaf) => new VersionControlView(leaf, store, plugin.app)
@@ -31,7 +31,7 @@ export function registerViews(plugin: Plugin, store: Store): void {
  * @param plugin The plugin instance.
  * @param store The application state store.
  */
-export function addRibbonIcon(plugin: Plugin, store: Store): void {
+export function addRibbonIcon(plugin: Plugin, store: AppStore): void {
     plugin.addRibbonIcon('history', 'Open Version Control', () => {
         activateViewAndDispatch(plugin, store);
     });
@@ -42,7 +42,7 @@ export function addRibbonIcon(plugin: Plugin, store: Store): void {
  * @param plugin The plugin instance.
  * @param store The application state store.
  */
-export function registerCommands(plugin: Plugin, store: Store): void {
+export function registerCommands(plugin: Plugin, store: AppStore): void {
     plugin.addCommand({
         id: 'open-version-control-view',
         name: 'Open Version Control View',
@@ -79,7 +79,7 @@ export function registerCommands(plugin: Plugin, store: Store): void {
  * @param plugin The plugin instance.
  * @param store The application state store.
  */
-async function activateViewAndDispatch(plugin: Plugin, store: Store) {
+async function activateViewAndDispatch(plugin: Plugin, store: AppStore) {
     let contextLeaf: WorkspaceLeaf | null = null;
     const currentActiveLeaf = plugin.app.workspace.activeLeaf;
 
