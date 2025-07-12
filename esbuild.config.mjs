@@ -1,6 +1,7 @@
 import esbuild from "esbuild";
 import process from "process";
 import fs from "fs";
+import { exec, execSync } from "child_process";
 
 const isProduction = process.argv.includes("--production");
 const banner = `/*
@@ -9,7 +10,6 @@ If you want to view the source, please visit the github repository of this plugi
 */
 `;
 
-// Function to check if a file exists
 const fileExists = (filePath) => {
   try {
     return fs.statSync(filePath).isFile();
@@ -18,32 +18,42 @@ const fileExists = (filePath) => {
   }
 };
 
-// Define entry points
 const entryPoints = ["src/main.ts"];
 if (fileExists("src/styles.css")) {
   entryPoints.push("src/styles.css");
 }
 
 const buildOptions = {
-  banner: {
-    js: banner,
-  },
-  entryPoints: entryPoints,
+  banner: { js: banner },
+  entryPoints,
   bundle: true,
   external: ["obsidian"],
   format: "cjs",
   target: "es2018",
-  logLevel: "info",
-  sourcemap: isProduction ? false : "inline",
+  logLevel: "info", // We'll capture logs manually
+  sourcemap: false,
   treeShaking: true,
-  minify: isProduction,
+  minify: true,
+  minifyWhitespace: true,
+  minifyIdentifiers: true,
+  minifySyntax: true,
   outdir: "build",
 };
 
-// Build or watch based on the mode
+// Function to run tsc --noEmit and log errors without halting build
+function typeCheck() {
+  exec("npx tsc --noEmit", (error, stdout, stderr) => {
+    if (error) {
+      console.error("TypeScript type errors detected:");
+      console.error(stdout || stderr);
+    }
+  });
+}
+
 if (isProduction) {
+  typeCheck();
   esbuild.build(buildOptions).catch(() => process.exit(1));
 } else {
-  // Development mode with watch
+  typeCheck();
   esbuild.context(buildOptions).then(ctx => ctx.watch());
 }

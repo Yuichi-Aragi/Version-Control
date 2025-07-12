@@ -1,11 +1,12 @@
 {
   "name": "Version Control",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "A local, snapshot-based version control system. Lets you create finite number of versions of any note.",
   "main": "main.js",
   "scripts": {
     "prebuild": "node esbuild.worker.mjs",
     "predev": "node esbuild.worker.mjs",
+    "typecheck": "tsc --noEmit",
     "dev": "node esbuild.config.mjs --watch",
     "build": "node esbuild.config.mjs --production"
   },
@@ -20,13 +21,18 @@
   "author": "Yuichi-Aragi",
   "license": "MIT",
   "dependencies": {
-    "diff": "^8.0.2"
+    "@reduxjs/toolkit": "^2.8.2",
+    "diff": "^8.0.2",
+    "inversify": "^7.5.4",
+    "lodash-es": "^4.17.21",
+    "reflect-metadata": "^0.2.2"
   },
   "devDependencies": {
-    "@types/diff": "^5.2.1",
-    "@types/node": "^24.0.3",
-    "esbuild": "^0.25.5",
+    "@types/lodash-es": "^4.17.12",
+    "@types/node": "^24.0.12",
+    "esbuild": "^0.25.6",
     "obsidian": "latest",
+    "tslib": "^2.8.1",
     "typescript": "^5.8.3"
   }
 }
