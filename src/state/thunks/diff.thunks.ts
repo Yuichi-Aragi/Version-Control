@@ -1,21 +1,22 @@
 import { App } from 'obsidian';
-import { Thunk } from '../store';
-import { actions } from '../actions';
+import { AppThunk } from '../store';
+import { actions } from '../appSlice';
 import { VersionHistoryEntry, DiffTarget } from '../../types';
 import { AppStatus } from '../state';
-import { VIEW_TYPE_VERSION_DIFF, SERVICE_NAMES } from '../../constants';
+import { VIEW_TYPE_VERSION_DIFF } from '../../constants';
 import { UIService } from '../../services/ui-service';
 import { DiffManager } from '../../services/diff-manager';
+import { TYPES } from '../../types/inversify.types';
 
 /**
  * Thunks for generating and displaying diffs between versions.
  */
 
-export const requestDiff = (version1: VersionHistoryEntry): Thunk => async (dispatch, getState, container) => {
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
+export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (dispatch, getState, container) => {
+    const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
 
-    if (state.status !== AppStatus.READY || !state.noteId || state.noteId !== version1.noteId) {
+    if (state.status !== AppStatus.READY || !state.noteId || !state.file || state.noteId !== version1.noteId) {
         uiService.showNotice("Cannot start diff: view context has changed.", 3000);
         return;
     }
@@ -55,13 +56,13 @@ export const requestDiff = (version1: VersionHistoryEntry): Thunk => async (disp
     uiService.showActionMenu(menuOptions);
 };
 
-export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: DiffTarget, mode: 'panel' | 'tab'): Thunk => async (dispatch, getState, container) => {
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
-    const diffManager = container.resolve<DiffManager>(SERVICE_NAMES.DIFF_MANAGER);
-    const app = container.resolve<App>(SERVICE_NAMES.APP);
+export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: DiffTarget, mode: 'panel' | 'tab'): AppThunk => async (dispatch, getState, container) => {
+    const uiService = container.get<UIService>(TYPES.UIService);
+    const diffManager = container.get<DiffManager>(TYPES.DiffManager);
+    const app = container.get<App>(TYPES.App);
     
     const initialState = getState();
-    if (initialState.status !== AppStatus.READY || !initialState.noteId) return;
+    if (initialState.status !== AppStatus.READY || !initialState.noteId || !initialState.file) return;
     const { noteId, file } = initialState;
 
     if (mode === 'tab') {
@@ -112,8 +113,8 @@ export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: Dif
     }
 };
 
-export const viewReadyDiff = (): Thunk => (dispatch, getState, container) => {
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
+export const viewReadyDiff = (): AppThunk => (dispatch, getState, container) => {
+    const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
 
     if (state.status !== AppStatus.READY) return;
@@ -133,6 +134,6 @@ export const viewReadyDiff = (): Thunk => (dispatch, getState, container) => {
     const { version1, version2, diffChanges } = diffRequest;
 
     // Directly open the panel, as this was the implied action for the indicator.
-    dispatch(actions.openDiffPanel({ version1, version2, diffChanges }));
+    dispatch(actions.openPanel({ type: 'diff', version1, version2, diffChanges }));
     dispatch(actions.clearDiffRequest());
 };

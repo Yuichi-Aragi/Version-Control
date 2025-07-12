@@ -1,20 +1,21 @@
-import { MouseEvent as ObsidianMouseEvent, App } from 'obsidian';
-import { Thunk } from '../store';
-import { actions } from '../actions';
+import { App } from 'obsidian';
+import { AppThunk } from '../store';
+import { actions } from '../appSlice';
 import { VersionHistoryEntry } from '../../types';
 import { AppStatus } from '../state';
-import { VIEW_TYPE_VERSION_PREVIEW, SERVICE_NAMES } from '../../constants';
+import { VIEW_TYPE_VERSION_PREVIEW } from '../../constants';
 import { initializeView } from './core.thunks';
 import { UIService } from '../../services/ui-service';
 import { VersionManager } from '../../core/version-manager';
+import { TYPES } from '../../types/inversify.types';
 
 /**
  * Thunks related to UI interactions, such as opening panels, tabs, and modals.
  */
 
-export const viewVersionInPanel = (version: VersionHistoryEntry): Thunk => async (dispatch, getState, container) => {
-    const versionManager = container.resolve<VersionManager>(SERVICE_NAMES.VERSION_MANAGER);
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
+export const viewVersionInPanel = (version: VersionHistoryEntry): AppThunk => async (dispatch, getState, container) => {
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
 
     if (state.status !== AppStatus.READY || !state.noteId) return;
@@ -28,7 +29,7 @@ export const viewVersionInPanel = (version: VersionHistoryEntry): Thunk => async
         }
         const content = await versionManager.getVersionContent(state.noteId, version.id);
         if (content !== null) {
-            dispatch(actions.openPreviewPanel({ version, content }));
+            dispatch(actions.openPanel({ type: 'preview', version, content }));
         } else {
             uiService.showNotice("VC: Error: Could not load version content for preview.");
         }
@@ -44,13 +45,13 @@ export const viewVersionInPanel = (version: VersionHistoryEntry): Thunk => async
     }
 };
 
-export const viewVersionInNewTab = (version: VersionHistoryEntry): Thunk => async (_dispatch, getState, container) => {
-    const versionManager = container.resolve<VersionManager>(SERVICE_NAMES.VERSION_MANAGER);
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
-    const app = container.resolve<App>(SERVICE_NAMES.APP);
+export const viewVersionInNewTab = (version: VersionHistoryEntry): AppThunk => async (_dispatch, getState, container) => {
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const uiService = container.get<UIService>(TYPES.UIService);
+    const app = container.get<App>(TYPES.App);
     const state = getState();
 
-    if (state.status !== AppStatus.READY || !state.noteId) return;
+    if (state.status !== AppStatus.READY || !state.noteId || !state.file) return;
     
     try {
         if (state.noteId !== version.noteId) {
@@ -83,10 +84,10 @@ export const viewVersionInNewTab = (version: VersionHistoryEntry): Thunk => asyn
     }
 };
 
-export const createDeviation = (version: VersionHistoryEntry): Thunk => async (dispatch, getState, container) => {
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
-    const versionManager = container.resolve<VersionManager>(SERVICE_NAMES.VERSION_MANAGER);
-    const app = container.resolve<App>(SERVICE_NAMES.APP);
+export const createDeviation = (version: VersionHistoryEntry): AppThunk => async (_dispatch, getState, container) => {
+    const uiService = container.get<UIService>(TYPES.UIService);
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const app = container.get<App>(TYPES.App);
     
     const initialState = getState();
 
@@ -124,8 +125,9 @@ export const createDeviation = (version: VersionHistoryEntry): Thunk => async (d
     }
 };
 
-export const showVersionContextMenu = (version: VersionHistoryEntry, event: ObsidianMouseEvent): Thunk => (dispatch, getState, container) => {
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
+// FIX: Renamed unused 'dispatch' parameter to '_dispatch' to resolve TS6133 error.
+export const showVersionContextMenu = (version: VersionHistoryEntry, event: MouseEvent): AppThunk => (_dispatch, getState, container) => {
+    const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
 
     if (state.status !== AppStatus.READY || state.noteId !== version.noteId) {
@@ -134,21 +136,22 @@ export const showVersionContextMenu = (version: VersionHistoryEntry, event: Obsi
     uiService.showVersionContextMenu(version, event);
 };
 
-export const showSortMenu = (event: MouseEvent): Thunk => (dispatch, getState, container) => {
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
+// FIX: Renamed unused 'dispatch' parameter to '_dispatch' to resolve TS6133 error.
+export const showSortMenu = (event: MouseEvent): AppThunk => (_dispatch, getState, container) => {
+    const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
 
     if (state.status !== AppStatus.READY) return;
     uiService.showSortMenu(state.sortOrder, event);
 };
 
-export const showNotice = (message: string, duration?: number): Thunk => (_dispatch, _getState, container) => {
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
+export const showNotice = (message: string, duration?: number): AppThunk => (_dispatch, _getState, container) => {
+    const uiService = container.get<UIService>(TYPES.UIService);
     uiService.showNotice(message, duration);
 };
 
-export const closeSettingsPanelWithNotice = (message: string, duration?: number): Thunk => (dispatch, _getState, container) => {
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
+export const closeSettingsPanelWithNotice = (message: string, duration?: number): AppThunk => (dispatch, _getState, container) => {
+    const uiService = container.get<UIService>(TYPES.UIService);
     dispatch(actions.closePanel());
     uiService.showNotice(message, duration);
 };

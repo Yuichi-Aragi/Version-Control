@@ -1,25 +1,26 @@
-import { TFile, App, MarkdownView } from 'obsidian';
-import { Thunk } from '../store';
-import { actions } from '../actions';
+import { TFile, App } from 'obsidian';
+import { AppThunk } from '../store';
+import { actions } from '../appSlice';
 import { VersionHistoryEntry } from '../../types';
 import { AppStatus } from '../state';
-import { NOTE_FRONTMATTER_KEY, SERVICE_NAMES } from '../../constants';
+import { NOTE_FRONTMATTER_KEY } from '../../constants';
 import { loadHistoryForNoteId, initializeView } from './core.thunks';
 import { VersionManager } from '../../core/version-manager';
 import { NoteManager } from '../../core/note-manager';
 import { UIService } from '../../services/ui-service';
 import { BackgroundTaskManager } from '../../core/BackgroundTaskManager';
+import { TYPES } from '../../types/inversify.types';
 
 /**
  * Thunks for direct version management (CRUD operations).
  */
 
-export const saveNewVersion = (options: { isAuto?: boolean } = {}): Thunk => async (dispatch, getState, container) => {
+export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => async (dispatch, getState, container) => {
     const { isAuto = false } = options;
-    const versionManager = container.resolve<VersionManager>(SERVICE_NAMES.VERSION_MANAGER);
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
-    const app = container.resolve<App>(SERVICE_NAMES.APP);
-    const backgroundTaskManager = container.resolve<BackgroundTaskManager>(SERVICE_NAMES.BACKGROUND_TASK_MANAGER);
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const uiService = container.get<UIService>(TYPES.UIService);
+    const app = container.get<App>(TYPES.App);
+    const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
 
     const initialState = getState();
     if (initialState.status !== AppStatus.READY) {
@@ -27,6 +28,10 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): Thunk => asy
             console.warn("Version Control: Manual save attempt while not in Ready state. Aborting.", initialState.status);
             uiService.showNotice("VC: Cannot save version, view not ready.", 3000);
         }
+        return;
+    }
+    if (!initialState.file) {
+        if (!isAuto) uiService.showNotice("VC: Cannot save, no active file in state.", 3000);
         return;
     }
     const { file: initialFileFromState } = initialState;
@@ -46,8 +51,6 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): Thunk => asy
         if (result.status === 'duplicate') {
             if (!isAuto) {
                 uiService.showNotice("Content is identical to the latest version. No new version was saved.", 4000);
-            } else {
-                console.log("VC (Watch Mode): Content unchanged. Skipping auto-save.");
             }
             return; // Return early, finally block will still execute
         }
@@ -56,15 +59,13 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): Thunk => asy
         const { newVersionEntry, displayName, newNoteId } = result;
         if (newVersionEntry) {
             if (initialState.noteId !== newNoteId) {
-                dispatch(actions.updateNoteIdInState(newNoteId));
+                dispatch(actions.updateNoteIdInState({ noteId: newNoteId }));
             }
 
-            dispatch(actions.addVersionSuccess(newVersionEntry));
+            dispatch(actions.addVersionSuccess({ newVersion: newVersionEntry }));
             
             if (!isAuto) {
                 uiService.showNotice(`Version ${displayName} saved for "${liveFile.basename}".`);
-            } else {
-                console.log(`VC (Watch Mode): Auto-saved version ${displayName} for "${liveFile.basename}".`);
             }
         }
 
@@ -83,19 +84,19 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): Thunk => asy
     }
 };
 
-export const updateVersionDetails = (versionId: string, name: string): Thunk => async (dispatch, getState, container) => {
-    const versionManager = container.resolve<VersionManager>(SERVICE_NAMES.VERSION_MANAGER);
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
+export const updateVersionDetails = (versionId: string, name: string): AppThunk => async (dispatch, getState, container) => {
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
 
-    if (state.status !== AppStatus.READY || !state.noteId) {
+    if (state.status !== AppStatus.READY || !state.noteId || !state.file) {
         return;
     }
-    const noteId = state.noteId;
+    const { noteId, file } = state;
 
     // Optimistic UI update
     const version_name = name.trim();
-    dispatch(actions.updateVersionDetailsInState(versionId, version_name || undefined));
+    dispatch(actions.updateVersionDetailsInState({ versionId, name: version_name || undefined }));
 
     try {
         await versionManager.updateVersionDetails(noteId, versionId, version_name);
@@ -103,49 +104,46 @@ export const updateVersionDetails = (versionId: string, name: string): Thunk => 
         console.error(`VC: Failed to save name update for version ${versionId}. Reverting UI.`, error);
         uiService.showNotice("VC: Error: Could not save version details. Reverting changes.", 5000);
         // On failure, reload history to revert the optimistic update
-        dispatch(loadHistoryForNoteId(state.file, noteId));
+        dispatch(loadHistoryForNoteId(file, noteId));
     } finally {
         dispatch(actions.stopVersionEditing());
     }
 };
 
-export const requestEditVersion = (version: VersionHistoryEntry): Thunk => (dispatch, getState) => {
+export const requestEditVersion = (version: VersionHistoryEntry): AppThunk => (dispatch, getState) => {
     const state = getState();
     if (state.status !== AppStatus.READY) return;
-    dispatch(actions.startVersionEditing(version.id));
+    dispatch(actions.startVersionEditing({ versionId: version.id }));
 };
 
-export const requestRestore = (version: VersionHistoryEntry): Thunk => (dispatch, getState) => {
+export const requestRestore = (version: VersionHistoryEntry): AppThunk => (dispatch, getState) => {
     const state = getState();
-    if (state.status !== AppStatus.READY) return;
+    if (state.status !== AppStatus.READY || !state.file) return;
 
     const versionLabel = version.name ? `"${version.name}" (V${version.versionNumber})` : `Version ${version.versionNumber}`;
-    dispatch(actions.openConfirmation({
+    dispatch(actions.openPanel({
+        type: 'confirmation',
         title: "Confirm Restore",
         message: `This will overwrite the current content of "${state.file.basename}" with ${versionLabel}. A backup of the current content will be saved as a new version before restoring. Are you sure?`,
         onConfirmAction: restoreVersion(version.id),
     }));
 };
 
-export const restoreVersion = (versionId: string): Thunk => async (dispatch, getState, container) => {
-    const versionManager = container.resolve<VersionManager>(SERVICE_NAMES.VERSION_MANAGER);
-    const noteManager = container.resolve<NoteManager>(SERVICE_NAMES.NOTE_MANAGER);
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
-    const app = container.resolve<App>(SERVICE_NAMES.APP);
-    const backgroundTaskManager = container.resolve<BackgroundTaskManager>(SERVICE_NAMES.BACKGROUND_TASK_MANAGER);
+export const restoreVersion = (versionId: string): AppThunk => async (dispatch, getState, container) => {
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
+    const uiService = container.get<UIService>(TYPES.UIService);
+    const app = container.get<App>(TYPES.App);
+    const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
     
     const initialState = getState();
-    if (initialState.status !== AppStatus.READY) return;
+    if (initialState.status !== AppStatus.READY || !initialState.file || !initialState.noteId) return;
     const { file: initialFileFromState, noteId: initialNoteIdFromState } = initialState;
 
     dispatch(actions.setProcessing(true));
     dispatch(actions.closePanel()); 
 
     try {
-        if (!initialNoteIdFromState) {
-            throw new Error("Cannot restore. Current note is not under version control.");
-        }
-
         const liveFile = app.vault.getAbstractFileByPath(initialFileFromState.path);
         if (!(liveFile instanceof TFile)) {
             throw new Error(`Restore failed. Note "${initialFileFromState.basename}" may have been deleted or moved.`);
@@ -174,9 +172,9 @@ export const restoreVersion = (versionId: string): Thunk => async (dispatch, get
     }
 };
 
-export const requestDelete = (version: VersionHistoryEntry): Thunk => (dispatch, getState) => {
+export const requestDelete = (version: VersionHistoryEntry): AppThunk => (dispatch, getState) => {
     const state = getState();
-    if (state.status !== AppStatus.READY) return;
+    if (state.status !== AppStatus.READY || !state.file) return;
 
     const isLastVersion = state.history.length === 1 && state.history[0].id === version.id;
     const versionLabel = version.name ? `"${version.name}" (V${version.versionNumber})` : `Version ${version.versionNumber}`;
@@ -185,31 +183,28 @@ export const requestDelete = (version: VersionHistoryEntry): Thunk => (dispatch,
         message += ` This is the last version. Deleting it will also remove the note from version control (its ${NOTE_FRONTMATTER_KEY} will be cleared).`;
     }
 
-    dispatch(actions.openConfirmation({
+    dispatch(actions.openPanel({
+        type: 'confirmation',
         title: "Confirm Delete Version",
         message: message,
         onConfirmAction: deleteVersion(version.id),
     }));
 };
 
-export const deleteVersion = (versionId: string): Thunk => async (dispatch, getState, container) => {
-    const versionManager = container.resolve<VersionManager>(SERVICE_NAMES.VERSION_MANAGER);
-    const noteManager = container.resolve<NoteManager>(SERVICE_NAMES.NOTE_MANAGER);
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
-    const app = container.resolve<App>(SERVICE_NAMES.APP);
+export const deleteVersion = (versionId: string): AppThunk => async (dispatch, getState, container) => {
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
+    const uiService = container.get<UIService>(TYPES.UIService);
+    const app = container.get<App>(TYPES.App);
 
     const initialState = getState();
-    if (initialState.status !== AppStatus.READY) return;
+    if (initialState.status !== AppStatus.READY || !initialState.file || !initialState.noteId) return;
     const { file: initialFileFromState, noteId: initialNoteIdFromState, history: initialHistory } = initialState;
 
     dispatch(actions.setProcessing(true));
     dispatch(actions.closePanel());
 
     try {
-        if (!initialNoteIdFromState) {
-             throw new Error("Cannot delete version. Note ID is missing from current context.");
-        }
-
         const liveFile = app.vault.getAbstractFileByPath(initialFileFromState.path);
         if (liveFile instanceof TFile) {
             const currentNoteIdOnDisk = await noteManager.getNoteId(liveFile);
@@ -239,33 +234,31 @@ export const deleteVersion = (versionId: string): Thunk => async (dispatch, getS
     }
 };
 
-export const requestDeleteAll = (): Thunk => (dispatch, getState) => {
+export const requestDeleteAll = (): AppThunk => (dispatch, getState) => {
     const state = getState();
-    if (state.status !== AppStatus.READY) return;
+    if (state.status !== AppStatus.READY || !state.file) return;
 
-    dispatch(actions.openConfirmation({
+    dispatch(actions.openPanel({
+        type: 'confirmation',
         title: "Confirm Delete All Versions",
         message: `This will permanently delete all version history for "${state.file.basename}" and remove it from version control (its ${NOTE_FRONTMATTER_KEY} will be cleared). This action cannot be undone. Are you sure?`,
         onConfirmAction: deleteAllVersions(),
     }));
 };
 
-export const deleteAllVersions = (): Thunk => async (dispatch, getState, container) => {
-    const versionManager = container.resolve<VersionManager>(SERVICE_NAMES.VERSION_MANAGER);
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
-    const app = container.resolve<App>(SERVICE_NAMES.APP);
+export const deleteAllVersions = (): AppThunk => async (dispatch, getState, container) => {
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const uiService = container.get<UIService>(TYPES.UIService);
+    const app = container.get<App>(TYPES.App);
 
     const initialState = getState();
-    if (initialState.status !== AppStatus.READY) return;
+    if (initialState.status !== AppStatus.READY || !initialState.file || !initialState.noteId) return;
     const { file: initialFileFromState, noteId: initialNoteIdFromState } = initialState;
 
     dispatch(actions.setProcessing(true));
     dispatch(actions.closePanel());
 
     try {
-        if (!initialNoteIdFromState) {
-            throw new Error("No versions to delete or note ID is missing.");
-        }
         const success = await versionManager.deleteAllVersions(initialNoteIdFromState);
         if (success) {
             uiService.showNotice(`All versions for "${initialFileFromState.basename}" have been deleted.`);

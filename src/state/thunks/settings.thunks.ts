@@ -1,95 +1,93 @@
-import { Thunk } from '../store';
-import { actions } from '../actions';
+import { AppThunk } from '../store';
+import { actions } from '../appSlice';
 import { VersionControlSettings, VersionHistoryEntry, VersionData } from '../../types';
 import { AppStatus } from '../state';
 import { customSanitizeFileName } from '../../utils/file';
-import { SERVICE_NAMES } from '../../constants';
 import { UIService } from '../../services/ui-service';
 import { ManifestManager } from '../../core/manifest-manager';
 import { ExportManager } from '../../services/export-manager';
 import { VersionManager } from '../../core/version-manager';
 import { BackgroundTaskManager } from '../../core/BackgroundTaskManager';
+import { TYPES } from '../../types/inversify.types';
+import { CentralManifestRepository } from '../../core/storage/central-manifest-repository';
+import { DEFAULT_SETTINGS } from '../../constants';
 
 /**
  * Thunks for updating settings and handling export functionality.
  */
 
-export const updateSettings = (settingsUpdate: Partial<VersionControlSettings>): Thunk => async (dispatch, getState, container) => {
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
-    const globalSettingsManager = container.resolve<{ get: () => VersionControlSettings, save: (s: VersionControlSettings) => Promise<void> }>(SERVICE_NAMES.GLOBAL_SETTINGS_MANAGER);
-    const backgroundTaskManager = container.resolve<BackgroundTaskManager>(SERVICE_NAMES.BACKGROUND_TASK_MANAGER);
-    const manifestManager = container.resolve<ManifestManager>(SERVICE_NAMES.MANIFEST_MANAGER);
+export const updateSettings = (settingsUpdate: Partial<VersionControlSettings>): AppThunk => async (dispatch, getState, container) => {
+    const uiService = container.get<UIService>(TYPES.UIService);
+    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const centralManifestRepo = container.get<CentralManifestRepository>(TYPES.CentralManifestRepo);
+    const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
 
-    const currentGlobalSettings = globalSettingsManager.get();
-    let newGlobalSettings = { ...currentGlobalSettings };
-    let perNoteUpdate = { ...settingsUpdate };
-    let needsGlobalSave = false;
-
-    // --- Step 1: Handle Always-Global Settings ---
-    // The orphan cleanup setting is ALWAYS global.
-    if ('autoCleanupOrphanedVersions' in settingsUpdate) {
-        newGlobalSettings.autoCleanupOrphanedVersions = settingsUpdate.autoCleanupOrphanedVersions!;
-        delete perNoteUpdate.autoCleanupOrphanedVersions; // Remove from per-note consideration
-        needsGlobalSave = true;
-    }
-
-    // The global toggle itself is ALWAYS global.
-    if ('applySettingsGlobally' in settingsUpdate) {
-        newGlobalSettings.applySettingsGlobally = settingsUpdate.applySettingsGlobally!;
-        delete perNoteUpdate.applySettingsGlobally; // Remove from per-note consideration
-        needsGlobalSave = true;
-    }
-
-    // --- Step 2: Determine where to save the rest of the settings ---
-    if (newGlobalSettings.applySettingsGlobally) {
-        // If global mode is on, all other changes also apply globally.
-        if (Object.keys(perNoteUpdate).length > 0) {
-            newGlobalSettings = { ...newGlobalSettings, ...perNoteUpdate };
-            needsGlobalSave = true;
-        }
-    } else {
-        // Global mode is OFF. Save other changes to the current note's manifest.
-        const state = getState();
-        if (state.status === AppStatus.READY && state.noteId) {
-            if (Object.keys(perNoteUpdate).length > 0) {
-                await manifestManager.updateNoteManifest(state.noteId, (manifest) => {
-                    manifest.settings = { ...(manifest.settings || {}), ...perNoteUpdate };
-                    return manifest;
-                });
-            }
-        } else if (Object.keys(perNoteUpdate).length > 0) {
-            // Tried to change a per-note setting without an active note.
-            uiService.showNotice("Cannot save setting: No note is active.", 3000);
-            return; // Abort without saving or updating state
-        }
-    }
-
-    // --- Step 3: Save global settings if anything changed ---
-    if (needsGlobalSave) {
-        await globalSettingsManager.save(newGlobalSettings);
-    }
-
-    // --- Step 4: Update the effective settings in the Redux state ---
-    // Recalculate the final effective settings for the UI to display.
     const state = getState();
-    let finalEffectiveSettings = { ...newGlobalSettings }; // Start with the new global state
-    if (!newGlobalSettings.applySettingsGlobally && state.status === AppStatus.READY && state.noteId) {
-        // If global is off and we have a note, merge its settings
-        const noteManifest = await manifestManager.loadNoteManifest(state.noteId);
-        if (noteManifest?.settings) {
-            finalEffectiveSettings = { ...finalEffectiveSettings, ...noteManifest.settings };
-        }
-    }
-    
-    dispatch(actions.updateSettings(finalEffectiveSettings));
 
-    // --- Step 5: Trigger side-effects ---
-    backgroundTaskManager.managePeriodicOrphanCleanup();
-    backgroundTaskManager.manageWatchModeInterval();
+    // --- Special Case: Handle the truly global orphan cleanup setting ---
+    if ('autoCleanupOrphanedVersions' in settingsUpdate) {
+        const newSettingValue = !!settingsUpdate.autoCleanupOrphanedVersions;
+        try {
+            await centralManifestRepo.updateGlobalSettings(gSettings => {
+                gSettings = gSettings || {};
+                gSettings.autoCleanupOrphanedVersions = newSettingValue;
+                return gSettings;
+            });
+            // Dispatch to update the live state
+            dispatch(actions.updateSettings({ autoCleanupOrphanedVersions: newSettingValue }));
+            // Trigger background task manager to start/stop the periodic job
+            backgroundTaskManager.managePeriodicOrphanCleanup();
+        } catch (error) {
+            console.error("VC: Failed to update global orphan cleanup setting.", error);
+            uiService.showNotice("Failed to save orphan cleanup setting. Check console.");
+        }
+        return; // End of this specific action
+    }
+
+    // --- Handle all other per-note settings ---
+    if (state.status !== AppStatus.READY || !state.noteId) {
+        uiService.showNotice("A note with version history must be active to change its settings.", 5000);
+        return;
+    }
+    const { noteId } = state;
+
+    try {
+        await manifestManager.updateNoteManifest(noteId, (manifest) => {
+            // Ensure the settings object exists before merging
+            const currentNoteSettings = manifest.settings || {};
+            const newNoteSettings = { ...currentNoteSettings, ...settingsUpdate };
+
+            // Prune settings that are the same as the default to keep manifests clean.
+            for (const key of Object.keys(newNoteSettings) as Array<keyof typeof newNoteSettings>) {
+                if (newNoteSettings[key] === DEFAULT_SETTINGS[key]) {
+                    delete newNoteSettings[key];
+                }
+            }
+
+            if (Object.keys(newNoteSettings).length > 0) {
+                manifest.settings = newNoteSettings;
+            } else {
+                // If no overrides remain, remove the settings object entirely.
+                delete manifest.settings;
+            }
+            
+            return manifest;
+        });
+
+        // Dispatch to update the live state immediately for responsive UI
+        dispatch(actions.updateSettings(settingsUpdate));
+
+        // Trigger side-effects after any settings change
+        backgroundTaskManager.manageWatchModeInterval();
+
+    } catch (error) {
+        console.error(`VC: Failed to update per-note settings for note ${noteId}.`, error);
+        uiService.showNotice("Failed to save note-specific settings. Check console.");
+    }
 };
 
-export const requestExportAllVersions = (): Thunk => (dispatch, getState, container) => {
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
+export const requestExportAllVersions = (): AppThunk => (dispatch, getState, container) => {
+    const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
 
     if (state.status !== AppStatus.READY || !state.noteId) {
@@ -108,10 +106,10 @@ export const requestExportAllVersions = (): Thunk => (dispatch, getState, contai
     uiService.showActionMenu(menuOptions);
 };
 
-export const exportAllVersions = (noteId: string, format: 'md' | 'json' | 'ndjson' | 'txt'): Thunk => async (dispatch, getState, container) => {
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
-    const manifestManager = container.resolve<ManifestManager>(SERVICE_NAMES.MANIFEST_MANAGER);
-    const exportManager = container.resolve<ExportManager>(SERVICE_NAMES.EXPORT_MANAGER);
+export const exportAllVersions = (noteId: string, format: 'md' | 'json' | 'ndjson' | 'txt'): AppThunk => async (dispatch, getState, container) => {
+    const uiService = container.get<UIService>(TYPES.UIService);
+    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const exportManager = container.get<ExportManager>(TYPES.ExportManager);
 
     const initialState = getState();
     if (initialState.status !== AppStatus.READY || initialState.noteId !== noteId) {
@@ -170,8 +168,8 @@ export const exportAllVersions = (noteId: string, format: 'md' | 'json' | 'ndjso
     }
 };
 
-export const requestExportSingleVersion = (version: VersionHistoryEntry): Thunk => (dispatch, getState, container) => {
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
+export const requestExportSingleVersion = (version: VersionHistoryEntry): AppThunk => (dispatch, getState, container) => {
+    const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
 
     if (state.status !== AppStatus.READY || state.noteId !== version.noteId) {
@@ -189,11 +187,11 @@ export const requestExportSingleVersion = (version: VersionHistoryEntry): Thunk 
     uiService.showActionMenu(menuOptions);
 };
 
-export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: 'md' | 'json' | 'ndjson' | 'txt'): Thunk => async (dispatch, getState, container) => {
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
-    const manifestManager = container.resolve<ManifestManager>(SERVICE_NAMES.MANIFEST_MANAGER);
-    const versionManager = container.resolve<VersionManager>(SERVICE_NAMES.VERSION_MANAGER);
-    const exportManager = container.resolve<ExportManager>(SERVICE_NAMES.EXPORT_MANAGER);
+export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: 'md' | 'json' | 'ndjson' | 'txt'): AppThunk => async (dispatch, getState, container) => {
+    const uiService = container.get<UIService>(TYPES.UIService);
+    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const exportManager = container.get<ExportManager>(TYPES.ExportManager);
 
     const initialState = getState();
     if (initialState.status !== AppStatus.READY || initialState.noteId !== versionEntry.noteId) {
@@ -214,7 +212,16 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: '
         if (content === null) {
             throw new Error(`Could not load content for version V${versionEntry.versionNumber}.`);
         }
-        const versionData: VersionData = { ...versionEntry, content, notePath: versionEntry.notePath };
+        
+        const versionData: VersionData = {
+            id: versionEntry.id,
+            noteId: versionEntry.noteId,
+            versionNumber: versionEntry.versionNumber,
+            timestamp: versionEntry.timestamp,
+            name: versionEntry.name,
+            size: versionEntry.size,
+            content: content,
+        };
         
         const exportContent = exportManager.formatExportData([versionData], format);
         if (exportContent === null) {

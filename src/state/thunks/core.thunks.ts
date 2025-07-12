@@ -1,15 +1,18 @@
-import { TFile, WorkspaceLeaf, MetadataCache, App } from 'obsidian';
-import { Thunk } from '../store';
-import { actions } from '../actions';
+import { TFile, WorkspaceLeaf, CachedMetadata, App } from 'obsidian';
+import { AppThunk } from '../store';
+import { actions } from '../appSlice';
 import { AppError, VersionControlSettings } from '../../types';
 import { AppStatus } from '../state';
-import { NOTE_FRONTMATTER_KEY, SERVICE_NAMES } from '../../constants';
+import { NOTE_FRONTMATTER_KEY } from '../../constants';
 import { NoteManager } from '../../core/note-manager';
 import { UIService } from '../../services/ui-service';
 import { VersionManager } from '../../core/version-manager';
 import { ManifestManager } from '../../core/manifest-manager';
 import { CleanupManager } from '../../core/cleanup-manager';
 import { BackgroundTaskManager } from '../../core/BackgroundTaskManager';
+import { TYPES } from '../../types/inversify.types';
+import { DEFAULT_SETTINGS } from '../../constants';
+import { CentralManifestRepository } from '../../core/storage/central-manifest-repository';
 
 /**
  * Thunks related to the core application lifecycle, such as view initialization and history loading.
@@ -17,33 +20,53 @@ import { BackgroundTaskManager } from '../../core/BackgroundTaskManager';
 
 /**
  * Calculates the effective settings for a given note (or global if no note) and applies them to the state.
- * @param noteId The ID of the note, or null to apply global settings.
+ * This is the core logic for the new settings model.
+ * @param noteId The ID of the note, or null to apply global/default settings.
  */
-const applyEffectiveSettingsForNote = (noteId: string | null): Thunk => async (dispatch, getState, container) => {
-    const globalSettingsManager = container.resolve<{ get: () => VersionControlSettings }>(SERVICE_NAMES.GLOBAL_SETTINGS_MANAGER);
-    const manifestManager = container.resolve<ManifestManager>(SERVICE_NAMES.MANIFEST_MANAGER);
-    const globalSettings = globalSettingsManager.get();
+const loadEffectiveSettingsForNote = (noteId: string | null): AppThunk => async (dispatch, getState, container) => {
+    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const centralManifestRepo = container.get<CentralManifestRepository>(TYPES.CentralManifestRepo);
+    const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
 
-    let effectiveSettings = { ...globalSettings };
-    if (noteId && !globalSettings.applySettingsGlobally) {
-        const noteManifest = await manifestManager.loadNoteManifest(noteId);
-        if (noteManifest?.settings) {
-            // The Omit in types.ts ensures we don't override the global-only settings.
-            effectiveSettings = { ...effectiveSettings, ...noteManifest.settings };
+    // 1. Start with the hardcoded defaults.
+    let effectiveSettings: VersionControlSettings = { ...DEFAULT_SETTINGS };
+
+    // 2. Layer on the global settings from the central manifest.
+    try {
+        const centralManifest = await centralManifestRepo.load();
+        if (centralManifest.globalSettings) {
+            effectiveSettings = { ...effectiveSettings, ...centralManifest.globalSettings };
+        }
+    } catch (error) {
+        console.error("VC: Could not load global settings from central manifest.", error);
+    }
+
+    // 3. If a note is active, layer its per-note settings on top.
+    if (noteId) {
+        try {
+            const noteManifest = await manifestManager.loadNoteManifest(noteId);
+            if (noteManifest?.settings) {
+                effectiveSettings = { ...effectiveSettings, ...noteManifest.settings };
+            }
+        } catch (error) {
+            console.error(`VC: Could not load per-note settings for note ${noteId}.`, error);
         }
     }
 
-    // Only dispatch if settings have actually changed to avoid unnecessary re-renders.
+    // 4. Only dispatch if settings have actually changed to avoid unnecessary re-renders.
     if (JSON.stringify(getState().settings) !== JSON.stringify(effectiveSettings)) {
         dispatch(actions.updateSettings(effectiveSettings));
     }
+
+    // 5. After updating settings, some background tasks might need to be re-evaluated.
+    backgroundTaskManager.managePeriodicOrphanCleanup();
+    backgroundTaskManager.manageWatchModeInterval();
 };
 
 
-export const initializeView = (leaf?: WorkspaceLeaf | null): Thunk => async (dispatch, _getState, container) => {
-    const app = container.resolve<App>(SERVICE_NAMES.APP);
-    const noteManager = container.resolve<NoteManager>(SERVICE_NAMES.NOTE_MANAGER);
-    const backgroundTaskManager = container.resolve<BackgroundTaskManager>(SERVICE_NAMES.BACKGROUND_TASK_MANAGER);
+export const initializeView = (leaf?: WorkspaceLeaf | null): AppThunk => async (dispatch, _getState, container) => {
+    const app = container.get<App>(TYPES.App);
+    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
 
     try {
         const targetLeaf = leaf ?? app.workspace.activeLeaf;
@@ -51,16 +74,18 @@ export const initializeView = (leaf?: WorkspaceLeaf | null): Thunk => async (dis
         
         dispatch(actions.initializeView(activeNoteInfo));
 
+        // If the note was identified by the manifest, it means it's missing the frontmatter key.
+        // We should write it back to the file to self-heal.
         if (activeNoteInfo.source === 'manifest' && activeNoteInfo.file && activeNoteInfo.noteId) {
             dispatch(reconcileNoteId(activeNoteInfo.file, activeNoteInfo.noteId));
         }
         
+        // Load the correct settings for the current context (note or no note).
+        dispatch(loadEffectiveSettingsForNote(activeNoteInfo.noteId));
+
+        // If a file is active, proceed to load its history.
         if (activeNoteInfo.file) {
             dispatch(loadHistory(activeNoteInfo.file));
-        } else {
-            // No file is active, revert to global settings and ensure watch mode is off.
-            dispatch(applyEffectiveSettingsForNote(null));
-            backgroundTaskManager.manageWatchModeInterval();
         }
     } catch (error) {
         console.error("Version Control: CRITICAL: Failed to initialize view.", error);
@@ -73,12 +98,11 @@ export const initializeView = (leaf?: WorkspaceLeaf | null): Thunk => async (dis
     }
 };
 
-export const reconcileNoteId = (file: TFile, noteId: string): Thunk => async (_dispatch, _getState, container) => {
-    const noteManager = container.resolve<NoteManager>(SERVICE_NAMES.NOTE_MANAGER);
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
+export const reconcileNoteId = (file: TFile, noteId: string): AppThunk => async (_dispatch, _getState, container) => {
+    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
+    const uiService = container.get<UIService>(TYPES.UIService);
 
     try {
-        console.log(`Version Control: Reconciling missing vc-id. Writing "${noteId}" to note "${file.path}".`);
         const success = await noteManager.writeNoteIdToFrontmatter(file, noteId);
         if (success) {
             uiService.showNotice(`Version Control: Restored missing vc-id for "${file.basename}".`, 3000);
@@ -89,11 +113,11 @@ export const reconcileNoteId = (file: TFile, noteId: string): Thunk => async (_d
     }
 };
 
-export const loadHistory = (file: TFile): Thunk => async (dispatch, _getState, container) => {
-    const noteManager = container.resolve<NoteManager>(SERVICE_NAMES.NOTE_MANAGER);
-    const manifestManager = container.resolve<ManifestManager>(SERVICE_NAMES.MANIFEST_MANAGER);
-    const versionManager = container.resolve<VersionManager>(SERVICE_NAMES.VERSION_MANAGER);
-    const backgroundTaskManager = container.resolve<BackgroundTaskManager>(SERVICE_NAMES.BACKGROUND_TASK_MANAGER);
+export const loadHistory = (file: TFile): AppThunk => async (dispatch, _getState, container) => {
+    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
+    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
 
     try {
         let noteId = await noteManager.getNoteId(file); 
@@ -101,12 +125,11 @@ export const loadHistory = (file: TFile): Thunk => async (dispatch, _getState, c
             noteId = await manifestManager.getNoteIdByPath(file.path);
         }
         
-        dispatch(applyEffectiveSettingsForNote(noteId));
-        
         const history = noteId ? await versionManager.getVersionHistory(noteId) : [];
         dispatch(actions.historyLoadedSuccess({ file, noteId, history }));
-        
-        // After history is loaded and state is READY, manage the watch mode timer.
+
+        // After history is loaded and state is READY, manage the watch mode interval.
+        // This is the correct place to call it, as the state is now fully ready for the new note.
         backgroundTaskManager.manageWatchModeInterval();
 
     } catch (error) {
@@ -120,15 +143,15 @@ export const loadHistory = (file: TFile): Thunk => async (dispatch, _getState, c
     }
 };
 
-export const loadHistoryForNoteId = (file: TFile, noteId: string): Thunk => async (dispatch, _getState, container) => {
-    const versionManager = container.resolve<VersionManager>(SERVICE_NAMES.VERSION_MANAGER);
-    const backgroundTaskManager = container.resolve<BackgroundTaskManager>(SERVICE_NAMES.BACKGROUND_TASK_MANAGER);
+export const loadHistoryForNoteId = (file: TFile, noteId: string): AppThunk => async (dispatch, _getState, container) => {
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
     try {
-        dispatch(applyEffectiveSettingsForNote(noteId));
+        dispatch(loadEffectiveSettingsForNote(noteId));
         const history = await versionManager.getVersionHistory(noteId);
         dispatch(actions.historyLoadedSuccess({ file, noteId, history }));
-        
-        // After history is loaded and state is READY, manage the watch mode timer.
+
+        // Also call it here for consistency.
         backgroundTaskManager.manageWatchModeInterval();
     } catch (error) {
         console.error(`Version Control: Failed to load version history for note ID "${noteId}" ("${file.path}").`, error);
@@ -141,23 +164,22 @@ export const loadHistoryForNoteId = (file: TFile, noteId: string): Thunk => asyn
     }
 };
 
-export const handleMetadataChange = (file: TFile, cache: MetadataCache): Thunk => async (dispatch, getState, container) => {
+export const handleMetadataChange = (file: TFile, cache: CachedMetadata): AppThunk => async (dispatch, getState, container) => {
     if (file.extension !== 'md') return;
 
     const state = getState();
     if (state.status === AppStatus.READY && state.isProcessing && state.file?.path === file.path) {
-        console.log(`Version Control: Metadata changed for ${file.path} while processing. Operation will self-validate.`);
         return;
     }
-    if (state.status === AppStatus.LOADING && state.file.path === file.path) {
-        console.log(`Version Control: Metadata changed for ${file.path} while loading its history. Load will use latest data.`);
+    if (state.status === AppStatus.LOADING && state.file?.path === file.path) {
         return;
     }
 
-    const manifestManager = container.resolve<ManifestManager>(SERVICE_NAMES.MANIFEST_MANAGER);
-    const app = container.resolve<App>(SERVICE_NAMES.APP);
+    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const app = container.get<App>(TYPES.App);
 
-    const newNoteIdFromFrontmatter = cache.frontmatter?.[NOTE_FRONTMATTER_KEY] ?? null;
+    const fileCache = cache;
+    const newNoteIdFromFrontmatter = fileCache?.frontmatter?.[NOTE_FRONTMATTER_KEY] ?? null;
     const oldNoteIdInManifest = await manifestManager.getNoteIdByPath(file.path);
 
     let idChanged = false;
@@ -168,58 +190,51 @@ export const handleMetadataChange = (file: TFile, cache: MetadataCache): Thunk =
     }
 
     if (idChanged) {
-        console.log(`Version Control: Detected vc-id change for "${file.path}". New FM: ${newNoteIdFromFrontmatter}, Old Manifest: ${oldNoteIdInManifest}.`);
         manifestManager.invalidateCentralManifestCache();
-        // Diff cache is now invalidated automatically by events, no direct call needed.
 
         const currentState = getState();
         if ((currentState.status === AppStatus.READY || currentState.status === AppStatus.LOADING) && currentState.file?.path === file.path) {
-            console.log(`Version Control: Active note's vc-id potentially changed externally. Re-initializing view for ${file.path}.`);
             dispatch(initializeView(app.workspace.activeLeaf));
         }
     }
 };
 
-export const handleFileRename = (file: TFile, oldPath: string): Thunk => async (dispatch, getState, container) => {
+export const handleFileRename = (file: TFile, oldPath: string): AppThunk => async (dispatch, getState, container) => {
     if (file.extension !== 'md') return;
 
-    const manifestManager = container.resolve<ManifestManager>(SERVICE_NAMES.MANIFEST_MANAGER);
-    const noteManager = container.resolve<NoteManager>(SERVICE_NAMES.NOTE_MANAGER);
-    const app = container.resolve<App>(SERVICE_NAMES.APP);
+    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
+    const app = container.get<App>(TYPES.App);
 
     const oldNoteId = await manifestManager.getNoteIdByPath(oldPath);
     await noteManager.handleNoteRename(file, oldPath);
     
     const state = getState();
-    if ((state.status === AppStatus.READY || state.status === AppStatus.LOADING) && 
-        (state.file?.path === oldPath || (oldNoteId && state.noteId === oldNoteId))) {
+    if (state.file?.path === oldPath || (oldNoteId && state.noteId === oldNoteId)) {
         dispatch(initializeView(app.workspace.activeLeaf));
     }
 };
 
-export const handleFileDelete = (file: TFile): Thunk => async (dispatch, getState, container) => {
+export const handleFileDelete = (file: TFile): AppThunk => async (dispatch, getState, container) => {
     if (file.extension !== 'md') return;
 
-    const manifestManager = container.resolve<ManifestManager>(SERVICE_NAMES.MANIFEST_MANAGER);
-    const noteManager = container.resolve<NoteManager>(SERVICE_NAMES.NOTE_MANAGER);
+    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
 
     const deletedNoteId = await manifestManager.getNoteIdByPath(file.path); 
     
     noteManager.invalidateCentralManifestCache();
     manifestManager.invalidateCentralManifestCache();
-    // Diff cache is now invalidated automatically by the 'history-deleted' event,
-    // which will be fired by the orphan cleanup process. No direct call is needed here.
 
     const state = getState();
-    if ((state.status === AppStatus.READY || state.status === AppStatus.LOADING) && 
-        (state.file?.path === file.path || (deletedNoteId && state.noteId === deletedNoteId))) {
+    if (state.file?.path === file.path || (deletedNoteId && state.noteId === deletedNoteId)) {
         dispatch(actions.clearActiveNote()); 
     }
 };
 
-export const cleanupOrphanedVersions = (manualTrigger: boolean): Thunk => async (_dispatch, _getState, container) => {
-    const cleanupManager = container.resolve<CleanupManager>(SERVICE_NAMES.CLEANUP_MANAGER);
-    const uiService = container.resolve<UIService>(SERVICE_NAMES.UI_SERVICE);
+export const cleanupOrphanedVersions = (manualTrigger: boolean): AppThunk => async (_dispatch, _getState, container) => {
+    const cleanupManager = container.get<CleanupManager>(TYPES.CleanupManager);
+    const uiService = container.get<UIService>(TYPES.UIService);
 
     try {
         const result = await cleanupManager.cleanupOrphanedVersions(manualTrigger);
