@@ -1,25 +1,29 @@
-import { App, TFile, MarkdownView, FrontMatterCache, TFolder } from "obsidian";
+import { App, TFile, MarkdownView, TFolder } from "obsidian";
+import { map, orderBy } from 'lodash-es';
+import { injectable, inject } from 'inversify';
 import { ManifestManager } from "./manifest-manager";
 import { NoteManager } from "./note-manager";
-import { VersionHistoryEntry, NoteManifest } from "../types";
+import { VersionHistoryEntry } from "../types";
 import { generateUniqueFilePath } from "../utils/file";
 import { NOTE_FRONTMATTER_KEY } from "../constants";
 import { PluginEvents } from "./plugin-events";
 import { generateUniqueId } from "../utils/id";
 import { VersionContentRepository } from "./storage/version-content-repository";
+import { TYPES } from "../types/inversify.types";
 
 /**
  * Manages the core business logic for versioning operations like saving,
  * restoring, deleting, and retrieving versions. It orchestrates other services
  * and repositories to perform its tasks.
  */
+@injectable()
 export class VersionManager {
     constructor(
-        private app: App, 
-        private manifestManager: ManifestManager, 
-        private noteManager: NoteManager, 
-        private versionContentRepo: VersionContentRepository,
-        private eventBus: PluginEvents
+        @inject(TYPES.App) private app: App, 
+        @inject(TYPES.ManifestManager) private manifestManager: ManifestManager, 
+        @inject(TYPES.NoteManager) private noteManager: NoteManager, 
+        @inject(TYPES.VersionContentRepo) private versionContentRepo: VersionContentRepository,
+        @inject(TYPES.EventBus) private eventBus: PluginEvents
     ) {}
 
     /**
@@ -61,7 +65,6 @@ export class VersionManager {
         if (!force) {
             const latestContent = await this.versionContentRepo.getLatestVersionContent(noteId, noteManifest);
             if (latestContent !== null && latestContent === contentToSave) {
-                console.log(`VC: Content for "${file.path}" is identical to the latest version. Skipping save.`);
                 return { status: 'duplicate', newVersionEntry: null, displayName: '', newNoteId: noteId };
             }
         }
@@ -123,8 +126,6 @@ export class VersionManager {
             manifest.lastModified = new Date().toISOString();
             return manifest;
         });
-
-        console.log(`VC: Updated details for version ${versionId} to name: "${version_name}".`);
     }
 
     async getVersionHistory(noteId: string): Promise<VersionHistoryEntry[]> {
@@ -133,12 +134,17 @@ export class VersionManager {
             const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
             if (!noteManifest || !noteManifest.versions) return [];
 
-            return Object.entries(noteManifest.versions)
-                .map(([id, data]) => ({
-                    id, noteId, notePath: noteManifest.notePath, versionNumber: data.versionNumber,
-                    timestamp: data.timestamp, name: data.name, size: data.size,
-                }))
-                .sort((a, b) => b.versionNumber - a.versionNumber);
+            const history = map(noteManifest.versions, (data, id) => ({
+                id,
+                noteId,
+                notePath: noteManifest.notePath,
+                versionNumber: data.versionNumber,
+                timestamp: data.timestamp,
+                name: data.name,
+                size: data.size,
+            }));
+
+            return orderBy(history, ['versionNumber'], ['desc']);
         } catch (error) {
             console.error(`VC: Failed to get version history for note ${noteId}.`, error);
             throw new Error(`Failed to get version history for note ${noteId}.`);
@@ -282,7 +288,6 @@ export class VersionManager {
                     await this.app.fileManager.processFrontMatter(liveFile, (fm) => {
                         delete fm[NOTE_FRONTMATTER_KEY];
                     });
-                    console.log(`VC: Removed vc-id from frontmatter of "${filePath}" after deleting history.`);
                 } catch (fmError) {
                     console.error(`VC: WARNING: Could not clean vc-id from frontmatter of "${filePath}". Please remove it manually.`, fmError);
                 }

@@ -1,18 +1,19 @@
 import { App, TFile, WorkspaceLeaf, MarkdownView, FrontMatterCache } from "obsidian";
+import { injectable, inject } from 'inversify';
 import { ManifestManager } from "./manifest-manager";
 import { NOTE_FRONTMATTER_KEY } from "../constants";
 import { ActiveNoteInfo } from "../types";
 import { generateUniqueId } from "../utils/id";
+import { TYPES } from "../types/inversify.types";
 
+@injectable()
 export class NoteManager {
-    private app: App;
-    private manifestManager: ManifestManager;
     private idCreationLocks = new Map<string, Promise<string | null>>();
 
-    constructor(app: App, manifestManager: ManifestManager) {
-        this.app = app;
-        this.manifestManager = manifestManager;
-    }
+    constructor(
+        @inject(TYPES.App) private app: App, 
+        @inject(TYPES.ManifestManager) private manifestManager: ManifestManager
+    ) {}
 
     async getActiveNoteState(leaf?: WorkspaceLeaf | null): Promise<ActiveNoteInfo> {
         const targetLeaf = leaf;
@@ -130,7 +131,6 @@ export class NoteManager {
             await this.app.fileManager.processFrontMatter(file, (frontmatter: FrontMatterCache) => {
                 frontmatter[NOTE_FRONTMATTER_KEY] = noteId;
             });
-            console.log(`VC: Wrote vc-id "${noteId}" to frontmatter for note "${file.path}".`);
             return true;
         } catch (error) {
             console.error(`VC: CRITICAL: Failed to write vc-id to frontmatter for '${file.path}'. Frontmatter might be invalid.`, error);
@@ -143,11 +143,9 @@ export class NoteManager {
             const noteIdToUpdate = await this.manifestManager.getNoteIdByPath(oldPath);
 
             if (noteIdToUpdate) {
-                console.log(`VC: Note ID ${noteIdToUpdate} renamed/moved from "${oldPath}" to "${file.path}". Updating manifests.`);
                 await this.manifestManager.updateNotePath(noteIdToUpdate, file.path);
             } else {
                 this.manifestManager.invalidateCentralManifestCache();
-                console.log(`VC: Note renamed from "${oldPath}" to "${file.path}", but no existing vc-id found by old path. No manifest update needed for this ID.`);
             }
         } catch (error) {
             console.error(`VC: Failed to handle note rename from "${oldPath}" to "${file.path}".`, error);

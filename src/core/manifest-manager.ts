@@ -1,23 +1,27 @@
 import { App, Vault } from "obsidian";
+import { injectable, inject } from 'inversify';
 import { NoteManifest } from "../types";
 import { PathService } from "./storage/path-service";
 import { CentralManifestRepository } from "./storage/central-manifest-repository";
 import { NoteManifestRepository } from "./storage/note-manifest-repository";
 import { AtomicFileIO } from "./storage/atomic-file-io";
+import { TYPES } from "../types/inversify.types";
 
 /**
  * A high-level facade that coordinates operations across the manifest repositories.
  * It handles complex, multi-step operations that involve both the central and note manifests,
  * such as creating or deleting a note's entire version history.
  */
+@injectable()
 export class ManifestManager {
     private vault: Vault;
 
     constructor(
-        private app: App,
-        private pathService: PathService,
-        private centralManifestRepo: CentralManifestRepository,
-        private noteManifestRepo: NoteManifestRepository
+        @inject(TYPES.App) app: App,
+        @inject(TYPES.PathService) private pathService: PathService,
+        @inject(TYPES.CentralManifestRepo) private centralManifestRepo: CentralManifestRepository,
+        @inject(TYPES.NoteManifestRepo) private noteManifestRepo: NoteManifestRepository,
+        @inject(TYPES.AtomicFileIO) private atomicFileIO: AtomicFileIO
     ) {
         this.vault = app.vault;
     }
@@ -35,9 +39,8 @@ export class ManifestManager {
 
             const centralManifestPath = this.pathService.getCentralManifestPath();
             if (!await this.vault.adapter.exists(centralManifestPath)) {
-                // Use AtomicFileIO directly for this one-time setup
-                const atomicFileIO = new AtomicFileIO(this.vault);
-                await atomicFileIO.writeJsonFile(centralManifestPath, { version: "1.0.0", notes: {} });
+                // Use the injected AtomicFileIO instance for this one-time setup
+                await this.atomicFileIO.writeJsonFile(centralManifestPath, { version: "1.0.0", notes: {} });
             }
             await this.centralManifestRepo.load(true);
         } catch (error) {
@@ -92,7 +95,6 @@ export class ManifestManager {
 
             // 3. Invalidate caches.
             this.noteManifestRepo.invalidateCache(noteId);
-            console.log(`VC: Successfully deleted note entry and data for ID ${noteId}.`);
 
         } catch (error) {
             console.error(`VC: Failed to complete deletion for note entry ID ${noteId}`, error);
@@ -145,7 +147,6 @@ export class ManifestManager {
         if (await this.vault.adapter.exists(noteDbPath)) {
             try {
                 await this.vault.adapter.rmdir(noteDbPath, true);
-                console.log(`VC: Successfully rolled back by deleting directory: ${noteDbPath}`);
             } catch (rmdirError) {
                 console.error(`VC: CRITICAL: Failed to rollback directory ${noteDbPath}. Manual cleanup may be needed.`, rmdirError);
             }

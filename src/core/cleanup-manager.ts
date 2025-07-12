@@ -1,9 +1,12 @@
 import { App, TFile, moment, Component } from "obsidian";
+import { orderBy } from 'lodash-es';
+import { injectable, inject } from 'inversify';
 import { ManifestManager } from "./manifest-manager";
-import { VersionControlSettings, NoteManifest } from "../types";
+import type { VersionControlSettings } from "../types";
 import { NOTE_FRONTMATTER_KEY } from "../constants";
 import { PluginEvents } from "./plugin-events";
 import { PathService } from "./storage/path-service";
+import { TYPES } from "../types/inversify.types";
 
 /**
  * Manages all cleanup operations, such as removing old versions based on
@@ -11,29 +14,19 @@ import { PathService } from "./storage/path-service";
  * It operates in a decoupled manner by listening to events from the PluginEvents bus.
  * Extends Component to leverage automatic event listener cleanup.
  */
+@injectable()
 export class CleanupManager extends Component {
-    private app: App;
-    private manifestManager: ManifestManager;
-    private settingsProvider: () => VersionControlSettings;
-    private eventBus: PluginEvents;
-    private pathService: PathService;
-    
     private cleanupPromises = new Map<string, Promise<void>>();
     private isOrphanCleanupRunning = false;
 
     constructor(
-        app: App, 
-        manifestManager: ManifestManager, 
-        settingsProvider: () => VersionControlSettings,
-        eventBus: PluginEvents,
-        pathService: PathService
+        @inject(TYPES.App) private app: App, 
+        @inject(TYPES.ManifestManager) private manifestManager: ManifestManager, 
+        @inject(TYPES.SettingsProvider) private settingsProvider: () => VersionControlSettings,
+        @inject(TYPES.EventBus) private eventBus: PluginEvents,
+        @inject(TYPES.PathService) private pathService: PathService
     ) {
         super();
-        this.app = app;
-        this.manifestManager = manifestManager;
-        this.settingsProvider = settingsProvider;
-        this.eventBus = eventBus;
-        this.pathService = pathService;
     }
 
     /**
@@ -41,7 +34,10 @@ export class CleanupManager extends Component {
      * once during plugin initialization.
      */
     public initialize(): void {
-        this.registerEvent(this.eventBus.on('version-saved', this.handleVersionSaved));
+        // FIX: Use the component's `register` method for automatic cleanup of the event listener.
+        // `registerEvent` cannot be used with a custom event bus that doesn't return an EventRef.
+        this.eventBus.on('version-saved', this.handleVersionSaved);
+        this.register(() => this.eventBus.off('version-saved', this.handleVersionSaved));
     }
 
     /**
@@ -84,16 +80,19 @@ export class CleanupManager extends Component {
         }
 
         // --- Start of new unified cleanup logic ---
-        const versions = Object.entries(noteManifest.versions)
-            .sort(([, a], [, b]) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()); // Newest first
+        const versions = orderBy(
+            Object.entries(noteManifest.versions),
+            ([_id, versionData]) => new Date(versionData.timestamp).getTime(),
+            ['desc'] // Newest first
+        );
 
         // Don't run cleanup if there's only one version to preserve.
         if (versions.length <= 1) {
             return;
         }
 
-        const versionsToDelete = new Set<string>();
         const versionsToKeep = new Set<string>();
+        const versionsToDelete = new Set<string>();
         const cutoffDate = moment().subtract(autoCleanupDays, 'days');
 
         // Iterate through versions from newest to oldest, deciding which to keep.
@@ -120,8 +119,6 @@ export class CleanupManager extends Component {
         // --- End of new unified cleanup logic ---
 
         if (versionsToDelete.size > 0) {
-            console.log(`VC: Identified ${versionsToDelete.size} old versions to cleanup for note ${noteId}.`);
-            
             // Now, perform the manifest update atomically using the queue
             await this.manifestManager.updateNoteManifest(noteId, (manifest) => {
                 for (const versionId of versionsToDelete) {
@@ -145,7 +142,6 @@ export class CleanupManager extends Component {
             await Promise.allSettled(deletionPromises);
 
             this.eventBus.trigger('version-deleted', noteId);
-            console.log(`VC: Successfully cleaned up ${versionsToDelete.size} old versions for note ${noteId}.`);
         }
     }
 
@@ -155,7 +151,6 @@ export class CleanupManager extends Component {
             return { count: 0, success: true };
         }
         if (this.isOrphanCleanupRunning) {
-            console.log("VC: Orphan cleanup is already in progress. Skipping this run.");
             return { count: 0, success: true };
         }
         this.isOrphanCleanupRunning = true;
@@ -202,7 +197,6 @@ export class CleanupManager extends Component {
 
                     if (idFromFrontmatter !== noteId) {
                         // The file at the path is no longer associated with this history.
-                        console.log(`VC (Orphan): Mismatched vc-id for note ID ${noteId} at path "${noteData.notePath}". Manifest ID: ${noteId}, File FM ID: "${idFromFrontmatter}". Scheduling data deletion.`);
                         orphanedNoteIdsToDelete.push(noteId);
                     }
                 } else {
@@ -210,11 +204,9 @@ export class CleanupManager extends Component {
                     const newPathForId = allVcIdsInVault.get(noteId);
                     if (newPathForId) {
                         // The file was renamed! Self-heal by updating the path.
-                        console.log(`VC (Orphan): Detected renamed file for note ID ${noteId}. Old path: "${noteData.notePath}", New path: "${newPathForId}". Scheduling path update.`);
                         pathsToUpdate.push({ noteId, newPath: newPathForId });
                     } else {
                         // The file is truly gone.
-                        console.log(`VC (Orphan): File not found for note ID ${noteId} at path "${noteData.notePath}" and ID not found elsewhere. Scheduling data deletion.`);
                         orphanedNoteIdsToDelete.push(noteId);
                     }
                 }
@@ -249,9 +241,7 @@ export class CleanupManager extends Component {
     async completePendingCleanups(): Promise<void> {
         const pending = Array.from(this.cleanupPromises.values());
         if (pending.length > 0) {
-            console.log(`VC: Waiting for ${pending.length} pending per-note cleanups...`);
             await Promise.allSettled(pending);
-            console.log("VC: All pending per-note cleanups completed.");
         }
         this.cleanupPromises.clear();
     }
