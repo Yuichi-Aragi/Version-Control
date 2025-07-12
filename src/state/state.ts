@@ -1,7 +1,7 @@
 import { TFile } from 'obsidian';
 import { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, DiffRequest } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
-import { Thunk } from './store';
+import { AppThunk } from './store';
 import { Change } from 'diff';
 
 // ===================================================================================
@@ -20,13 +20,13 @@ export enum AppStatus {
     ERROR = 'ERROR',
 }
 
-// --- Panel States (Nested within ReadyState) ---
+// --- Panel States (Nested within AppState) ---
 
 export interface ConfirmationPanel {
     type: 'confirmation';
     title: string;
     message: string;
-    onConfirmAction: Thunk; // Thunk to execute on confirmation
+    onConfirmAction: AppThunk; // Thunk to execute on confirmation
 }
 
 export interface PreviewPanel {
@@ -48,24 +48,7 @@ export interface SettingsPanel {
 
 export type PanelState = ConfirmationPanel | PreviewPanel | DiffPanel | SettingsPanel | null;
 
-
-// --- Core Application States ---
-
-export interface InitializingState {
-    status: AppStatus.INITIALIZING;
-    settings: VersionControlSettings;
-}
-
-export interface PlaceholderState {
-    status: AppStatus.PLACEHOLDER;
-    settings: VersionControlSettings;
-}
-
-export interface LoadingState {
-    status: AppStatus.LOADING;
-    settings: VersionControlSettings;
-    file: TFile; // The file whose history is being loaded
-}
+// --- Core Application State ---
 
 export type SortProperty = 'versionNumber' | 'timestamp' | 'name' | 'size';
 export type SortDirection = 'asc' | 'desc';
@@ -75,16 +58,21 @@ export interface SortOrder {
     direction: SortDirection;
 }
 
-export interface ReadyState {
-    status: AppStatus.READY;
+export interface AppState {
+    status: AppStatus;
     settings: VersionControlSettings;
-    file: TFile; // The currently active and version-controlled file
-    noteId: string | null; // VC-ID of the note, null if not yet versioned
+    error: AppError | null;
+    
+    // Properties for LOADING and READY states
+    file: TFile | null; 
+    noteId: string | null;
     history: VersionHistoryEntry[];
-    isProcessing: boolean; // True if a background operation (save, restore, etc.) is in progress
-    panel: PanelState; // State of any active overlay panel
-    namingVersionId: string | null; // ID of the version currently being named inline
-    highlightedVersionId: string | null; // ID of version to highlight temporarily
+    
+    // Properties primarily for READY state
+    isProcessing: boolean;
+    panel: PanelState;
+    namingVersionId: string | null;
+    highlightedVersionId: string | null;
     
     // Search and sort properties
     isSearchActive: boolean;
@@ -99,20 +87,24 @@ export interface ReadyState {
     watchModeCountdown: number | null;
 }
 
-export interface ErrorState {
-    status: AppStatus.ERROR;
-    settings: VersionControlSettings;
-    error: AppError; // Detailed error information
-}
-
-export type AppState =
-    | InitializingState
-    | PlaceholderState
-    | LoadingState
-    | ReadyState
-    | ErrorState;
-
-export const getInitialState = (loadedSettings: VersionControlSettings): AppState => ({
-    status: AppStatus.INITIALIZING,
-    settings: { ...DEFAULT_SETTINGS, ...loadedSettings },
-});
+export const getInitialState = (loadedSettings: VersionControlSettings): AppState => {
+    const defaultSortOrder: SortOrder = { property: 'versionNumber', direction: 'desc' };
+    return {
+        status: AppStatus.INITIALIZING,
+        settings: { ...DEFAULT_SETTINGS, ...loadedSettings },
+        error: null,
+        file: null,
+        noteId: null,
+        history: [],
+        isProcessing: false,
+        panel: null,
+        namingVersionId: null,
+        highlightedVersionId: null,
+        isSearchActive: false,
+        searchQuery: '',
+        isSearchCaseSensitive: false,
+        sortOrder: defaultSortOrder,
+        diffRequest: null,
+        watchModeCountdown: null,
+    };
+};
