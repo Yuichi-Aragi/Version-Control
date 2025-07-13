@@ -1,7 +1,7 @@
 import { ItemView, WorkspaceLeaf, App } from "obsidian";
 import { VIEW_TYPE_VERSION_CONTROL } from "../constants";
 import type { AppStore } from "../state/store";
-import { type AppState, AppStatus } from "../state/state"; // FIX: Changed 'import type' to allow 'AppStatus' enum usage at runtime.
+import { AppStatus, type AppState } from "../state/state";
 
 import { PlaceholderComponent } from "./components/PlaceholderComponent";
 import { ActionBarComponent } from "./components/ActionBarComponent";
@@ -14,8 +14,8 @@ import { ErrorDisplayComponent } from "./components/ErrorDisplayComponent";
 
 export class VersionControlView extends ItemView {
     store: AppStore;
-    app: App;
-    // FIX: Use definite assignment assertion '!' for all properties that are
+    override app: App;
+    // Use definite assignment assertion '!' for all properties that are
     // correctly initialized in the `onOpen` lifecycle method, not the constructor.
     private unsubscribeFromStore!: () => void;
     
@@ -38,15 +38,15 @@ export class VersionControlView extends ItemView {
         this.icon = "history";
     }
 
-    getViewType(): string {
+    override getViewType(): string {
         return VIEW_TYPE_VERSION_CONTROL;
     }
 
-    getDisplayText(): string {
+    override getDisplayText(): string {
         return "Version Control";
     }
 
-    async onOpen() {
+    override async onOpen() {
         this.containerEl.addClass("version-control-view");
         this.contentEl.addClass("version-control-content");
         
@@ -63,7 +63,7 @@ export class VersionControlView extends ItemView {
         this.render(this.store.getState());
     }
 
-    async onClose() {
+    override async onClose() {
         if (this.unsubscribeFromStore) {
             this.unsubscribeFromStore();
         }
@@ -71,7 +71,6 @@ export class VersionControlView extends ItemView {
         // by the base Component's `unload` method. Their own `onunload` methods
         // will handle removing their DOM elements. We should not call `empty()` here
         // as it can cause errors if child components try to access their DOM during unload.
-        // this.contentEl.empty(); // REMOVED: This was the cause of the unload error.
     }
 
     private initComponents() {
@@ -147,7 +146,6 @@ export class VersionControlView extends ItemView {
                     this.settingsPanelComponent.render(state.panel?.type === 'settings', state);
                     this.previewPanelComponent.render(state.panel?.type === 'preview' ? state.panel : null, state);
                     this.diffPanelComponent.render(state.panel?.type === 'diff' ? state.panel : null);
-                    // FIX: Removed second argument as it was unused in the component's render method.
                     this.confirmationPanelComponent.render(state.panel?.type === 'confirmation' ? state.panel : null);
                 }
                 break;

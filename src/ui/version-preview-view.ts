@@ -2,7 +2,7 @@ import { ItemView, WorkspaceLeaf, MarkdownRenderer, Component, moment, TFile, Ap
 import { VIEW_TYPE_VERSION_PREVIEW, NOTE_FRONTMATTER_KEY } from "../constants";
 import type { VersionHistoryEntry } from "../types";
 import type { AppStore } from "../state/store";
-import { AppStatus } from "../state/state"; // FIX: Changed to a value import to use the enum at runtime.
+import { AppStatus } from "../state/state";
 
 interface VersionPreviewViewDisplayState {
     version: VersionHistoryEntry;
@@ -14,7 +14,7 @@ interface VersionPreviewViewDisplayState {
 
 export class VersionPreviewView extends ItemView {
     store: AppStore;
-    app: App;
+    override app: App;
     private currentDisplayState: VersionPreviewViewDisplayState | null = null;
     private unsubscribeFromStore: (() => void) | null = null;
 
@@ -34,11 +34,11 @@ export class VersionPreviewView extends ItemView {
         this.icon = "search"; 
     }
 
-    getViewType(): string {
+    override getViewType(): string {
         return VIEW_TYPE_VERSION_PREVIEW;
     }
 
-    getDisplayText(): string {
+    override getDisplayText(): string {
         if (this.currentDisplayState) {
             const { noteName, version } = this.currentDisplayState;
             const versionLabel = version.name || `V${version.versionNumber}`; 
@@ -49,7 +49,7 @@ export class VersionPreviewView extends ItemView {
         return "Version Preview"; 
     }
 
-    async setState(state: any, options: any): Promise<void> {
+    override async setState(state: any, options: any): Promise<void> {
         await super.setState(state, options);
 
         if (state && state.version && typeof state.content === 'string' && 
@@ -64,7 +64,9 @@ export class VersionPreviewView extends ItemView {
                 this.handleSubscription(); 
             } else {
                 this.currentDisplayState.content = newState.content;
-                this.currentDisplayState.version.name = newState.version.name;
+                // FIX: Coalesce a potentially undefined `name` to an empty string
+                // to prevent type errors and ensure consistent behavior.
+                this.currentDisplayState.version.name = newState.version.name || '';
             }
 
             if (this.tabContentEl) { 
@@ -145,13 +147,11 @@ export class VersionPreviewView extends ItemView {
     }
 
     private updateTabTitle() {
-        // FIX: 'requestUpdateLayout' does not exist on Workspace.
-        // 'trigger("layout-change")' is the correct way to ask Obsidian to
-        // re-evaluate view titles.
+        // Use the correct API to request a header update
         this.app.workspace.trigger("layout-change");
     }
 
-    async onOpen() {
+    override async onOpen() {
         this.containerEl.addClass("version-preview-view"); 
         this.tabContentEl = this.contentEl.createDiv("v-tab-view-content");
         
@@ -163,7 +163,7 @@ export class VersionPreviewView extends ItemView {
         }
     }
 
-    async onClose() {
+    override async onClose() {
         this.clearSubscription();
         this.contentEl.empty(); 
         this.currentDisplayState = null;

@@ -1,9 +1,10 @@
-import { App, TFolder, FuzzySuggestModal, moment, FuzzyMatch } from "obsidian";
-import type { DiffTarget } from "../types";
+import { App, TFolder, FuzzySuggestModal, moment, type FuzzyMatch } from "obsidian";
+import type { DiffTarget, VersionHistoryEntry } from "../types";
 
 export class FolderSuggest extends FuzzySuggestModal<TFolder> {
     onChoose: (result: TFolder) => void;
-    onCancel?: () => void;
+    // FIX: Explicitly type as possibly undefined to satisfy `exactOptionalPropertyTypes`.
+    onCancel: (() => void) | undefined;
     private itemChosen: boolean = false;
 
     constructor(app: App, onChoose: (result: TFolder) => void, onCancel?: () => void) {
@@ -27,7 +28,7 @@ export class FolderSuggest extends FuzzySuggestModal<TFolder> {
         this.onChoose(item);
     }
 
-    onClose(): void {
+    override onClose(): void {
         super.onClose();
         if (!this.itemChosen && this.onCancel) {
             this.onCancel();
@@ -38,7 +39,8 @@ export class FolderSuggest extends FuzzySuggestModal<TFolder> {
 export class VersionSuggest extends FuzzySuggestModal<DiffTarget> {
     private targets: DiffTarget[];
     onChoose: (result: DiffTarget) => void;
-    onCancel?: () => void;
+    // FIX: Explicitly type as possibly undefined to satisfy `exactOptionalPropertyTypes`.
+    onCancel: (() => void) | undefined;
     private itemChosen: boolean = false;
 
     constructor(app: App, targets: DiffTarget[], onChoose: (result: DiffTarget) => void, onCancel?: () => void) {
@@ -54,9 +56,9 @@ export class VersionSuggest extends FuzzySuggestModal<DiffTarget> {
     }
 
     getItemText(target: DiffTarget): string {
-        // FIX: Use a more robust type guard by checking for a property unique to VersionHistoryEntry.
+        // Use a more robust type guard by checking for a property unique to VersionHistoryEntry.
         if ('versionNumber' in target) {
-            const version = target; // Now correctly typed as VersionHistoryEntry
+            const version = target as VersionHistoryEntry;
             const versionLabel = version.name ? `V${version.versionNumber}: ${version.name}` : `Version ${version.versionNumber}`;
             const timeLabel = moment(version.timestamp).format('YYYY-MM-DD HH:mm:ss');
             return `${versionLabel} (${timeLabel})`;
@@ -66,17 +68,16 @@ export class VersionSuggest extends FuzzySuggestModal<DiffTarget> {
         }
     }
 
-    renderSuggestion(match: FuzzyMatch<DiffTarget>, el: HTMLElement): void {
+    override renderSuggestion(match: FuzzyMatch<DiffTarget>, el: HTMLElement): void {
         const target = match.item; // Extract the actual item from the match object
         el.addClass('mod-complex');
         const content = el.createDiv('suggestion-content');
         const title = content.createDiv('suggestion-title');
         const note = content.createDiv('suggestion-note');
 
-        // FIX: Use a more robust type guard by checking for a property unique to one of the union types.
         // The `in` operator provides a reliable way for TypeScript to discriminate the union.
         if ('versionNumber' in target) {
-            const version = target; // TypeScript now knows this is a VersionHistoryEntry
+            const version = target as VersionHistoryEntry; // TypeScript now knows this is a VersionHistoryEntry
             const versionLabel = version.name ? `V${version.versionNumber}: ${version.name}` : `Version ${version.versionNumber}`;
             title.setText(versionLabel);
             note.setText(moment(version.timestamp).format('LLLL'));
@@ -92,7 +93,7 @@ export class VersionSuggest extends FuzzySuggestModal<DiffTarget> {
         this.onChoose(item);
     }
 
-    onClose(): void {
+    override onClose(): void {
         super.onClose();
         if (!this.itemChosen && this.onCancel) {
             this.onCancel();

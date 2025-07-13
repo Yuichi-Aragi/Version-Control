@@ -1,14 +1,12 @@
 import { ItemView, WorkspaceLeaf, moment, App } from "obsidian";
 import { VIEW_TYPE_VERSION_DIFF } from "../constants";
 import type { AppStore } from "../state/store";
-// FIX: Removed unused 'VersionHistoryEntry' and 'DiffTarget' imports.
-// Their types are correctly inferred from DiffViewDisplayState.
 import type { DiffViewDisplayState } from "../types";
 import { renderDiffLines } from "./utils/diff-renderer";
 
 export class VersionDiffView extends ItemView {
     store: AppStore;
-    app: App;
+    override app: App;
     private currentDisplayState: DiffViewDisplayState | null = null;
     private tabContentEl: HTMLElement | null = null;
 
@@ -19,21 +17,21 @@ export class VersionDiffView extends ItemView {
         this.icon = "diff";
     }
 
-    getViewType(): string {
+    override getViewType(): string {
         return VIEW_TYPE_VERSION_DIFF;
     }
 
-    getDisplayText(): string {
+    override getDisplayText(): string {
         if (this.currentDisplayState) {
             const { version1, version2, noteName } = this.currentDisplayState;
             const v1Label = `V${version1.versionNumber}`;
             
-            // FIX: Use a proper type guard to safely access properties on the 'version2' DiffTarget.
             let v2Label: string;
             if ('versionNumber' in version2) {
-                // TypeScript now knows version2 is a VersionHistoryEntry
+                // This is a VersionHistoryEntry
                 v2Label = `V${version2.versionNumber}`;
             } else {
+                // This is a DiffTargetCurrent
                 v2Label = 'Current';
             }
             
@@ -42,7 +40,7 @@ export class VersionDiffView extends ItemView {
         return "Version Diff";
     }
 
-    async setState(state: any, options: any): Promise<void> {
+    override async setState(state: any, options: any): Promise<void> {
         await super.setState(state, options);
 
         if (state && state.version1 && state.version2 && state.diffChanges) {
@@ -50,14 +48,12 @@ export class VersionDiffView extends ItemView {
             if (this.tabContentEl) {
                 this.render();
             }
-            // FIX: Use the correct API to request a header update.
-            // 'requestUpdateLayout' does not exist. 'trigger("layout-change")' is the
-            // correct way to ask Obsidian to re-evaluate view titles.
+            // Request a header update using the correct API
             this.app.workspace.trigger("layout-change");
         }
     }
 
-    async onOpen() {
+    override async onOpen() {
         this.containerEl.addClass("version-diff-view");
         this.tabContentEl = this.contentEl.createDiv("v-tab-view-content"); // Use semantic class
         
@@ -68,7 +64,7 @@ export class VersionDiffView extends ItemView {
         }
     }
 
-    async onClose() {
+    override async onClose() {
         this.contentEl.empty();
         this.currentDisplayState = null;
         this.tabContentEl = null;
@@ -84,12 +80,12 @@ export class VersionDiffView extends ItemView {
         const headerEl = this.tabContentEl.createDiv("v-panel-header");
         const v1Label = version1.name ? `"${version1.name}" (V${version1.versionNumber})` : `Version ${version1.versionNumber}`;
         
-        // FIX: Use a type guard to safely construct the label for 'version2' (DiffTarget).
         let v2Label: string;
         if ('versionNumber' in version2) {
-            // TypeScript now knows version2 is a VersionHistoryEntry
+            // This is a VersionHistoryEntry
             v2Label = version2.name ? `"${version2.name}" (V${version2.versionNumber})` : `Version ${version2.versionNumber}`;
         } else {
+            // This is a DiffTargetCurrent
             v2Label = 'Current Note State';
         }
         
@@ -99,7 +95,6 @@ export class VersionDiffView extends ItemView {
             cls: "v-meta-label"
         });
         headerEl.createDiv({
-            // FIX: Use the same type guard to safely access the timestamp.
             text: `Compared (Green, +): ${v2Label} - ${'versionNumber' in version2 ? moment(version2.timestamp).format('LLL') : 'Now'}`,
             cls: "v-meta-label"
         });
