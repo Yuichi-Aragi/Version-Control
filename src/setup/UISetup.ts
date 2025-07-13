@@ -1,5 +1,5 @@
 import { Plugin, WorkspaceLeaf, MarkdownView } from 'obsidian';
-import { AppStore } from '../state/store';
+import type { AppStore } from '../state/store';
 import { thunks } from '../state/thunks';
 import { VIEW_TYPE_VERSION_CONTROL, VIEW_TYPE_VERSION_PREVIEW, VIEW_TYPE_VERSION_DIFF } from '../constants';
 import { VersionControlView } from '../ui/version-control-view';
@@ -81,7 +81,9 @@ export function registerCommands(plugin: Plugin, store: AppStore): void {
  */
 async function activateViewAndDispatch(plugin: Plugin, store: AppStore) {
     let contextLeaf: WorkspaceLeaf | null = null;
-    const currentActiveLeaf = plugin.app.workspace.activeLeaf;
+    // FIX: Coalesce `undefined` to `null`. `activeLeaf` can be `undefined`,
+    // but thunks and other logic consistently handle `WorkspaceLeaf | null`.
+    const currentActiveLeaf = plugin.app.workspace.activeLeaf ?? null;
 
     if (currentActiveLeaf && currentActiveLeaf.view instanceof MarkdownView) {
         const mdView = currentActiveLeaf.view as MarkdownView;
@@ -93,8 +95,16 @@ async function activateViewAndDispatch(plugin: Plugin, store: AppStore) {
     store.dispatch(thunks.initializeView(contextLeaf));
 
     const existingLeaves = plugin.app.workspace.getLeavesOfType(VIEW_TYPE_VERSION_CONTROL);
-    if (existingLeaves.length > 0) {
-        plugin.app.workspace.revealLeaf(existingLeaves[0]);
+    // The root cause of the error is that accessing an array element by index (e.g.,
+    // `existingLeaves[0]`) is typed as `T | undefined`. A simple length check is not
+    // always sufficient for the compiler to eliminate the `undefined` possibility.
+    // To fix this with 100% type safety, we get the element first and then perform
+    // a direct truthiness check on it. This explicitly proves to the compiler that
+    // the value is a valid `WorkspaceLeaf` before it's used.
+    const leafToReveal = existingLeaves[0];
+
+    if (leafToReveal) {
+        plugin.app.workspace.revealLeaf(leafToReveal);
     } else {
         const newLeaf = plugin.app.workspace.getRightLeaf(false);
         if (newLeaf) {
