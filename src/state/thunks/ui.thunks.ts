@@ -1,7 +1,7 @@
 import { App } from 'obsidian';
-import { AppThunk } from '../store';
+import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
-import { VersionHistoryEntry } from '../../types';
+import type { VersionHistoryEntry } from '../../types';
 import { AppStatus } from '../state';
 import { VIEW_TYPE_VERSION_PREVIEW } from '../../constants';
 import { initializeView } from './core.thunks';
@@ -125,7 +125,6 @@ export const createDeviation = (version: VersionHistoryEntry): AppThunk => async
     }
 };
 
-// FIX: Renamed unused 'dispatch' parameter to '_dispatch' to resolve TS6133 error.
 export const showVersionContextMenu = (version: VersionHistoryEntry, event: MouseEvent): AppThunk => (_dispatch, getState, container) => {
     const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
@@ -136,7 +135,6 @@ export const showVersionContextMenu = (version: VersionHistoryEntry, event: Mous
     uiService.showVersionContextMenu(version, event);
 };
 
-// FIX: Renamed unused 'dispatch' parameter to '_dispatch' to resolve TS6133 error.
 export const showSortMenu = (event: MouseEvent): AppThunk => (_dispatch, getState, container) => {
     const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();

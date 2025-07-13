@@ -1,7 +1,7 @@
-import { TFile, WorkspaceLeaf, CachedMetadata, App } from 'obsidian';
-import { AppThunk } from '../store';
+import { TFile, type WorkspaceLeaf, type CachedMetadata, App } from 'obsidian';
+import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
-import { AppError, VersionControlSettings } from '../../types';
+import type { AppError, VersionControlSettings } from '../../types';
 import { AppStatus } from '../state';
 import { NOTE_FRONTMATTER_KEY } from '../../constants';
 import { NoteManager } from '../../core/note-manager';

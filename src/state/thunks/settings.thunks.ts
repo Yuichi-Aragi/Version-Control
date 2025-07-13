@@ -1,6 +1,6 @@
-import { AppThunk } from '../store';
+import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
-import { VersionControlSettings, VersionHistoryEntry, VersionData } from '../../types';
+import type { VersionControlSettings, VersionHistoryEntry, VersionData } from '../../types';
 import { AppStatus } from '../state';
 import { customSanitizeFileName } from '../../utils/file';
 import { UIService } from '../../services/ui-service';
@@ -218,7 +218,7 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: '
             noteId: versionEntry.noteId,
             versionNumber: versionEntry.versionNumber,
             timestamp: versionEntry.timestamp,
-            name: versionEntry.name,
+            name: versionEntry.name ?? '',
             size: versionEntry.size,
             content: content,
         };

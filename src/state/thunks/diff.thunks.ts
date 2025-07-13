@@ -1,7 +1,7 @@
 import { App } from 'obsidian';
-import { AppThunk } from '../store';
+import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
-import { VersionHistoryEntry, DiffTarget } from '../../types';
+import type { VersionHistoryEntry, DiffTarget } from '../../types';
 import { AppStatus } from '../state';
 import { VIEW_TYPE_VERSION_DIFF } from '../../constants';
 import { UIService } from '../../services/ui-service';

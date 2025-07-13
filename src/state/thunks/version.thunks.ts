@@ -1,7 +1,7 @@
 import { TFile, App } from 'obsidian';
-import { AppThunk } from '../store';
+import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
-import { VersionHistoryEntry } from '../../types';
+import type { VersionHistoryEntry } from '../../types';
 import { AppStatus } from '../state';
 import { NOTE_FRONTMATTER_KEY } from '../../constants';
 import { loadHistoryForNoteId, initializeView } from './core.thunks';
@@ -30,11 +30,11 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => 
         }
         return;
     }
-    if (!initialState.file) {
+    const initialFileFromState = initialState.file;
+    if (!initialFileFromState) {
         if (!isAuto) uiService.showNotice("VC: Cannot save, no active file in state.", 3000);
         return;
     }
-    const { file: initialFileFromState } = initialState;
 
     dispatch(actions.setProcessing(true));
 
@@ -74,7 +74,7 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => 
         if (!isAuto) {
             uiService.showNotice("An unexpected error occurred while saving the version. Please check the console.");
         }
-        dispatch(initializeView(app.workspace.activeLeaf));
+        dispatch(initializeView(app.workspace.activeLeaf ?? null));
     } finally {
         backgroundTaskManager.manageWatchModeInterval(); // Reset the timer after any save attempt.
         const finalState = getState();
@@ -89,14 +89,18 @@ export const updateVersionDetails = (versionId: string, name: string): AppThunk 
     const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
 
-    if (state.status !== AppStatus.READY || !state.noteId || !state.file) {
+    if (state.status !== AppStatus.READY) {
         return;
     }
-    const { noteId, file } = state;
+    const noteId = state.noteId;
+    const file = state.file;
+    if (!noteId || !file) {
+        return;
+    }
 
     // Optimistic UI update
     const version_name = name.trim();
-    dispatch(actions.updateVersionDetailsInState({ versionId, name: version_name || undefined }));
+    dispatch(actions.updateVersionDetailsInState({ versionId, name: version_name }));
 
     try {
         await versionManager.updateVersionDetails(noteId, versionId, version_name);
@@ -118,13 +122,16 @@ export const requestEditVersion = (version: VersionHistoryEntry): AppThunk => (d
 
 export const requestRestore = (version: VersionHistoryEntry): AppThunk => (dispatch, getState) => {
     const state = getState();
-    if (state.status !== AppStatus.READY || !state.file) return;
+    if (state.status !== AppStatus.READY) return;
+    
+    const file = state.file;
+    if (!file) return;
 
     const versionLabel = version.name ? `"${version.name}" (V${version.versionNumber})` : `Version ${version.versionNumber}`;
     dispatch(actions.openPanel({
         type: 'confirmation',
         title: "Confirm Restore",
-        message: `This will overwrite the current content of "${state.file.basename}" with ${versionLabel}. A backup of the current content will be saved as a new version before restoring. Are you sure?`,
+        message: `This will overwrite the current content of "${file.basename}" with ${versionLabel}. A backup of the current content will be saved as a new version before restoring. Are you sure?`,
         onConfirmAction: restoreVersion(version.id),
     }));
 };
@@ -137,8 +144,11 @@ export const restoreVersion = (versionId: string): AppThunk => async (dispatch, 
     const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
     
     const initialState = getState();
-    if (initialState.status !== AppStatus.READY || !initialState.file || !initialState.noteId) return;
-    const { file: initialFileFromState, noteId: initialNoteIdFromState } = initialState;
+    if (initialState.status !== AppStatus.READY) return;
+
+    const initialFileFromState = initialState.file;
+    const initialNoteIdFromState = initialState.noteId;
+    if (!initialFileFromState || !initialNoteIdFromState) return;
 
     dispatch(actions.setProcessing(true));
     dispatch(actions.closePanel()); 
@@ -166,7 +176,7 @@ export const restoreVersion = (versionId: string): AppThunk => async (dispatch, 
         const message = error instanceof Error ? error.message : "An unexpected error occurred.";
         console.error("Version Control: Error in restoreVersion thunk.", error);
         uiService.showNotice(`Restore failed: ${message}`, 7000);
-        dispatch(initializeView(app.workspace.activeLeaf));
+        dispatch(initializeView(app.workspace.activeLeaf ?? null));
     } finally {
         backgroundTaskManager.manageWatchModeInterval();
     }
@@ -174,21 +184,27 @@ export const restoreVersion = (versionId: string): AppThunk => async (dispatch, 
 
 export const requestDelete = (version: VersionHistoryEntry): AppThunk => (dispatch, getState) => {
     const state = getState();
-    if (state.status !== AppStatus.READY || !state.file) return;
+    if (state.status === AppStatus.READY) {
+        const { file, history } = state;
+        if (!file) return;
 
-    const isLastVersion = state.history.length === 1 && state.history[0].id === version.id;
-    const versionLabel = version.name ? `"${version.name}" (V${version.versionNumber})` : `Version ${version.versionNumber}`;
-    let message = `Are you sure you want to permanently delete ${versionLabel} for "${state.file.basename}"? This action cannot be undone.`;
-    if (isLastVersion) {
-        message += ` This is the last version. Deleting it will also remove the note from version control (its ${NOTE_FRONTMATTER_KEY} will be cleared).`;
+        // Explicit null-safe check for history array
+        const firstVersion = history.length > 0 ? history[0] : null;
+        const isLastVersion = history.length === 1 && firstVersion && firstVersion.id === version.id;
+        
+        const versionLabel = version.name ? `"${version.name}" (V${version.versionNumber})` : `Version ${version.versionNumber}`;
+        let message = `Are you sure you want to permanently delete ${versionLabel} for "${file.basename}"? This action cannot be undone.`;
+        if (isLastVersion) {
+            message += ` This is the last version. Deleting it will also remove the note from version control (its ${NOTE_FRONTMATTER_KEY} will be cleared).`;
+        }
+
+        dispatch(actions.openPanel({
+            type: 'confirmation',
+            title: "Confirm Delete Version",
+            message: message,
+            onConfirmAction: deleteVersion(version.id),
+        }));
     }
-
-    dispatch(actions.openPanel({
-        type: 'confirmation',
-        title: "Confirm Delete Version",
-        message: message,
-        onConfirmAction: deleteVersion(version.id),
-    }));
 };
 
 export const deleteVersion = (versionId: string): AppThunk => async (dispatch, getState, container) => {
@@ -198,8 +214,13 @@ export const deleteVersion = (versionId: string): AppThunk => async (dispatch, g
     const app = container.get<App>(TYPES.App);
 
     const initialState = getState();
-    if (initialState.status !== AppStatus.READY || !initialState.file || !initialState.noteId) return;
-    const { file: initialFileFromState, noteId: initialNoteIdFromState, history: initialHistory } = initialState;
+    if (initialState.status !== AppStatus.READY) return;
+
+    const initialFileFromState = initialState.file;
+    const initialNoteIdFromState = initialState.noteId;
+    if (!initialFileFromState || !initialNoteIdFromState) return;
+    
+    const initialHistory = initialState.history;
 
     dispatch(actions.setProcessing(true));
     dispatch(actions.closePanel());
@@ -213,12 +234,15 @@ export const deleteVersion = (versionId: string): AppThunk => async (dispatch, g
             }
         }
 
+        // FIX: Explicit null-safe check for history array
+        const firstVersion = initialHistory.length > 0 ? initialHistory[0] : null;
+        const wasLastVersion = initialHistory.length === 1 && firstVersion && firstVersion.id === versionId;
+
         const success = await versionManager.deleteVersion(initialNoteIdFromState, versionId);
         if (success) {
-            const wasLastVersion = initialHistory.length === 1 && initialHistory[0].id === versionId;
             if (wasLastVersion) {
                 uiService.showNotice(`Last version deleted. "${initialFileFromState.basename}" is no longer under version control.`);
-                dispatch(initializeView(app.workspace.activeLeaf));
+                dispatch(initializeView(app.workspace.activeLeaf ?? null));
             } else {
                  dispatch(loadHistoryForNoteId(initialFileFromState, initialNoteIdFromState)); 
                  uiService.showNotice(`Version ${versionId.substring(0,6)}... deleted successfully.`);
@@ -230,20 +254,25 @@ export const deleteVersion = (versionId: string): AppThunk => async (dispatch, g
         const message = error instanceof Error ? error.message : "An unexpected error occurred.";
         console.error("Version Control: Error in deleteVersion thunk.", error);
         uiService.showNotice(`Delete failed: ${message}`, 7000);
-        dispatch(initializeView(app.workspace.activeLeaf));
+        dispatch(initializeView(app.workspace.activeLeaf ?? null));
     }
 };
 
 export const requestDeleteAll = (): AppThunk => (dispatch, getState) => {
     const state = getState();
-    if (state.status !== AppStatus.READY || !state.file) return;
+    if (state.status === AppStatus.READY) {
+        const { file } = state;
+        if (!file) return;
 
-    dispatch(actions.openPanel({
-        type: 'confirmation',
-        title: "Confirm Delete All Versions",
-        message: `This will permanently delete all version history for "${state.file.basename}" and remove it from version control (its ${NOTE_FRONTMATTER_KEY} will be cleared). This action cannot be undone. Are you sure?`,
-        onConfirmAction: deleteAllVersions(),
-    }));
+        // Create explicit variable to satisfy TypeScript
+        const basename = file.basename;
+        dispatch(actions.openPanel({
+            type: 'confirmation',
+            title: "Confirm Delete All Versions",
+            message: `This will permanently delete all version history for "${basename}" and remove it from version control (its ${NOTE_FRONTMATTER_KEY} will be cleared). This action cannot be undone. Are you sure?`,
+            onConfirmAction: deleteAllVersions(),
+        }));
+    }
 };
 
 export const deleteAllVersions = (): AppThunk => async (dispatch, getState, container) => {
@@ -252,8 +281,11 @@ export const deleteAllVersions = (): AppThunk => async (dispatch, getState, cont
     const app = container.get<App>(TYPES.App);
 
     const initialState = getState();
-    if (initialState.status !== AppStatus.READY || !initialState.file || !initialState.noteId) return;
-    const { file: initialFileFromState, noteId: initialNoteIdFromState } = initialState;
+    if (initialState.status !== AppStatus.READY) return;
+
+    const initialFileFromState = initialState.file;
+    const initialNoteIdFromState = initialState.noteId;
+    if (!initialFileFromState || !initialNoteIdFromState) return;
 
     dispatch(actions.setProcessing(true));
     dispatch(actions.closePanel());
@@ -262,7 +294,7 @@ export const deleteAllVersions = (): AppThunk => async (dispatch, getState, cont
         const success = await versionManager.deleteAllVersions(initialNoteIdFromState);
         if (success) {
             uiService.showNotice(`All versions for "${initialFileFromState.basename}" have been deleted.`);
-            dispatch(initializeView(app.workspace.activeLeaf));
+            dispatch(initializeView(app.workspace.activeLeaf ?? null));
         } else {
             throw new Error(`Failed to delete all versions for "${initialFileFromState.basename}".`);
         }
@@ -270,6 +302,6 @@ export const deleteAllVersions = (): AppThunk => async (dispatch, getState, cont
         const message = error instanceof Error ? error.message : "An unexpected error occurred.";
         console.error("Version Control: Error in deleteAllVersions thunk.", error);
         uiService.showNotice(`Delete all failed: ${message}`, 7000);
-        dispatch(initializeView(app.workspace.activeLeaf));
+        dispatch(initializeView(app.workspace.activeLeaf ?? null));
     }
 };
