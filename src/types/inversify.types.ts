@@ -17,6 +17,7 @@ export const TYPES = {
 
     // Services
     UIService: Symbol.for('UIService'),
+    QueueService: Symbol.for('QueueService'),
     
     // Core Utilities
     EventBus: Symbol.for('EventBus'),
@@ -25,7 +26,6 @@ export const TYPES = {
     // Low-level Storage Services & Repositories
     PathService: Symbol.for('PathService'),
     AtomicFileIO: Symbol.for('AtomicFileIO'),
-    WriteQueue: Symbol.for('WriteQueue'),
     CentralManifestRepo: Symbol.for('CentralManifestRepo'),
     NoteManifestRepo: Symbol.for('NoteManifestRepo'),
     VersionContentRepo: Symbol.for('VersionContentRepo'),
