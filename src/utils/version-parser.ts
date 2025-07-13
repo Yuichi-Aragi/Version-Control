@@ -11,7 +11,12 @@ export function parseNameAndTags(input: string): { name: string, tags: string[] 
     
     // Use lodash to extract, unique-ify, and limit tags
     const allMatches = Array.from(input.matchAll(tagRegex));
-    const extractedTags = map(allMatches, match => match[1]).filter(Boolean); // filter(Boolean) removes any empty tags
+    
+    // FIX: (TS2322) Use a type predicate `(tag): tag is string` to correctly
+    // narrow the type from `(string | undefined)[]` to `string[]`.
+    // `filter(Boolean)` removes falsy values but doesn't inform TypeScript.
+    const extractedTags = map(allMatches, match => match[1]).filter((tag): tag is string => !!tag);
+    
     const uniqueTags = uniq(extractedTags);
     const finalTags = take(uniqueTags, 5);
 

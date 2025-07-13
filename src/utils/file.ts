@@ -11,18 +11,19 @@ import { trim, trimStart, trimEnd, isEmpty } from 'lodash-es';
  */
 export async function generateUniqueFilePath(app: App, baseName: string, parentPath?: string): Promise<string> {
     const extension = '.md';
-    const folderPath = parentPath && parentPath !== '/' ? parentPath : ''; // Treat '/' as root, meaning no prefix
+    const folderPath: string = (parentPath && parentPath !== '/') ? parentPath : '';
+    const base = folderPath ? `${folderPath}/` : '';
     
     // Sanitize baseName once before the loop.
     const sanitizedBaseName = baseName.replace(/[\\/:*?"<>|]/g, '_').trim();
 
     let fileName = sanitizedBaseName + extension;
-    let filePath = folderPath ? normalizePath(`${folderPath}/${fileName}`) : normalizePath(fileName);
+    let filePath = normalizePath(base + fileName);
     let counter = 1;
 
     while (await app.vault.adapter.exists(filePath)) {
         fileName = `${sanitizedBaseName} ${counter}${extension}`;
-        filePath = folderPath ? normalizePath(`${folderPath}/${fileName}`) : normalizePath(fileName);
+        filePath = normalizePath(base + fileName);
         counter++;
         if (counter > 1000) { // Safety break to prevent infinite loops
             console.error("Version Control: Could not generate unique file path after 1000 attempts for:", baseName, parentPath);
@@ -47,7 +48,7 @@ export function customSanitizeFileName(name: string): string {
     }
 
     // 1. Remove control characters (ASCII 0-31 and 127-159)
-    let sanitized = name.replace(/[\x00-\x1f\x7f-\x9f]/g, '');
+    let sanitized: string = name.replace(/[\x00-\x1f\x7f-\x9f]/g, '');
 
     // 2. Replace characters invalid in Windows/Unix/MacOS filenames with an underscore.
     // Also includes characters that might be problematic in URLs or paths.
@@ -55,7 +56,8 @@ export function customSanitizeFileName(name: string): string {
 
     // 3. Handle reserved filenames on Windows (case-insensitive).
     // Check against the part before any potential extension-like dot.
-    const baseNamePartOnly = sanitized.split('.')[0];
+    const parts = sanitized.split('.');
+    const baseNamePartOnly = parts[0] || ''; // Explicitly handle possible undefined
     const reservedNames = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
     if (reservedNames.test(baseNamePartOnly)) {
         sanitized = `_${sanitized}`; 
@@ -72,7 +74,7 @@ export function customSanitizeFileName(name: string): string {
         }
     }
     
-    // 5. Remove leading/trailing dots, spaces, and underscores
+    // 5. Remove leading/trailing dots, spaces, and underscores.
     sanitized = trim(sanitized);
     sanitized = trimStart(sanitized, '._ ');
     sanitized = trimEnd(sanitized, '._ ');
