@@ -1,6 +1,6 @@
-import { AppStore } from "../../../state/store";
+import type { AppStore } from "../../../state/store";
 import { thunks } from "../../../state/thunks";
-import { VersionHistoryEntry } from "../../../types";
+import type { VersionHistoryEntry } from "../../../types";
 
 /**
  * Handles a click event on a history entry, typically to preview it.

@@ -1,9 +1,11 @@
 import { setIcon, moment } from "obsidian";
-import { VersionHistoryEntry } from "../../../types";
+import type { VersionHistoryEntry } from "../../../types";
 import { formatFileSize } from "../../utils/dom";
-import { AppStore } from "../../../state/store";
-import { AppState, AppStatus } from "../../../state/state";
-import { versionActions, VersionActionConfig } from "../../VersionActions";
+import type { AppStore } from "../../../state/store";
+import { AppStatus } from "../../../state/state";
+import type { AppState } from "../../../state/state";
+import { versionActions } from "../../VersionActions";
+import type { VersionActionConfig } from "../../VersionActions";
 import { thunks } from "../../../state/thunks/index";
 import { actions } from "../../../state/appSlice";
 import * as EventHandlers from "./HistoryEventHandlers";
@@ -29,13 +31,13 @@ export class HistoryEntryRenderer {
         entryEl.toggleClass('is-naming', isNamingThisVersion);
         entryEl.toggleClass('is-highlighted', version.id === highlightedVersionId);
         entryEl.setAttribute('role', 'listitem');
-        entryEl.dataset.versionId = version.id;
+        entryEl.dataset['versionId'] = version.id;
         
         const signature = `${version.name || ''}|${isNamingThisVersion}|${settings.isListView}|${settings.useRelativeTimestamps}`;
-        if (entryEl.dataset.signature === signature) {
+        if (entryEl.dataset['signature'] === signature) {
             return; // No need to re-render DOM children if signature is the same
         }
-        entryEl.dataset.signature = signature;
+        entryEl.dataset['signature'] = signature;
         
         entryEl.empty(); // Clear previous content before re-rendering
 

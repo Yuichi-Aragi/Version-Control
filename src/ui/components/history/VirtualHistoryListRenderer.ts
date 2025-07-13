@@ -1,7 +1,7 @@
 import { Component } from "obsidian";
 import { debounce } from 'lodash-es';
-import { VersionHistoryEntry } from "../../../types";
-import { AppState } from "../../../state/state";
+import type { VersionHistoryEntry } from "../../../types";
+import type { AppState } from "../../../state/state";
 import { HistoryEntryRenderer } from "./HistoryEntryRenderer";
 
 const RENDER_DEBOUNCE_MS = 20;
@@ -15,7 +15,6 @@ export class VirtualHistoryListRenderer extends Component {
     private renderedNodes: Map<string, HTMLElement> = new Map();
     private visibleNodeIds: Set<string> = new Set();
 
-    // FIX: Removed unused 'lastScrollTop' property to resolve TS6133 error.
     private debouncedUpdate: () => void;
     private totalItemHeight: number;
 
@@ -33,7 +32,7 @@ export class VirtualHistoryListRenderer extends Component {
         this.totalItemHeight = this.itemHeight + this.itemGap;
     }
 
-    onload() {
+    override onload() {
         this.viewportEl.addEventListener('scroll', this.debouncedUpdate);
         
         // Defer initial render until after the next frame to ensure layout is stable
@@ -47,7 +46,7 @@ export class VirtualHistoryListRenderer extends Component {
         this.register(() => resizeObserver.disconnect());
     }
 
-    onunload() {
+    override onunload() {
         this.viewportEl.removeEventListener('scroll', this.debouncedUpdate);
         this.viewportEl.empty();
         this.renderedNodes.clear();
@@ -90,8 +89,9 @@ export class VirtualHistoryListRenderer extends Component {
 
         const newVisibleNodeIds = new Set<string>();
         for (let i = startIndex; i <= endIndex; i++) {
-            if (this.items[i]) {
-                newVisibleNodeIds.add(this.items[i].id);
+            const item = this.items[i];
+            if (item) {
+                newVisibleNodeIds.add(item.id);
             }
         }
 

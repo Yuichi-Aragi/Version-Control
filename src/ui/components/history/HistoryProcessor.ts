@@ -1,7 +1,8 @@
 import { moment } from "obsidian";
 import { orderBy } from 'lodash-es';
-import { VersionHistoryEntry } from "../../../types";
-import { AppState, AppStatus } from "../../../state/state";
+import type { VersionHistoryEntry } from "../../../types";
+import { AppStatus } from "../../../state/state";
+import type { AppState } from "../../../state/state";
 import { formatFileSize } from "../../utils/dom";
 
 /**
