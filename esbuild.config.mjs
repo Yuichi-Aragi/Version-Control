@@ -29,7 +29,7 @@ const buildOptions = {
   bundle: true,
   external: ["obsidian"],
   format: "cjs",
-  target: "es2018",
+  target: "es2022",
   logLevel: "info", // We'll capture logs manually
   sourcemap: false,
   treeShaking: true,
