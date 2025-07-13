@@ -3,7 +3,7 @@ import { map, orderBy } from 'lodash-es';
 import { injectable, inject } from 'inversify';
 import { ManifestManager } from "./manifest-manager";
 import { NoteManager } from "./note-manager";
-import { VersionHistoryEntry } from "../types";
+import type { VersionHistoryEntry } from "../types";
 import { generateUniqueFilePath } from "../utils/file";
 import { NOTE_FRONTMATTER_KEY } from "../constants";
 import { PluginEvents } from "./plugin-events";
@@ -78,8 +78,10 @@ export class VersionManager {
             const updatedManifest = await this.manifestManager.updateNoteManifest(noteId, (manifest) => {
                 const versionNumber = (manifest.totalVersions || 0) + 1;
                 manifest.versions[versionId] = {
-                    versionNumber, timestamp, size,
-                    name: version_name || undefined,
+                    versionNumber,
+                    timestamp,
+                    size,
+                    ...(version_name && { name: version_name }),
                 };
                 manifest.totalVersions = versionNumber;
                 manifest.lastModified = timestamp;
@@ -87,18 +89,26 @@ export class VersionManager {
             });
 
             const savedVersionData = updatedManifest.versions[versionId];
+            if (!savedVersionData) {
+                throw new Error(`Failed to retrieve saved version data for version ${versionId} from manifest after update.`);
+            }
+
             const displayName = version_name ? `"${version_name}" (V${savedVersionData.versionNumber})` : `Version ${savedVersionData.versionNumber}`;
             this.eventBus.trigger('version-saved', noteId);
 
             return {
                 status: 'saved',
                 newVersionEntry: {
-                    id: versionId, noteId, notePath: file.path,
+                    id: versionId,
+                    noteId,
+                    notePath: file.path,
                     versionNumber: savedVersionData.versionNumber,
-                    timestamp: timestamp, name: version_name || undefined,
+                    timestamp: timestamp,
                     size,
+                    ...(version_name && { name: version_name }),
                 },
-                displayName, newNoteId: noteId,
+                displayName,
+                newNoteId: noteId,
             };
 
         } catch (error) {
@@ -119,10 +129,15 @@ export class VersionManager {
         const version_name = name.trim();
 
         await this.manifestManager.updateNoteManifest(noteId, (manifest) => {
-            if (!manifest.versions[versionId]) {
+            const versionData = manifest.versions[versionId];
+            if (!versionData) {
                 throw new Error(`Version ${versionId} not found in manifest for note ${noteId}.`);
             }
-            manifest.versions[versionId].name = version_name || undefined;
+            if (version_name) {
+                versionData.name = version_name;
+            } else {
+                delete versionData.name;
+            }
             manifest.lastModified = new Date().toISOString();
             return manifest;
         });
@@ -140,8 +155,8 @@ export class VersionManager {
                 notePath: noteManifest.notePath,
                 versionNumber: data.versionNumber,
                 timestamp: data.timestamp,
-                name: data.name,
                 size: data.size,
+                ...(data.name && { name: data.name }),
             }));
 
             return orderBy(history, ['versionNumber'], ['desc']);

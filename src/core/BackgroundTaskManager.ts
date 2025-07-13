@@ -26,7 +26,7 @@ export class BackgroundTaskManager extends Component {
         this.store = store;
     }
 
-    onunload() {
+    public override onunload(): void {
         // This method is called automatically by Obsidian when the plugin unloads
         // because this component is registered as a child in main.ts.
         this.clearAllIntervals();

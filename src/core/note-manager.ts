@@ -1,8 +1,9 @@
-import { App, TFile, WorkspaceLeaf, MarkdownView, FrontMatterCache } from "obsidian";
+import { App, TFile, WorkspaceLeaf, MarkdownView } from "obsidian";
+import type { FrontMatterCache } from "obsidian";
 import { injectable, inject } from 'inversify';
 import { ManifestManager } from "./manifest-manager";
 import { NOTE_FRONTMATTER_KEY } from "../constants";
-import { ActiveNoteInfo } from "../types";
+import type { ActiveNoteInfo } from "../types";
 import { generateUniqueId } from "../utils/id";
 import { TYPES } from "../types/inversify.types";
 

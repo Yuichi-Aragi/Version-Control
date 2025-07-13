@@ -1,6 +1,6 @@
 import { App, Vault } from "obsidian";
 import { injectable, inject } from 'inversify';
-import { NoteManifest } from "../types";
+import type { NoteManifest } from "../types";
 import { PathService } from "./storage/path-service";
 import { CentralManifestRepository } from "./storage/central-manifest-repository";
 import { NoteManifestRepository } from "./storage/note-manifest-repository";
