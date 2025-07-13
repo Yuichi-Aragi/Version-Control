@@ -68,10 +68,4 @@ You can't find a settings tab? Well, there isn't one! I absolutely hate them. Yo
 
 Just click the **Settings icon** (`⚙️`) in the top right of the Version Control panel to open the settings overlay. You can toggle features, set cleanup rules, and change the view mode on the fly.
 
-### Shameless Plug 🔌
-
-Do check out my **In-App Builder** plugin that lets you build and bundle your plugins right inside your vault. No external tools needed! Fun fact: this whole plugin was compiled and built by IAB from start to finish.
-
-[IAB](https://github.com/Yuichi-Aragi/IAB)
-
-Bye.
+Bye!
