@@ -8,7 +8,7 @@ import { getInitialState } from './state/state';
 import { PluginEvents } from './core/plugin-events';
 import { PathService } from './core/storage/path-service';
 import { AtomicFileIO } from './core/storage/atomic-file-io';
-import { WriteQueue } from './core/storage/write-queue';
+import { QueueService } from './services/queue-service';
 import { CentralManifestRepository } from './core/storage/central-manifest-repository';
 import { NoteManifestRepository } from './core/storage/note-manifest-repository';
 import { VersionContentRepository } from './core/storage/version-content-repository';
@@ -51,7 +51,7 @@ export function configureServices(plugin: VersionControlPlugin): Container {
     // == SINGLETON CLASS BINDINGS ==
     // Foundational services
     container.bind<PluginEvents>(TYPES.EventBus).to(PluginEvents);
-    container.bind<WriteQueue>(TYPES.WriteQueue).to(WriteQueue);
+    container.bind<QueueService>(TYPES.QueueService).to(QueueService);
 
     // Low-level Storage Services
     container.bind<PathService>(TYPES.PathService).to(PathService);

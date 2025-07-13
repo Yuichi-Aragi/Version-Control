@@ -1,5 +1,5 @@
-import { TFile } from "obsidian";
-import { Change } from "diff";
+import type { TFile } from "obsidian";
+import type { Change } from "diff";
 
 export interface VersionControlSettings {
   maxVersionsPerNote: number;
@@ -44,7 +44,6 @@ export interface NoteManifest {
   createdAt: string;
   lastModified: string;
   // Per-note settings can override any global setting EXCEPT the orphan cleanup setting.
-  // FIX: Removed 'applySettingsGlobally' from the Omit<> as the property is being removed entirely.
   settings?: Partial<Omit<VersionControlSettings, 'autoCleanupOrphanedVersions'>>;
 }
 

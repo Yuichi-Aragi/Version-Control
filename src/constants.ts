@@ -1,4 +1,4 @@
-import { VersionControlSettings } from "./types";
+import type { VersionControlSettings } from "./types";
 
 export const VIEW_TYPE_VERSION_CONTROL = "version-control-view";
 export const VIEW_TYPE_VERSION_PREVIEW = "version-preview-view";

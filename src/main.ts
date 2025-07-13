@@ -21,7 +21,7 @@ export default class VersionControlPlugin extends Plugin {
     private cleanupManager!: CleanupManager;
     private backgroundTaskManager!: BackgroundTaskManager;
 
-	async onload() {
+	override async onload() {
 		try {
 			// The settings object is no longer loaded here.
             // configureServices will handle setting up the initial state.
@@ -74,7 +74,7 @@ export default class VersionControlPlugin extends Plugin {
 		}
 	}
 
-	async onunload() {
+	override async onunload() {
         await this.cleanupManager?.completePendingCleanups();
 	}
 
@@ -84,7 +84,7 @@ export default class VersionControlPlugin extends Plugin {
 	}
 
     // This method is no longer used for settings. It's kept for future plugin-wide data.
-    async saveData(data: any): Promise<void> {
+    override async saveData(data: any): Promise<void> {
         await super.saveData(data);
     }
 }
