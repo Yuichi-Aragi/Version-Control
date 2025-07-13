@@ -20,7 +20,7 @@ export class DiffManager extends Component {
         super();
     }
 
-    onload() {
+    override onload() {
         // FIX: Use the component's `register` method for automatic cleanup of event listeners.
         // This is more robust than manually unsubscribing in `onunload` and is consistent
         // with other components like CleanupManager.
@@ -34,7 +34,7 @@ export class DiffManager extends Component {
         this.register(() => this.eventBus.off('history-deleted', this.handleHistoryChange));
     }
 
-    onunload() {
+    override onunload() {
         // The event listeners are now cleaned up automatically by the `register` calls in `onload`.
         this.diffCache.clear();
     }

@@ -30,12 +30,15 @@ export class ExportManager {
         return Promise.all(
             history.map(async (versionEntry) => {
                 const content = await this.versionManager.getVersionContent(noteId, versionEntry.id);
+                // FIX: Conditionally add the 'name' property only if it exists.
+                // This satisfies the 'exactOptionalPropertyTypes' compiler option by ensuring
+                // 'name' is either a string or the property is omitted, but never explicitly undefined.
                 return {
                     id: versionEntry.id,
                     noteId: versionEntry.noteId,
                     versionNumber: versionEntry.versionNumber,
                     timestamp: versionEntry.timestamp,
-                    name: versionEntry.name,
+                    ...(versionEntry.name && { name: versionEntry.name }),
                     size: versionEntry.size,
                     content: content || "", // Ensure content is always a string
                 };
