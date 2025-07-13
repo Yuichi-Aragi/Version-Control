@@ -1,9 +1,11 @@
-import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { createSlice } from '@reduxjs/toolkit';
+import type { PayloadAction } from '@reduxjs/toolkit';
 import { TFile } from 'obsidian';
-import { Change } from 'diff';
+import type { Change } from 'diff';
 import { find } from 'lodash-es';
-import { AppState, AppStatus, getInitialState, PanelState, SortOrder } from './state';
-import { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, ActiveNoteInfo } from '../types';
+import { AppStatus, getInitialState } from './state';
+import type { AppState, PanelState, SortOrder } from './state';
+import type { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, ActiveNoteInfo } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
 
 const initialState: AppState = getInitialState(DEFAULT_SETTINGS);
@@ -109,7 +111,12 @@ export const appSlice = createSlice({
             if (state.status === AppStatus.READY) {
                 const version = find(state.history, { id: action.payload.versionId });
                 if (version) {
-                    version.name = action.payload.name;
+                    // The `name` property on the payload is optional. The error TS2412 indicates
+                    // that `version.name` is of type `string` and cannot be assigned `undefined`.
+                    // We only perform the assignment if a name is actually provided in the payload.
+                    if (action.payload.name !== undefined) {
+                        version.name = action.payload.name;
+                    }
                 }
             }
         },

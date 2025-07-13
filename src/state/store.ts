@@ -1,6 +1,7 @@
-import { configureStore, ThunkAction, Action } from '@reduxjs/toolkit';
+import { configureStore } from '@reduxjs/toolkit';
+import type { ThunkAction, Action } from '@reduxjs/toolkit';
 import { Container } from 'inversify';
-import { AppState } from './state';
+import type { AppState } from './state';
 import { appSlice } from './appSlice';
 
 /**
