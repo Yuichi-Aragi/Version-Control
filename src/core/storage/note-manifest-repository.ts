@@ -1,8 +1,8 @@
 import { injectable, inject } from 'inversify';
-import { NoteManifest } from "../../types";
+import type { NoteManifest } from "../../types";
 import { AtomicFileIO } from "./atomic-file-io";
 import { PathService } from "./path-service";
-import { WriteQueue } from "./write-queue";
+import { QueueService } from '../../services/queue-service';
 import { TYPES } from '../../types/inversify.types';
 
 /**
@@ -16,7 +16,7 @@ export class NoteManifestRepository {
     constructor(
         @inject(TYPES.AtomicFileIO) private atomicFileIO: AtomicFileIO,
         @inject(TYPES.PathService) private pathService: PathService,
-        @inject(TYPES.WriteQueue) private writeQueue: WriteQueue
+        @inject(TYPES.QueueService) private queueService: QueueService
     ) {}
 
     public async load(noteId: string): Promise<NoteManifest | null> {
@@ -46,7 +46,7 @@ export class NoteManifestRepository {
         noteId: string,
         updateFn: (manifest: NoteManifest) => NoteManifest | Promise<NoteManifest>
     ): Promise<NoteManifest> {
-        return this.writeQueue.enqueue(noteId, async () => {
+        return this.queueService.enqueue(noteId, async () => {
             const manifest = await this.load(noteId);
             if (!manifest) {
                 throw new Error(`Cannot update manifest for non-existent note ID: ${noteId}`);
@@ -61,6 +61,6 @@ export class NoteManifestRepository {
 
     public invalidateCache(noteId: string): void {
         this.cache.delete(noteId);
-        this.writeQueue.clear(noteId);
+        this.queueService.clear(noteId);
     }
 }

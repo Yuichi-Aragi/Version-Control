@@ -1,8 +1,8 @@
 import { injectable, inject } from 'inversify';
-import { CentralManifest } from "../../types";
+import type { CentralManifest } from "../../types";
 import { AtomicFileIO } from "./atomic-file-io";
 import { PathService } from "./path-service";
-import { WriteQueue } from "./write-queue";
+import { QueueService } from '../../services/queue-service';
 import { TYPES } from '../../types/inversify.types';
 
 /**
@@ -14,11 +14,12 @@ export class CentralManifestRepository {
     private cache: CentralManifest | null = null;
     private pathToIdMap: Map<string, string> | null = null;
     private manifestPath: string;
+    private readonly queueKey = 'central-manifest';
 
     constructor(
         @inject(TYPES.AtomicFileIO) private atomicFileIO: AtomicFileIO,
         @inject(TYPES.PathService) private pathService: PathService,
-        @inject(TYPES.WriteQueue) private writeQueue: WriteQueue
+        @inject(TYPES.QueueService) private queueService: QueueService
     ) {
         this.manifestPath = this.pathService.getCentralManifestPath();
     }
@@ -27,7 +28,7 @@ export class CentralManifestRepository {
         if (this.cache && !forceReload) {
             return this.cache;
         }
-        // FIX: Add globalSettings to the default manifest structure.
+        
         const defaultManifest: CentralManifest = { version: "1.0.0", globalSettings: {}, notes: {} };
         const loaded = await this.atomicFileIO.readJsonFile<CentralManifest>(this.manifestPath, defaultManifest);
         
@@ -88,13 +89,17 @@ export class CentralManifestRepository {
 
     public async updateGlobalSettings(updateFn: (settings: CentralManifest['globalSettings']) => CentralManifest['globalSettings']): Promise<CentralManifest> {
         return this.update((manifest) => {
-            manifest.globalSettings = updateFn(manifest.globalSettings || {});
+            // The updateFn can return `undefined`, which is not a valid assignment
+            // when `exactOptionalPropertyTypes` is enabled. We default to an empty object
+            // to prevent this error and maintain consistency with the `load` method,
+            // which also ensures `globalSettings` is always an object.
+            manifest.globalSettings = updateFn(manifest.globalSettings || {}) ?? {};
             return manifest;
         });
     }
 
     private async update(updateFn: (manifest: CentralManifest) => CentralManifest): Promise<CentralManifest> {
-        return this.writeQueue.enqueue('central-manifest', async () => {
+        return this.queueService.enqueue(this.queueKey, async () => {
             const manifest = await this.load(true); // Load fresh inside the queue
             const newManifest = updateFn(manifest);
             await this.atomicFileIO.writeJsonFile(this.manifestPath, newManifest);
