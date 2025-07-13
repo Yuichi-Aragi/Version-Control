@@ -1,5 +1,5 @@
 ***
-So in my work flow I have to constantly modify the same version of the note. I'm a perfectionist at core, that's why I always have to create many variations of the same content until I'm satisfied. But this introduces a problem: Obsidian doesn't have any built-in version control feature, so I made one myself. This plugin lets you create a finite number of versions of any note.
+So in my work flow I have to constantly modify the same version of the note. I'm a perfectionist at core, that's why I always have to create many variations of the same content until I'm satisfied. But this introduces a problem, and i wanted a solution, so I made one myself. This plugin lets you create a finite number of versions of any note.
 
 # Version Control for Obsidian
 
