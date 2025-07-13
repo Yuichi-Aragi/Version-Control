@@ -1,4 +1,4 @@
-import { Change } from "diff";
+import type { Change } from "diff";
 
 /**
  * Renders diff changes into a container element with a unified, two-column line number format.
