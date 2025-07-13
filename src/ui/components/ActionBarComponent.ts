@@ -1,18 +1,16 @@
 import { setIcon, Component } from "obsidian";
 import { debounce } from 'lodash-es';
-import { AppStore } from "../../state/store";
-import { AppState, AppStatus } from "../../state/state";
+import type { AppStore } from "../../state/store";
+import type { AppState } from "../../state/state";
+import { AppStatus } from "../../state/state";
 import { actions } from "../../state/appSlice";
 import { thunks } from "../../state/thunks/index";
-// FIX: Removed unused imports for Menu, SortOrder, and VersionControlSettings.
 
 export class ActionBarComponent extends Component {
     private container: HTMLElement;
     protected store: AppStore;
 
     // Element references
-    // FIX: Use definite assignment assertion '!' for all properties that are
-    // correctly initialized in methods called from the constructor.
     private defaultActionsEl!: HTMLElement;
     private searchContainerEl!: HTMLElement;
     private searchInput!: HTMLInputElement;
@@ -223,7 +221,7 @@ export class ActionBarComponent extends Component {
         return this.container;
     }
 
-    onunload() {
+    override onunload() {
         this.container.remove();
     }
 }

@@ -1,7 +1,8 @@
 import { Setting, setIcon } from "obsidian";
 import { debounce } from 'lodash-es';
-import { AppStore } from "../../state/store";
-import { AppState, AppStatus } from "../../state/state";
+import type { AppStore } from "../../state/store";
+import { AppStatus } from "../../state/state";
+import type { AppState } from "../../state/state";
 import { actions } from "../../state/appSlice";
 import { thunks } from "../../state/thunks/index";
 import { BasePanelComponent } from "./BasePanelComponent";
@@ -289,7 +290,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
             });
     }
 
-    onunload() {
+    override onunload() {
         if (this.autoCloseTimer) {
             window.clearTimeout(this.autoCloseTimer);
             this.autoCloseTimer = null;

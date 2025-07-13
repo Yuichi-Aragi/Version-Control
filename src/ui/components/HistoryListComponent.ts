@@ -1,7 +1,8 @@
 import { setIcon, Component } from "obsidian";
-import { AppStore } from "../../state/store";
-import { AppState, AppStatus } from "../../state/state";
-import { VersionHistoryEntry, VersionControlSettings } from "../../types"; // FIX: Corrected import path for VersionControlSettings
+import type { AppStore } from "../../state/store";
+import { AppStatus } from "../../state/state";
+import type { AppState } from "../../state/state";
+import type { VersionHistoryEntry, VersionControlSettings } from "../../types";
 import { getFilteredAndSortedHistory } from "./history/HistoryProcessor";
 import { HistoryEntryRenderer } from "./history/HistoryEntryRenderer";
 import { renderSkeletonEntry, renderEmptyState } from "./history/HistoryListStates";
@@ -15,7 +16,6 @@ export class HistoryListComponent extends Component {
     private container: HTMLElement;
     private listViewport: HTMLElement | null = null;
     private countEl: HTMLElement | null = null;
-    // FIX: Removed unused 'store' property to resolve TS6133 error.
     private entryRenderer: HistoryEntryRenderer;
     private virtualRenderer: VirtualHistoryListRenderer | null = null;
 
@@ -127,7 +127,7 @@ export class HistoryListComponent extends Component {
         return this.container;
     }
 
-    onunload(): void {
+    override onunload(): void {
         this.destroyVirtualRenderer();
         this.container.remove();
     }

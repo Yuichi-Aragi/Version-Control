@@ -1,6 +1,6 @@
 import { MarkdownRenderer, setIcon, App, moment, Component } from "obsidian";
-import { AppStore } from "../../state/store";
-import { PreviewPanel as PreviewPanelState, AppState } from "../../state/state";
+import type { AppStore } from "../../state/store";
+import type { PreviewPanel as PreviewPanelState, AppState } from "../../state/state";
 import { actions } from "../../state/appSlice";
 import { BasePanelComponent } from "./BasePanelComponent";
 
@@ -112,7 +112,7 @@ export class PreviewPanelComponent extends BasePanelComponent {
         }
     }
 
-    onunload() {
+    override onunload() {
         this.lastRenderedVersionId = undefined;
         this.previewContentEl = null;
         super.onunload();

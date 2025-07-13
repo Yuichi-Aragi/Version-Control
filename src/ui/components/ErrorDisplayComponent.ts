@@ -1,6 +1,6 @@
 import { setIcon, App, Component } from "obsidian";
-import { AppStore } from "../../state/store";
-import { AppError } from "../../types";
+import type { AppStore } from "../../state/store";
+import type { AppError } from "../../types";
 import { thunks } from "../../state/thunks/index";
 
 export class ErrorDisplayComponent extends Component {
@@ -47,7 +47,7 @@ export class ErrorDisplayComponent extends Component {
         return this.container;
     }
 
-    onunload() {
+    override onunload() {
         this.container.remove();
     }
 }

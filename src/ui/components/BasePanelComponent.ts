@@ -1,5 +1,5 @@
 import { Component } from "obsidian";
-import { AppStore } from "../../state/store";
+import type { AppStore } from "../../state/store";
 
 /**
  * An abstract base class for UI panel components that typically overlay or integrate
@@ -54,7 +54,7 @@ export abstract class BasePanelComponent extends Component {
         return this.container;
     }
 
-    onunload() {
+    override onunload() {
         // This will be called automatically when the parent component unloads.
         // It ensures the DOM element is removed from the parent.
         this.container.remove();

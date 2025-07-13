@@ -1,5 +1,6 @@
-import { AppStore } from "../../state/store";
-import { ConfirmationPanel as ConfirmationPanelState, AppStatus } from "../../state/state";
+import type { AppStore } from "../../state/store";
+import type { ConfirmationPanel as ConfirmationPanelState } from "../../state/state";
+import { AppStatus } from "../../state/state";
 import { actions } from "../../state/appSlice";
 import { BasePanelComponent } from "./BasePanelComponent";
 
@@ -11,7 +12,6 @@ export class ConfirmationPanelComponent extends BasePanelComponent {
         this.innerPanel = this.container.createDiv({ cls: "v-inline-panel v-confirmation-panel" });
     }
 
-    // FIX: Removed unused 'appState' parameter and its 'AppState' type import to resolve TS6133 error.
     render(panelState: ConfirmationPanelState | null) {
         this.toggle(!!panelState);
         
@@ -23,7 +23,7 @@ export class ConfirmationPanelComponent extends BasePanelComponent {
         }
         
         this.innerPanel.empty();
-        this.innerPanel.dataset.confirmationTitle = panelState.title;
+        this.innerPanel.dataset['confirmationTitle'] = panelState.title;
 
         this.innerPanel.createEl("h3", { text: panelState.title });
         this.innerPanel.createEl("p", { text: panelState.message });

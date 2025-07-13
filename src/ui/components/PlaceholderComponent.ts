@@ -47,7 +47,7 @@ export class PlaceholderComponent extends Component {
         return this.container;
     }
 
-    onunload() {
+    override onunload() {
         this.container.remove();
     }
 }

@@ -1,9 +1,8 @@
 import { setIcon } from "obsidian";
-import { AppStore } from "../../state/store";
-import { DiffPanel as DiffPanelState } from "../../state/state";
+import type { AppStore } from "../../state/store";
+import type { DiffPanel as DiffPanelState } from "../../state/state";
 import { actions } from "../../state/appSlice";
 import { BasePanelComponent } from "./BasePanelComponent";
-// FIX: Removed unused 'Change' import to resolve TS6133 error.
 import { renderDiffLines } from "../utils/diff-renderer";
 
 export class DiffPanelComponent extends BasePanelComponent {
@@ -61,7 +60,7 @@ export class DiffPanelComponent extends BasePanelComponent {
         }
     }
 
-    onunload() {
+    override onunload() {
         this.lastRenderedKey = null;
         super.onunload();
     }
