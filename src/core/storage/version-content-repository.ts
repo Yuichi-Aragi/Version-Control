@@ -3,16 +3,19 @@ import { injectable, inject } from "inversify";
 import { PathService } from "./path-service";
 import type { NoteManifest } from "../../types";
 import { TYPES } from "../../types/inversify.types";
+import { QueueService } from "../../services/queue-service";
 
 /**
  * Repository for managing the content of individual versions.
- * Handles reading, writing, and deleting the actual version files.
+ * Handles reading, writing, and deleting the actual version files,
+ * and encapsulates concurrency control for write/delete operations.
  */
 @injectable()
 export class VersionContentRepository {
   constructor(
     @inject(TYPES.App) private readonly app: App,
-    @inject(TYPES.PathService) private readonly pathService: PathService
+    @inject(TYPES.PathService) private readonly pathService: PathService,
+    @inject(TYPES.QueueService) private readonly queueService: QueueService
   ) {}
 
   public async read(
@@ -46,43 +49,47 @@ export class VersionContentRepository {
     versionId: string,
     content: string
   ): Promise<{ size: number }> {
-    const versionFilePath = this.pathService.getNoteVersionPath(
-      noteId,
-      versionId
-    );
-    await this.app.vault.adapter.write(versionFilePath, content);
+    return this.queueService.enqueue(noteId, async () => {
+        const versionFilePath = this.pathService.getNoteVersionPath(
+          noteId,
+          versionId
+        );
+        await this.app.vault.adapter.write(versionFilePath, content);
 
-    let fileSize = content.length;
-    try {
-      const stats = await this.app.vault.adapter.stat(versionFilePath);
-      // Ensure stats is defined and has a numeric size property
-      if (stats?.size !== undefined) {
-        fileSize = stats.size;
-      }
-    } catch (statError) {
-      console.warn(
-        `VC: Could not get file stats for ${versionFilePath}. Using content length.`,
-        statError
-      );
-    }
-    return { size: fileSize };
+        let fileSize = content.length;
+        try {
+          const stats = await this.app.vault.adapter.stat(versionFilePath);
+          // Ensure stats is defined and has a numeric size property
+          if (stats?.size !== undefined) {
+            fileSize = stats.size;
+          }
+        } catch (statError) {
+          console.warn(
+            `VC: Could not get file stats for ${versionFilePath}. Using content length.`,
+            statError
+          );
+        }
+        return { size: fileSize };
+    });
   }
 
   public async delete(
     noteId: string,
     versionId: string
   ): Promise<void> {
-    const versionFilePath = this.pathService.getNoteVersionPath(
-      noteId,
-      versionId
-    );
-    if (await this.app.vault.adapter.exists(versionFilePath)) {
-      await this.app.vault.adapter.remove(versionFilePath);
-    } else {
-      console.warn(
-        `VC: Version file to delete was already missing: ${versionFilePath}`
-      );
-    }
+    return this.queueService.enqueue(noteId, async () => {
+        const versionFilePath = this.pathService.getNoteVersionPath(
+          noteId,
+          versionId
+        );
+        if (await this.app.vault.adapter.exists(versionFilePath)) {
+          await this.app.vault.adapter.remove(versionFilePath);
+        } else {
+          console.warn(
+            `VC: Version file to delete was already missing: ${versionFilePath}`
+          );
+        }
+    });
   }
 
   public async getLatestVersionContent(
