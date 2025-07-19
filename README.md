@@ -61,11 +61,4 @@ This plugin solves that. It allows you to save "snapshots" of your notes at any 
 4.  **Interact with History:** As you create more versions, they will appear in the list.
     *   In **Card View**, use the buttons on each version to `View`, `Restore`, or `Delete`.
     *   In **Compact View**, right-click on any version to see all available actions in a context menu.
-
-### Where Are The Settings? 🤔
-
-You can't find a settings tab? Well, there isn't one! I absolutely hate them. You can configure everything you need right from the UI.
-
-Just click the **Settings icon** (`⚙️`) in the top right of the Version Control panel to open the settings overlay. You can toggle features, set cleanup rules, and change the view mode on the fly.
-
-Bye!
+***
