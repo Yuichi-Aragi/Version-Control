@@ -6,7 +6,7 @@
 }
 .version-preview-view .v-tab-view-content,
 .version-diff-view .v-tab-view-content { 
-    padding: var(--size-4-6); 
+    padding: var(--size-4-4); 
     height: 100%;
     overflow-y: auto;
     display: flex;
@@ -49,5 +49,6 @@
 .version-diff-view .v-version-content-preview { 
     height: auto; 
     max-height: none; 
-    flex-grow: 0; 
+    /* FIX: Allow the preview content to grow and fill the available space in the tab */
+    flex-grow: 1; 
 }

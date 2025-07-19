@@ -8,6 +8,13 @@
     padding: var(--size-4-2) 0;
 }
 
+/* NEW: Disable interactions when a panel is active */
+.v-history-list-container.is-panel-active .v-history-list {
+    pointer-events: none;
+    opacity: 0.6;
+    transition: opacity 0.3s ease-in-out;
+}
+
 .v-history-header {
     flex-shrink: 0;
     font-weight: bold;
@@ -38,14 +45,6 @@
     /* FIX: Add horizontal padding to the scroll viewport */
     padding-left: var(--size-4-2);
     padding-right: var(--size-4-2);
-
-    /* FEATURE: Hide scrollbar */
-    -ms-overflow-style: none;  /* IE and Edge */
-    scrollbar-width: none;  /* Firefox */
-}
-/* FEATURE: Hide scrollbar for WebKit browsers */
-.v-history-list::-webkit-scrollbar {
-    display: none;
 }
 
 

@@ -35,6 +35,13 @@
     opacity: 0.6;
 }
 
+/* Global state to disable the action bar when an overlay panel is active */
+.version-control-content.is-overlay-active .v-actions-container {
+    pointer-events: none;
+    opacity: 0.6;
+    transition: opacity 0.3s ease-in-out;
+}
+
 .v-main {
     flex-grow: 1;
     overflow: hidden;
@@ -61,23 +68,37 @@
     to { opacity: 1; transform: translateY(0); }
 }
 
-/* Scrollbars */
+/* Scrollbars - Hide all scrollbars while maintaining functionality */
+.v-history-list,
+.v-version-content-preview,
+.v-diff-content-wrapper,
+.v-settings-panel-content-wrapper,
+.version-preview-view .v-tab-view-content,
+.version-diff-view .v-tab-view-content,
+.v-error-display .v-error-details,
+.v-version-content-preview pre,
+.v-version-content-preview .table-wrapper,
+.v-preview-panel-content,
+.v-diff-panel-content,
+.v-inline-panel {
+    /* For Firefox */
+    scrollbar-width: none;
+    /* For IE and Edge */
+    -ms-overflow-style: none;
+}
+
 .v-history-list::-webkit-scrollbar,
-.v-preview-panel-content .v-version-content-preview::-webkit-scrollbar,
-.v-diff-panel-content .v-version-content-preview::-webkit-scrollbar,
+.v-version-content-preview::-webkit-scrollbar,
+.v-diff-content-wrapper::-webkit-scrollbar,
 .v-settings-panel-content-wrapper::-webkit-scrollbar,
 .version-preview-view .v-tab-view-content::-webkit-scrollbar,
 .version-diff-view .v-tab-view-content::-webkit-scrollbar,
-.v-version-tags::-webkit-scrollbar { 
-    width: 6px;
-}
-.v-history-list::-webkit-scrollbar-thumb,
-.v-preview-panel-content .v-version-content-preview::-webkit-scrollbar-thumb,
-.v-diff-panel-content .v-version-content-preview::-webkit-scrollbar-thumb,
-.v-settings-panel-content-wrapper::-webkit-scrollbar-thumb,
-.version-preview-view .v-tab-view-content::-webkit-scrollbar-thumb,
-.version-diff-view .v-tab-view-content::-webkit-scrollbar-thumb,
-.v-version-tags::-webkit-scrollbar-thumb {
-    background-color: var(--scrollbar-thumb-bg);
-    border-radius: 3px;
+.v-error-display .v-error-details::-webkit-scrollbar,
+.v-version-content-preview pre::-webkit-scrollbar,
+.v-version-content-preview .table-wrapper::-webkit-scrollbar,
+.v-preview-panel-content::-webkit-scrollbar,
+.v-diff-panel-content::-webkit-scrollbar,
+.v-inline-panel::-webkit-scrollbar {
+    /* For WebKit browsers (Chrome, Safari, Electron) */
+    display: none;
 }

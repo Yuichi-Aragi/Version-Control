@@ -36,16 +36,16 @@
 }
 
 /* Skeleton Loader Component */
-.v-skeleton-item {
+div.v-skeleton-item {
     background-color: var(--background-secondary-alt);
     position: relative;
     overflow: hidden;
     border-radius: var(--radius-s);
-    color: transparent !important; /* Hide any accidental text */
+    color: transparent; /* Hide any accidental text */
     user-select: none;
 }
 
-.v-skeleton-item::before {
+div.v-skeleton-item::before {
     content: '';
     position: absolute;
     top: 0;

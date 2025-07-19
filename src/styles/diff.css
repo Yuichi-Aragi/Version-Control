@@ -9,13 +9,25 @@
     flex-grow: 1;
 }
 
+/* NEW: Meta container for diff panel and tab view */
+.v-diff-meta-container {
+    padding-bottom: var(--size-4-2);
+    margin-bottom: var(--size-4-2);
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+.v-diff-meta-container .v-meta-label {
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+
 .v-diff-content-wrapper {
     font-family: var(--font-monospace);
     font-size: var(--font-ui-smaller);
     line-height: 1.6; /* Increased for readability */
     background-color: var(--background-secondary);
     border-radius: var(--radius-m);
-    overflow-y: auto;
+    /* FIX: The parent panel now handles scrolling. This element should expand to its content. */
+    /* overflow-y: auto; */
     flex-grow: 1;
     padding: var(--size-4-2) 0;
 }

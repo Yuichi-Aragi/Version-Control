@@ -7,10 +7,15 @@
     height: 100%;
     z-index: 50;
     display: none;
-    background-color: rgba(var(--background-primary-rgb), 0.7);
-    backdrop-filter: blur(2px);
+    /* FIX: Default to primary background. This is correct for light mode. */
+    background-color: var(--background-primary);
     padding: 0;
     animation: v-fade-in 0.25s ease;
+}
+
+/* NEW: In dark mode, use the secondary background to match other UI elements like the history list. */
+.theme-dark .v-panel-container {
+    background-color: var(--background-secondary);
 }
 
 .v-panel-container.is-active {
@@ -41,10 +46,19 @@
     display: flex;
     flex-direction: column;
     gap: 0;
-    overflow: hidden;
+    overflow: auto;
+    /* These styles are for the default modal-like panel (e.g., confirmation) */
     background-color: var(--background-primary);
     border-radius: var(--radius-l); 
     box-shadow: var(--shadow-l); 
+}
+
+/* NEW: Override styles for preview and diff panels to make them look integrated */
+.v-inline-panel.v-preview-panel,
+.v-inline-panel.v-diff-panel {
+    background-color: transparent;
+    box-shadow: none;
+    border-radius: 0;
 }
 
 .v-panel-header {
@@ -97,9 +111,10 @@
     margin-top: var(--size-4-4);
 }
 .v-preview-panel-content, .v-diff-panel-content {
-    overflow-y: auto; 
+    /* FIX: The parent panel now handles scrolling. This element should not scroll. */
+    /* overflow-y: auto; */
     flex-grow: 1;
-    padding: var(--size-4-2) var(--size-4-4);
+    padding: var(--size-4-2) var(--size-4-1);
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
@@ -108,12 +123,15 @@
     background-color: var(--background-secondary);
     padding: var(--size-4-4);
     border-radius: var(--radius-m);
-    overflow-y: auto;
-    word-break: break-word;
+    /* FIX: The parent panel content wrapper handles scrolling. */
+    /* overflow-y: auto; */
+    /* CRITICAL FIX: Prevent this container from scrolling horizontally,
+       forcing its children (like table-wrapper) to handle their own overflow. */
+    overflow-x: hidden;
     flex-grow: 1;
-    font-size: var(--font-ui-medium);
     line-height: 1.5;
-    max-height: 100%;
+    /* FIX: This was causing the element to scroll internally instead of expanding. */
+    /* max-height: 100%; */
     animation: v-fade-in 0.3s ease;
 }
 .v-version-content-preview.is-plaintext {
@@ -122,10 +140,32 @@
     font-size: var(--font-ui-smaller);
     padding: var(--size-4-3);
 }
+
+/* Make code blocks scroll horizontally instead of wrapping */
 .v-version-content-preview pre {
-    white-space: pre-wrap;
-    word-break: break-all;
+    white-space: pre; /* Use 'pre' to prevent wrapping */
+    word-break: normal; /* Reset word-break */
+    overflow-x: auto; /* Enable horizontal scroll */
     background-color: var(--background-primary);
     padding: var(--size-4-3);
     border-radius: var(--radius-s);
+}
+
+/* Target the wrapper Obsidian's MarkdownRenderer creates around tables
+   to enable horizontal scrolling for wide tables. */
+.v-version-content-preview .table-wrapper {
+    overflow-x: auto;
+    width: 100%;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    margin-bottom: 1em;
+}
+
+/* Let the table inside the wrapper have its natural width,
+   which is the key to enabling horizontal scrolling on the wrapper. */
+.v-version-content-preview .table-wrapper table {
+    width: auto; /* Allow table to expand to its content */
+    min-width: 100%; /* Ensure it fills the container if content is narrow */
+    border: none;
+    margin: 0;
 }
