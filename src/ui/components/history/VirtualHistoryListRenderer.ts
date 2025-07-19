@@ -68,6 +68,21 @@ export class VirtualHistoryListRenderer extends Component {
         this.render();
     }
 
+    /**
+     * Forces an update of only the currently visible items.
+     * Used for live timestamp updates.
+     */
+    public updateVisibleItems() {
+        const state = this.state; // Use the latest state
+        for (const id of this.visibleNodeIds) {
+            const node = this.renderedNodes.get(id);
+            const item = this.items.find(it => it.id === id);
+            if (node && item) {
+                this.entryRenderer.update(node, item, state);
+            }
+        }
+    }
+
     private render() {
         this.sizerEl.style.height = `${this.items.length * this.totalItemHeight}px`;
         this.update();
@@ -79,8 +94,6 @@ export class VirtualHistoryListRenderer extends Component {
         }
 
         const scrollTop = this.viewportEl.scrollTop;
-        // No need to check lastScrollTop, as state changes can require a re-render at the same scroll position
-
         const viewportHeight = this.viewportEl.offsetHeight;
         const buffer = this.totalItemHeight * 2; // Render a few items above and below viewport
 

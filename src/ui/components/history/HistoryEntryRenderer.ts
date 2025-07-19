@@ -13,33 +13,92 @@ import * as EventHandlers from "./HistoryEventHandlers";
 export class HistoryEntryRenderer {
     constructor(private store: AppStore) {}
 
+    /**
+     * Creates a new DOM element for a version entry.
+     * @param version The version data to render.
+     * @param state The current application state.
+     * @returns The newly created HTMLElement.
+     */
     public render(version: VersionHistoryEntry, state: AppState): HTMLElement {
         const entryEl = document.createElement('div');
-        entryEl.className = 'v-history-entry';
-        this.update(entryEl, version, state);
+        // Perform a full, initial render of the element and its contents.
+        this.update(entryEl, version, state, true);
         return entryEl;
     }
 
-    public update(entryEl: HTMLElement, version: VersionHistoryEntry, state: AppState): void {
+    /**
+     * Updates an existing DOM element for a version entry.
+     * It can perform a full re-render or a more surgical, performant update.
+     * @param entryEl The element to update.
+     * @param version The version data to render.
+     * @param state The current application state.
+     * @param isInitialRender If true, forces a full re-render of the element's contents.
+     */
+    public update(entryEl: HTMLElement, version: VersionHistoryEntry, state: AppState, isInitialRender: boolean = false): void {
         if (state.status !== AppStatus.READY) return;
 
         const { settings, namingVersionId, highlightedVersionId } = state;
         const isNamingThisVersion = version.id === namingVersionId;
 
+        // --- Update classes (always safe to do) ---
         entryEl.className = 'v-history-entry'; // Reset classes
         entryEl.toggleClass('is-list-view', settings.isListView);
         entryEl.toggleClass('is-naming', isNamingThisVersion);
         entryEl.toggleClass('is-highlighted', version.id === highlightedVersionId);
-        entryEl.setAttribute('role', 'listitem');
         entryEl.dataset['versionId'] = version.id;
-        
-        const signature = `${version.name || ''}|${isNamingThisVersion}|${settings.isListView}|${settings.useRelativeTimestamps}`;
-        if (entryEl.dataset['signature'] === signature) {
-            return; // No need to re-render DOM children if signature is the same
+
+        // --- Decide if a full re-render is needed ---
+        const isCurrentlyNaming = entryEl.querySelector('input.v-version-name-input') !== null;
+        const needsFullReRender = isInitialRender || (isNamingThisVersion !== isCurrentlyNaming);
+
+        if (needsFullReRender) {
+            this.reRenderContents(entryEl, version, state);
+            return;
         }
-        entryEl.dataset['signature'] = signature;
-        
-        entryEl.empty(); // Clear previous content before re-rendering
+
+        // --- If we are in naming mode, do not touch the input to avoid focus loss ---
+        if (isNamingThisVersion) {
+            return;
+        }
+
+        // --- Otherwise, perform surgical updates for performance ---
+        this.updateTimestamp(entryEl, version, state);
+    }
+
+    /**
+     * Surgically updates only the timestamp portion of an entry.
+     * This is the most common update and avoids disturbing other elements.
+     */
+    private updateTimestamp(entryEl: HTMLElement, version: VersionHistoryEntry, state: AppState): void {
+        const timestampEl = entryEl.querySelector('.v-version-timestamp');
+        if (timestampEl) {
+            const timestampText = state.settings.useRelativeTimestamps
+                ? moment(version.timestamp).fromNow()
+                : moment(version.timestamp).format("YYYY-MM-DD HH:mm");
+            if (timestampEl.textContent !== timestampText) {
+                timestampEl.setText(timestampText);
+            }
+        }
+    }
+
+    /**
+     * Performs a full, destructive re-render of the element's contents.
+     * This is only called when the structure needs to change (e.g., entering/exiting naming mode).
+     */
+    private reRenderContents(entryEl: HTMLElement, version: VersionHistoryEntry, state: AppState): void {
+        entryEl.empty();
+
+        const { settings, namingVersionId, panel } = state;
+        const isNamingThisVersion = version.id === namingVersionId;
+        const isPanelOpen = panel !== null;
+
+        entryEl.setAttribute('role', 'listitem');
+        // FIX: Explicitly clear event handlers on the root element before re-attaching them.
+        // This prevents stale handlers from persisting when the panel state changes.
+        entryEl.onclick = null;
+        entryEl.oncontextmenu = null;
+        entryEl.onkeydown = null;
+        entryEl.removeAttribute('tabindex');
 
         // --- Header ---
         const header = entryEl.createDiv("v-entry-header");
@@ -52,7 +111,6 @@ export class HistoryEntryRenderer {
             if (version.name) {
                 mainInfoWrapper.createDiv({ cls: "v-version-name", text: version.name, attr: { "title": version.name } });
             } else {
-                // Add a placeholder for alignment if name is missing in list view
                 mainInfoWrapper.createDiv({ cls: "v-version-name is-empty" });
             }
         } else {
@@ -70,18 +128,22 @@ export class HistoryEntryRenderer {
 
         // --- Body / Listeners ---
         if (settings.isListView) {
-            entryEl.onclick = (e) => EventHandlers.handleEntryClick(version, e, this.store);
-            entryEl.oncontextmenu = (e) => EventHandlers.handleEntryContextMenu(version, e, this.store);
-            entryEl.setAttribute('tabindex', '0');
-            entryEl.onkeydown = (e) => EventHandlers.handleEntryKeyDown(version, e, this.store);
+            if (!isPanelOpen) {
+                entryEl.onclick = (e) => EventHandlers.handleEntryClick(version, e, this.store);
+                entryEl.oncontextmenu = (e) => EventHandlers.handleEntryContextMenu(version, e, this.store);
+                entryEl.setAttribute('tabindex', '0');
+                entryEl.onkeydown = (e) => EventHandlers.handleEntryKeyDown(version, e, this.store);
+            }
         } else {
-            entryEl.oncontextmenu = (e) => EventHandlers.handleEntryContextMenu(version, e, this.store);
+            if (!isPanelOpen) {
+                entryEl.oncontextmenu = (e) => EventHandlers.handleEntryContextMenu(version, e, this.store);
+            }
             
             const contentEl = entryEl.createDiv("v-version-content");
             contentEl.setText(`Size: ${formatFileSize(version.size)}`);
             
             const footer = entryEl.createDiv("v-entry-footer");
-            this.createActionButtons(footer, version);
+            this.createActionButtons(footer, version, isPanelOpen);
         }
     }
 
@@ -113,7 +175,7 @@ export class HistoryEntryRenderer {
         const saveDetails = () => {
             if (!input.isConnected) return;
             const rawValue = input.value.trim();
-            if (rawValue !== initialValue) {
+            if (rawValue !== (version.name || '')) {
                 this.store.dispatch(thunks.updateVersionDetails(version.id, rawValue));
             } else {
                 this.store.dispatch(actions.stopVersionEditing());
@@ -121,35 +183,43 @@ export class HistoryEntryRenderer {
         };
 
         input.onblur = () => {
-            setTimeout(saveDetails, 100);
+            // Use a short timeout to allow other click events to process before
+            // this blur handler potentially re-renders the UI and removes the clicked element.
+            setTimeout(saveDetails, 150);
         };
 
         input.onkeydown = (e: KeyboardEvent) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                saveDetails();
+                input.blur(); // Triggers the onblur handler to save
             } else if (e.key === 'Escape') {
                 e.preventDefault();
+                // On escape, we don't save. Just stop editing immediately.
                 this.store.dispatch(actions.stopVersionEditing());
             }
         };
 
-        requestAnimationFrame(() => {
-            input.focus();
-            input.setSelectionRange(input.value.length, input.value.length);
-        });
+        // Defer focus to ensure the element is fully in the DOM and ready.
+        setTimeout(() => {
+            if (input.isConnected) {
+                input.focus();
+                input.setSelectionRange(input.value.length, input.value.length);
+            }
+        }, 0);
     }
 
-    private createActionButtons(container: HTMLElement, version: VersionHistoryEntry): void {
+    private createActionButtons(container: HTMLElement, version: VersionHistoryEntry, isPanelOpen: boolean): void {
         const viewBtn = container.createEl("button", {
             cls: "v-action-btn",
             attr: { "aria-label": "Preview in Panel", "title": "Preview in Panel" }
         });
         setIcon(viewBtn, "eye");
-        viewBtn.onclick = (e: MouseEvent) => {
-            e.stopPropagation(); 
-            this.store.dispatch(thunks.viewVersionInPanel(version));
-        };
+        if (!isPanelOpen) {
+            viewBtn.onclick = (e: MouseEvent) => {
+                e.stopPropagation(); 
+                this.store.dispatch(thunks.viewVersionInPanel(version));
+            };
+        }
 
         versionActions.forEach((actionConfig: VersionActionConfig) => {
             const btn = container.createEl("button", { 
@@ -157,10 +227,12 @@ export class HistoryEntryRenderer {
                 attr: { "aria-label": actionConfig.tooltip, "title": actionConfig.tooltip } 
             });
             setIcon(btn, actionConfig.icon);
-            btn.onclick = (e: MouseEvent) => {
-                e.stopPropagation();
-                actionConfig.actionHandler(version, this.store);
-            };
+            if (!isPanelOpen) {
+                btn.onclick = (e: MouseEvent) => {
+                    e.stopPropagation();
+                    actionConfig.actionHandler(version, this.store);
+                };
+            }
         });
     }
 }
