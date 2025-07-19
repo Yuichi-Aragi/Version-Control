@@ -1,7 +1,7 @@
 import esbuild from "esbuild";
 import process from "process";
 import fs from "fs";
-import { exec, execSync } from "child_process";
+import { exec } from "child_process";
 
 const isProduction = process.argv.includes("--production");
 const banner = `/*
@@ -18,27 +18,67 @@ const fileExists = (filePath) => {
   }
 };
 
-const entryPoints = ["src/main.ts"];
-if (fileExists("src/styles.css")) {
-  entryPoints.push("src/styles.css");
+/**
+ * Builds the diff worker into a string.
+ * This is done in memory and the result is used in the main build.
+ * @returns {Promise<string>} A promise that resolves to the bundled worker code.
+ */
+async function buildWorkerCode() {
+  const workerEntryPoint = 'src/workers/diff.worker.ts';
+  if (!fileExists(workerEntryPoint)) {
+    console.warn("Worker entry point not found, skipping worker build.");
+    return "";
+  }
+
+  const result = await esbuild.build({
+    entryPoints: [workerEntryPoint],
+    bundle: true,
+    minify: true,
+    format: 'iife', // self-contained immediate-invoked function expression
+    write: false,  // output to memory instead of a file
+  });
+
+  if (result.outputFiles && result.outputFiles.length > 0) {
+    return result.outputFiles[0].text;
+  }
+  throw new Error('esbuild did not produce an output file for the worker.');
 }
 
-const buildOptions = {
-  banner: { js: banner },
-  entryPoints,
-  bundle: true,
-  external: ["obsidian"],
-  format: "cjs",
-  target: "es2022",
-  logLevel: "info", // We'll capture logs manually
-  sourcemap: false,
-  treeShaking: true,
-  minify: true,
-  minifyWhitespace: true,
-  minifyIdentifiers: true,
-  minifySyntax: true,
-  outdir: "build",
-};
+/**
+ * Creates the final esbuild options, injecting the worker code.
+ * @returns {Promise<import('esbuild').BuildOptions>} A promise that resolves to the build options.
+ */
+async function createBuildOptions() {
+  // 1. Build the worker and get its code as a string.
+  const workerCode = await buildWorkerCode();
+
+  const entryPoints = ["src/main.ts"];
+  if (fileExists("src/styles.css")) {
+    entryPoints.push("src/styles.css");
+  }
+
+  return {
+    banner: { js: banner },
+    entryPoints,
+    bundle: true,
+    external: ["obsidian"],
+    format: "cjs",
+    target: "es2020",
+    logLevel: "info",
+    sourcemap: false,
+    treeShaking: true,
+    minify: true,
+    minifyWhitespace: true,
+    minifyIdentifiers: true,
+    minifySyntax: true,
+    outdir: ".",
+    // 2. Define the global constant. `JSON.stringify` ensures the code is correctly
+    // escaped and wrapped in quotes to be a valid string in the final bundle.
+    define: {
+      "diffWorkerString": JSON.stringify(workerCode),
+    },
+  };
+}
 
 // Function to run tsc --noEmit and log errors without halting build
 function typeCheck() {
@@ -50,10 +90,20 @@ function typeCheck() {
   });
 }
 
-if (isProduction) {
+// Main build execution
+async function runBuild() {
   typeCheck();
-  esbuild.build(buildOptions).catch(() => process.exit(1));
-} else {
-  typeCheck();
-  esbuild.context(buildOptions).then(ctx => ctx.watch());
+  const options = await createBuildOptions();
+  
+  if (isProduction) {
+    await esbuild.build(options).catch(() => process.exit(1));
+  } else {
+    const ctx = await esbuild.context(options);
+    await ctx.watch();
+  }
 }
+
+runBuild().catch(error => {
+    console.error("Build process failed:", error);
+    process.exit(1);
+});

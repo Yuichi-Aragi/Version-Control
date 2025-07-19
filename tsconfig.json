@@ -1,69 +1,50 @@
 {
-  "compilerOptions": {
-    "baseUrl": ".",
-    "inlineSourceMap": false,
-    "inlineSources": false,
-    "module": "ESNext",
-    "target": "ES2022",
-    "allowJs": false,
-    "checkJs": false,
-    "allowSyntheticDefaultImports": false,
-    "allowUmdGlobalAccess": false,
-    "noImplicitAny": true,
+  "compilerOptions": {    
     "strict": true,
+    "noImplicitAny": true,
     "strictNullChecks": true,
-    "strictBindCallApply": true,
     "strictFunctionTypes": true,
+    "strictBindCallApply": true,
     "strictPropertyInitialization": true,
     "noImplicitThis": true,
-    "alwaysStrict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitOverride": true,
-    "noPropertyAccessFromIndexSignature": true,
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
     "useUnknownInCatchVariables": true,
-    "forceConsistentCasingInFileNames": true,
-    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    
+    "module": "ESNext",
     "moduleResolution": "bundler",
-    "importHelpers": true,
-    "isolatedModules": true,
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
-    "allowArbitraryExtensions": false,
+    "verbatimModuleSyntax": true,
     "resolveJsonModule": true,
+    
     "noEmit": false,
-    "incremental": true,
-    "composite": false,
     "declaration": false,
-    "declarationMap": false,
     "sourceMap": false,
     "removeComments": true,
-    "noEmitOnError": false,
+    "importHelpers": true,
+    "noEmitOnError": true,
     "preserveConstEnums": true,
-    "suppressExcessPropertyErrors": false,
-    "suppressImplicitAnyIndexErrors": false,
-    "noStrictGenericChecks": false,
+
+    "allowJs": false,
+    "checkJs": false,
+
+    "isolatedModules": true,
+    "allowSyntheticDefaultImports": false,
+    "esModuleInterop": false,
+    "forceConsistentCasingInFileNames": true,
+
+    "target": "ES2022",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
     "useDefineForClassFields": true,
-    "verbatimModuleSyntax": true,
-    "lib": [
-      "DOM",
-      "DOM.Iterable",
-      "ES2022"
-    ]
+
+    "skipLibCheck": true,
+
+    "baseUrl": ".",
+    "incremental": true
   },
-  "include": [
-    "**/*.ts",
-    "**/*.tsx"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "build",
-    "**/*.js",
-    "**/*.jsx"
-  ]
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules", "dist", "build", "**/*.js", "**/*.jsx"]
 }
