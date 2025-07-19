@@ -17,7 +17,8 @@ export class PreviewPanelComponent extends BasePanelComponent {
 
     constructor(parent: HTMLElement, store: AppStore, app: App) {
         super(parent, store, ["v-panel-container"]);
-        this.innerPanel = this.container.createDiv({ cls: "v-inline-panel v-preview-panel-content" });
+        // FIX: Add a unique class for the panel itself for consistent styling and structure.
+        this.innerPanel = this.container.createDiv({ cls: "v-inline-panel v-preview-panel" });
         this.app = app;
     }
 
@@ -40,12 +41,15 @@ export class PreviewPanelComponent extends BasePanelComponent {
         this.lastRenderedVersionId = panelState.version.id;
         this.innerPanel.empty();
 
+        // FIX: Create a content wrapper inside the panel to match the structure of other panels.
+        const contentWrapper = this.innerPanel.createDiv("v-preview-panel-content");
+
         const { version, content } = panelState;
         this.currentContent = content; // Store content for re-rendering
         const settings = appState.settings; 
         this.currentNotePath = appState.file?.path ?? '';
 
-        const header = this.innerPanel.createDiv("v-panel-header");
+        const header = contentWrapper.createDiv("v-panel-header");
         const versionLabel = version.name
             ? `V${version.versionNumber}: ${version.name}`
             : `Version ${version.versionNumber}`;
@@ -78,7 +82,7 @@ export class PreviewPanelComponent extends BasePanelComponent {
             this.store.dispatch(actions.closePanel());
         });
 
-        this.previewContentEl = this.innerPanel.createDiv({ cls: "v-version-content-preview" });
+        this.previewContentEl = contentWrapper.createDiv({ cls: "v-version-content-preview" });
         this.renderPreviewContent();
     }
 

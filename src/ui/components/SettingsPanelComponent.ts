@@ -1,7 +1,7 @@
 import { Setting, setIcon } from "obsidian";
 import { debounce } from 'lodash-es';
 import type { AppStore } from "../../state/store";
-import { AppStatus } from "../../state/state";
+import { AppStatus, type SettingsPanel as SettingsPanelState } from "../../state/state";
 import type { AppState } from "../../state/state";
 import { actions } from "../../state/appSlice";
 import { thunks } from "../../state/thunks/index";
@@ -14,10 +14,15 @@ export class SettingsPanelComponent extends BasePanelComponent {
 
     constructor(parent: HTMLElement, store: AppStore) {
         super(parent, store, ["v-settings-panel"]); 
+        
+        // FIX: The close button has been removed. The panel is closed by clicking the settings icon in the action bar again.
+        
+        // Create the content wrapper once. Its content will be re-rendered.
         this.innerPanel = this.container.createDiv('v-settings-panel-content-wrapper');
     }
 
-    render(isOpen: boolean, state: AppState) { 
+    render(panelState: SettingsPanelState | null, state: AppState) { 
+        const isOpen = !!panelState;
         this.toggle(isOpen); 
         
         if (this.autoCloseTimer) {
@@ -38,9 +43,9 @@ export class SettingsPanelComponent extends BasePanelComponent {
             }
         }, this.AUTO_CLOSE_DELAY_MS);
 
+        // Populate Content
         if (state.status === AppStatus.READY && state.file) {
             const noteSection = this.innerPanel.createDiv('v-settings-section');
-            // FIX: Clarify that actions are for the current note.
             noteSection.createEl('h4', {
                 text: `Actions for "${state.file.basename}"`,
                 cls: 'v-settings-section-title'
@@ -54,26 +59,19 @@ export class SettingsPanelComponent extends BasePanelComponent {
         }
         
         const pluginSettingsSection = this.innerPanel.createDiv('v-settings-section');
-        // FIX: Title reflects that settings are context-dependent.
-        const settingsTitle = state.noteId ? `Settings for This Note` : `Default Settings`;
+        const descTitle = state.noteId ? `Note-Specific Settings` : `Default Settings`;
         pluginSettingsSection.createEl('h4', {
-            text: settingsTitle,
+            text: descTitle,
             cls: 'v-settings-section-title'
         });
-        // FIX: Add a description explaining the new settings behavior.
         const settingsDesc = pluginSettingsSection.createEl('p', { cls: 'v-settings-info v-meta-label' });
         if (state.noteId) {
-            settingsDesc.setText('These settings apply only to the current note. Other notes will use the default settings.');
+            settingsDesc.setText('These settings apply only to the current note and override the defaults. Other notes will use the default settings.');
         } else {
             settingsDesc.setText('Open a note with version history to configure its specific settings.');
         }
 
-        this.createPluginSettingsControls(pluginSettingsSection, state);
-
-        const helpSection = this.innerPanel.createDiv('v-settings-section');
-        const helpInfo = helpSection.createDiv('v-settings-info');
-        helpInfo.createEl('p', {text: "In compact list view, right-click (or long-press) a version entry for more actions."});
-        helpInfo.createEl('p', {text: "Settings panel will auto-close after 30 seconds of inactivity."});
+        this.createPluginSettingsControls(this.innerPanel, state);
 
         this.innerPanel.addEventListener('click', this.resetAutoCloseTimer, { capture: true });
         this.innerPanel.addEventListener('input', this.resetAutoCloseTimer, { capture: true });
@@ -146,24 +144,6 @@ export class SettingsPanelComponent extends BasePanelComponent {
     private createPluginSettingsControls(parent: HTMLElement, state: AppState) {
         const { settings } = state; 
 
-        // FIX: Removed the 'Apply settings globally' toggle.
-
-        // FIX: Add a divider to separate the global setting from per-note ones.
-        new Setting(parent)
-            .setName('Auto-cleanup orphaned versions')
-            .setDesc('On startup and periodically, remove version data for notes that no longer exist. This setting is always global and applies to the entire vault.')
-            .addToggle(toggle => toggle
-                .setValue(settings.autoCleanupOrphanedVersions)
-                .onChange(async (value) => {
-                    // This thunk now correctly handles saving this to the central manifest.
-                    await this.store.dispatch(thunks.updateSettings({ autoCleanupOrphanedVersions: value }));
-                }));
-        
-        parent.createEl('hr', { cls: 'v-settings-divider' });
-
-        // The rest of the settings are now implicitly per-note if a note is active.
-        // The `updateSettings` thunk handles the saving logic automatically.
-        // The `disabled` property ensures users can't change settings without an active, versioned note.
         const isNoteReady = state.status === AppStatus.READY && !!state.noteId;
 
         new Setting(parent)
@@ -172,8 +152,8 @@ export class SettingsPanelComponent extends BasePanelComponent {
             .addToggle(toggle => {
                 toggle
                     .setValue(settings.enableVersionNaming)
-                    .onChange(async (value) => {
-                         await this.store.dispatch(thunks.updateSettings({ enableVersionNaming: value }));
+                    .onChange((value) => {
+                         this.store.dispatch(thunks.updateSettings({ enableVersionNaming: value }));
                     });
                 if (!isNoteReady) toggle.setDisabled(true);
             });
@@ -184,8 +164,8 @@ export class SettingsPanelComponent extends BasePanelComponent {
             .addToggle(toggle => {
                 toggle
                     .setValue(settings.isListView)
-                    .onChange(async (value) => {
-                        await this.store.dispatch(thunks.updateSettings({ isListView: value }));
+                    .onChange((value) => {
+                        this.store.dispatch(thunks.updateSettings({ isListView: value }));
                     });
                 if (!isNoteReady) toggle.setDisabled(true);
             });
@@ -196,8 +176,8 @@ export class SettingsPanelComponent extends BasePanelComponent {
             .addToggle(toggle => {
                 toggle 
                     .setValue(settings.useRelativeTimestamps)
-                    .onChange(async (value) => {
-                        await this.store.dispatch(thunks.updateSettings({ useRelativeTimestamps: value }));
+                    .onChange((value) => {
+                        this.store.dispatch(thunks.updateSettings({ useRelativeTimestamps: value }));
                     });
                 if (!isNoteReady) toggle.setDisabled(true);
             });
@@ -208,8 +188,8 @@ export class SettingsPanelComponent extends BasePanelComponent {
             .addToggle(toggle => {
                 toggle
                     .setValue(settings.renderMarkdownInPreview)
-                    .onChange(async (value) => {
-                        await this.store.dispatch(thunks.updateSettings({ renderMarkdownInPreview: value }));
+                    .onChange((value) => {
+                        this.store.dispatch(thunks.updateSettings({ renderMarkdownInPreview: value }));
                     });
                 if (!isNoteReady) toggle.setDisabled(true);
             });
@@ -220,24 +200,36 @@ export class SettingsPanelComponent extends BasePanelComponent {
             .addToggle(toggle => {
                 toggle
                     .setValue(settings.enableWatchMode)
-                    .onChange(async (value) => {
-                        await this.store.dispatch(thunks.updateSettings({ enableWatchMode: value }));
+                    .onChange((value) => {
+                        this.store.dispatch(thunks.updateSettings({ enableWatchMode: value }));
                     });
                 if (!isNoteReady) toggle.setDisabled(true);
             });
         
         if (settings.enableWatchMode) {
+            let descEl: HTMLElement;
             new Setting(parent)
                 .setName('Watch mode interval')
-                .setDesc(`Time to wait before auto-saving. Current: ${this.formatInterval(settings.watchModeInterval)}.`)
+                .setDesc('placeholder') // Will be replaced
+                .then(setting => {
+                    descEl = setting.descEl;
+                    descEl.setText(`Time to wait before auto-saving. Current: ${this.formatInterval(settings.watchModeInterval)}.`);
+                })
                 .addSlider(slider => {
+                    const debouncedSave = debounce((value: number) => {
+                        this.store.dispatch(thunks.updateSettings({ watchModeInterval: value }));
+                    }, 500);
+
                     slider
                         .setLimits(5, 300, 5) // 5 seconds to 5 minutes, in 5-second steps
                         .setValue(settings.watchModeInterval)
                         .setDynamicTooltip()
-                        .onChange(debounce(async (value) => {
-                            await this.store.dispatch(thunks.updateSettings({ watchModeInterval: value }));
-                        }, 500));
+                        .onChange((value) => {
+                            if (descEl) {
+                                descEl.setText(`Time to wait before auto-saving. Current: ${this.formatInterval(value)}.`);
+                            }
+                            debouncedSave(value);
+                        });
                     if (!isNoteReady) slider.setDisabled(true);
                 });
         }
@@ -248,24 +240,36 @@ export class SettingsPanelComponent extends BasePanelComponent {
             .addToggle(toggle => {
                 toggle
                     .setValue(settings.autoCleanupOldVersions)
-                    .onChange(async (value) => {
-                        await this.store.dispatch(thunks.updateSettings({ autoCleanupOldVersions: value }));
+                    .onChange((value) => {
+                        this.store.dispatch(thunks.updateSettings({ autoCleanupOldVersions: value }));
                     });
                 if (!isNoteReady) toggle.setDisabled(true);
             });
 
         if (settings.autoCleanupOldVersions) {
+            let descEl: HTMLElement;
             new Setting(parent)
                 .setName('Delete versions older than (days)')
-                .setDesc(`Applies if "Auto-cleanup by age" is on. Min 7, Max 365. Current: ${settings.autoCleanupDays} days.`)
+                .setDesc('placeholder')
+                .then(setting => {
+                    descEl = setting.descEl;
+                    descEl.setText(`Applies if "Auto-cleanup by age" is on. Min 7, Max 365. Current: ${settings.autoCleanupDays} days.`);
+                })
                 .addSlider(slider => {
+                    const debouncedSave = debounce((value: number) => {
+                        this.store.dispatch(thunks.updateSettings({ autoCleanupDays: value }));
+                    }, 500);
+
                     slider
                         .setLimits(7, 365, 1)
                         .setValue(settings.autoCleanupDays)
                         .setDynamicTooltip()
-                        .onChange(debounce(async (value) => {
-                            await this.store.dispatch(thunks.updateSettings({ autoCleanupDays: value }));
-                        }, 500));
+                        .onChange((value) => {
+                            if (descEl) {
+                                descEl.setText(`Applies if "Auto-cleanup by age" is on. Min 7, Max 365. Current: ${value} days.`);
+                            }
+                            debouncedSave(value);
+                        });
                     if (!isNoteReady) slider.setDisabled(true);
                 });
         }
@@ -277,10 +281,10 @@ export class SettingsPanelComponent extends BasePanelComponent {
                 text
                     .setPlaceholder("e.g., 50 or 0 for infinite")
                     .setValue(String(settings.maxVersionsPerNote))
-                    .onChange(debounce(async (value) => {
+                    .onChange(debounce((value) => {
                         const num = parseInt(value, 10);
                         if (!isNaN(num) && num >= 0) {
-                            await this.store.dispatch(thunks.updateSettings({ maxVersionsPerNote: num }));
+                            this.store.dispatch(thunks.updateSettings({ maxVersionsPerNote: num }));
                         } else if (value.trim() !== "" && (isNaN(num) || num < 0)) {
                             this.store.dispatch(thunks.showNotice("Max versions must be a non-negative number.", 3000));
                             text.setValue(String(this.store.getState().settings.maxVersionsPerNote));
@@ -293,7 +297,6 @@ export class SettingsPanelComponent extends BasePanelComponent {
     override onunload() {
         if (this.autoCloseTimer) {
             window.clearTimeout(this.autoCloseTimer);
-            this.autoCloseTimer = null;
         }
         this.innerPanel.removeEventListener('click', this.resetAutoCloseTimer, { capture: true });
         this.innerPanel.removeEventListener('input', this.resetAutoCloseTimer, { capture: true });

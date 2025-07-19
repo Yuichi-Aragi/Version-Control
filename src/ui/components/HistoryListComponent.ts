@@ -11,6 +11,7 @@ import { VirtualHistoryListRenderer } from "./history/VirtualHistoryListRenderer
 const LIST_ITEM_HEIGHT = 44;
 const CARD_ITEM_HEIGHT = 110; // Reduced from 140 after removing tags
 const CARD_ITEM_GAP = 8;      // Explicit gap between cards
+const TIMESTAMP_UPDATE_INTERVAL = 5000; // 5 seconds
 
 export class HistoryListComponent extends Component {
     private container: HTMLElement;
@@ -18,9 +19,15 @@ export class HistoryListComponent extends Component {
     private countEl: HTMLElement | null = null;
     private entryRenderer: HistoryEntryRenderer;
     private virtualRenderer: VirtualHistoryListRenderer | null = null;
+    private timestampUpdateInterval: number | null = null;
 
     private lastProcessedIds: string = "";
-    private lastViewMode: boolean | null = null;
+    // FIX: Changed from `boolean | null` to `boolean | undefined`. This resolves
+    // a type error where `null` is not assignable to an optional boolean parameter
+    // that expects `boolean | undefined`. `undefined` is the correct type for a
+    // "not yet set" state in this context.
+    private lastViewMode: boolean | undefined;
+    private lastPanelIsOpen: boolean | undefined;
 
     constructor(parent: HTMLElement, store: AppStore) {
         super();
@@ -33,15 +40,24 @@ export class HistoryListComponent extends Component {
     render(state: AppState): void {
         if (state.status !== AppStatus.READY) {
             this.container.hide();
+            this.stopTimestampUpdates();
             return;
         }
+
+        const isPanelOpen = state.panel !== null;
+        this.container.classList.toggle('is-panel-active', isPanelOpen);
 
         const newProcessedHistory = getFilteredAndSortedHistory(state);
         const newProcessedIds = newProcessedHistory.map(v => v.id).join(',');
         const newViewMode = state.settings.isListView;
 
-        // Determine if a full re-initialization of the virtual list is needed
-        const needsRebuild = this.lastProcessedIds !== newProcessedIds || this.lastViewMode !== newViewMode || !this.virtualRenderer;
+        // Determine if a full re-initialization of the virtual list is needed.
+        // A check for panel open/close state ensures event handlers are
+        // correctly re-attached or removed when the panel's visibility changes.
+        const needsRebuild = this.lastProcessedIds !== newProcessedIds || 
+                             this.lastViewMode !== newViewMode || 
+                             this.lastPanelIsOpen !== isPanelOpen || 
+                             !this.virtualRenderer;
 
         const itemHeight = state.settings.isListView ? LIST_ITEM_HEIGHT : CARD_ITEM_HEIGHT;
         const itemGap = state.settings.isListView ? 0 : CARD_ITEM_GAP;
@@ -55,13 +71,16 @@ export class HistoryListComponent extends Component {
 
         this.lastProcessedIds = newProcessedIds;
         this.lastViewMode = newViewMode;
+        this.lastPanelIsOpen = isPanelOpen;
 
         this.updateCountDisplay(newProcessedHistory.length, state.history.length);
         this.container.show();
+        this.startTimestampUpdates();
     }
 
     renderAsLoading(settings: VersionControlSettings): void {
         this.destroyVirtualRenderer();
+        this.stopTimestampUpdates();
         
         if (!this.listViewport) return; // Safety check
         this.listViewport.empty(); // Only clear the list area
@@ -116,6 +135,20 @@ export class HistoryListComponent extends Component {
         }
     }
 
+    private startTimestampUpdates(): void {
+        if (this.timestampUpdateInterval) return;
+        this.timestampUpdateInterval = window.setInterval(() => {
+            this.virtualRenderer?.updateVisibleItems();
+        }, TIMESTAMP_UPDATE_INTERVAL);
+    }
+
+    private stopTimestampUpdates(): void {
+        if (this.timestampUpdateInterval) {
+            window.clearInterval(this.timestampUpdateInterval);
+            this.timestampUpdateInterval = null;
+        }
+    }
+
     private destroyVirtualRenderer(): void {
         if (this.virtualRenderer) {
             this.removeChild(this.virtualRenderer);
@@ -129,6 +162,7 @@ export class HistoryListComponent extends Component {
 
     override onunload(): void {
         this.destroyVirtualRenderer();
+        this.stopTimestampUpdates();
         this.container.remove();
     }
 }

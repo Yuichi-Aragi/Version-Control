@@ -152,12 +152,17 @@ export class ActionBarComponent extends Component {
         }
         this.container.show();
 
-        const { isSearchActive, searchQuery, isSearchCaseSensitive, isProcessing, diffRequest, settings, watchModeCountdown } = state;
+        const { isSearchActive, searchQuery, isSearchCaseSensitive, isProcessing, diffRequest, settings, watchModeCountdown, history, noteId } = state;
         
         this.container.classList.toggle('is-searching', isSearchActive);
         this.searchContainerEl.classList.toggle('is-query-active', searchQuery.trim().length > 0);
 
         this.saveButton.disabled = isProcessing;
+        
+        // Control visibility of buttons
+        this.searchToggleButton.style.display = history.length > 0 ? 'flex' : 'none';
+        this.settingsButton.style.display = !!noteId ? 'flex' : 'none';
+
         this.searchToggleButton.disabled = isProcessing;
         this.settingsButton.disabled = isProcessing;
         this.searchToggleButton.classList.toggle('is-active', isSearchActive);
