@@ -1,17 +1,18 @@
-import { Plugin, TFile, WorkspaceLeaf } from 'obsidian';
+import { TFile, WorkspaceLeaf } from 'obsidian';
 import type { CachedMetadata } from 'obsidian';
 import { debounce } from 'lodash-es';
 import type { AppStore } from '../state/store';
 import { thunks } from '../state/thunks';
 import { VIEW_TYPE_VERSION_CONTROL, VIEW_TYPE_VERSION_PREVIEW, VIEW_TYPE_VERSION_DIFF } from '../constants';
+import type VersionControlPlugin from '../main';
 
 /**
  * Registers all listeners for global Obsidian events.
  * @param plugin The plugin instance.
  * @param store The application state store.
  */
-export function registerSystemEventListeners(plugin: Plugin, store: AppStore): void {
-    const debouncedLeafChangeHandler = debounce((leaf: WorkspaceLeaf | null) => {
+export function registerSystemEventListeners(plugin: VersionControlPlugin, store: AppStore): void {
+    plugin.debouncedLeafChangeHandler = debounce((leaf: WorkspaceLeaf | null) => {
         store.dispatch(thunks.initializeView(leaf));
     }, 100, { leading: false, trailing: true });
 
@@ -21,7 +22,7 @@ export function registerSystemEventListeners(plugin: Plugin, store: AppStore): v
         if (view?.getViewType() === VIEW_TYPE_VERSION_CONTROL || view?.getViewType() === VIEW_TYPE_VERSION_PREVIEW || view?.getViewType() === VIEW_TYPE_VERSION_DIFF) {
             return; 
         }
-        debouncedLeafChangeHandler(leaf);
+        plugin.debouncedLeafChangeHandler?.(leaf);
     }));
     
     plugin.registerEvent(plugin.app.metadataCache.on('changed', (file: TFile, _data: string, cache: CachedMetadata) => {

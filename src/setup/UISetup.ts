@@ -68,7 +68,7 @@ export function registerCommands(plugin: Plugin, store: AppStore): void {
         id: 'cleanup-orphaned-versions',
         name: 'Clean up orphaned version data',
         callback: () => {
-            store.dispatch(thunks.cleanupOrphanedVersions(true));
+            store.dispatch(thunks.cleanupOrphanedVersions());
         },
     });
 }
