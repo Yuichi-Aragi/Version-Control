@@ -9,47 +9,40 @@ import { ExportManager } from '../../services/export-manager';
 import { VersionManager } from '../../core/version-manager';
 import { BackgroundTaskManager } from '../../core/BackgroundTaskManager';
 import { TYPES } from '../../types/inversify.types';
-import { CentralManifestRepository } from '../../core/storage/central-manifest-repository';
 import { DEFAULT_SETTINGS } from '../../constants';
+import { isPluginUnloading } from './ThunkUtils';
 
 /**
  * Thunks for updating settings and handling export functionality.
  */
 
 export const updateSettings = (settingsUpdate: Partial<VersionControlSettings>): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const uiService = container.get<UIService>(TYPES.UIService);
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
-    const centralManifestRepo = container.get<CentralManifestRepository>(TYPES.CentralManifestRepo);
     const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
 
-    const state = getState();
+    const stateBeforeUpdate = getState();
+    
+    // FIX: Use a type-safe method to create a copy of the original settings.
+    // The spread syntax within reduce is correctly inferred by TypeScript and avoids
+    // the "is not assignable to type 'never'" error that occurs with direct indexed assignment.
+    const originalSettings = (Object.keys(settingsUpdate) as Array<keyof VersionControlSettings>)
+        .reduce((acc, key) => ({
+            ...acc,
+            [key]: stateBeforeUpdate.settings[key]
+        }), {} as Partial<VersionControlSettings>);
 
-    // --- Special Case: Handle the truly global orphan cleanup setting ---
-    if ('autoCleanupOrphanedVersions' in settingsUpdate) {
-        const newSettingValue = !!settingsUpdate.autoCleanupOrphanedVersions;
-        try {
-            await centralManifestRepo.updateGlobalSettings(gSettings => {
-                gSettings = gSettings || {};
-                gSettings.autoCleanupOrphanedVersions = newSettingValue;
-                return gSettings;
-            });
-            // Dispatch to update the live state
-            dispatch(actions.updateSettings({ autoCleanupOrphanedVersions: newSettingValue }));
-            // Trigger background task manager to start/stop the periodic job
-            backgroundTaskManager.managePeriodicOrphanCleanup();
-        } catch (error) {
-            console.error("VC: Failed to update global orphan cleanup setting.", error);
-            uiService.showNotice("Failed to save orphan cleanup setting. Check console.");
-        }
-        return; // End of this specific action
-    }
-
-    // --- Handle all other per-note settings ---
-    if (state.status !== AppStatus.READY || !state.noteId) {
+    // --- Handle all per-note settings ---
+    if (stateBeforeUpdate.status !== AppStatus.READY || !stateBeforeUpdate.noteId) {
         uiService.showNotice("A note with version history must be active to change its settings.", 5000);
         return;
     }
-    const { noteId } = state;
+    const { noteId } = stateBeforeUpdate;
+
+    // Optimistic UI update
+    dispatch(actions.updateSettings(settingsUpdate));
+    backgroundTaskManager.syncWatchMode();
 
     try {
         await manifestManager.updateNoteManifest(noteId, (manifest) => {
@@ -74,19 +67,30 @@ export const updateSettings = (settingsUpdate: Partial<VersionControlSettings>):
             return manifest;
         });
 
-        // Dispatch to update the live state immediately for responsive UI
-        dispatch(actions.updateSettings(settingsUpdate));
-
-        // Trigger side-effects after any settings change
-        backgroundTaskManager.manageWatchModeInterval();
+        // Re-validate state after await.
+        const stateAfterUpdate = getState();
+        if (isPluginUnloading(container) || stateAfterUpdate.noteId !== noteId) {
+            // The setting was saved for the original note, but the view has changed.
+            // The UI is already showing the settings for the new note, so we don't need to do anything.
+            // The optimistic update is now irrelevant for the current view.
+            return;
+        }
 
     } catch (error) {
-        console.error(`VC: Failed to update per-note settings for note ${noteId}.`, error);
-        uiService.showNotice("Failed to save note-specific settings. Check console.");
+        console.error(`VC: Failed to update per-note settings for note ${noteId}. Reverting.`, error);
+        uiService.showNotice("Failed to save note-specific settings. Reverting.", 5000);
+        
+        // Revert UI on failure, but only if we are still on the same note.
+        const stateOnFailure = getState();
+        if (stateOnFailure.noteId === noteId) {
+            dispatch(actions.updateSettings(originalSettings));
+            backgroundTaskManager.syncWatchMode();
+        }
     }
 };
 
 export const requestExportAllVersions = (): AppThunk => (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
 
@@ -107,6 +111,7 @@ export const requestExportAllVersions = (): AppThunk => (dispatch, getState, con
 };
 
 export const exportAllVersions = (noteId: string, format: 'md' | 'json' | 'ndjson' | 'txt'): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const uiService = container.get<UIService>(TYPES.UIService);
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
     const exportManager = container.get<ExportManager>(TYPES.ExportManager);
@@ -145,7 +150,7 @@ export const exportAllVersions = (noteId: string, format: 'md' | 'json' | 'ndjso
 
         // Re-validate context after await
         const latestState = getState();
-        if (latestState.status !== AppStatus.READY || latestState.noteId !== initialState.noteId) {
+        if (isPluginUnloading(container) || latestState.status !== AppStatus.READY || latestState.noteId !== initialState.noteId) {
             uiService.showNotice("VC: Note context changed during folder selection. Export cancelled.");
             return;
         }
@@ -169,6 +174,7 @@ export const exportAllVersions = (noteId: string, format: 'md' | 'json' | 'ndjso
 };
 
 export const requestExportSingleVersion = (version: VersionHistoryEntry): AppThunk => (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
 
@@ -188,6 +194,7 @@ export const requestExportSingleVersion = (version: VersionHistoryEntry): AppThu
 };
 
 export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: 'md' | 'json' | 'ndjson' | 'txt'): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const uiService = container.get<UIService>(TYPES.UIService);
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
@@ -236,7 +243,7 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: '
         
         // Re-validate context after await
         const latestState = getState();
-        if (latestState.status !== AppStatus.READY || latestState.noteId !== initialState.noteId) {
+        if (isPluginUnloading(container) || latestState.status !== AppStatus.READY || latestState.noteId !== initialState.noteId) {
             uiService.showNotice("VC: Note context changed during folder selection. Export cancelled.");
             return;
         }

@@ -10,12 +10,14 @@ import { NoteManager } from '../../core/note-manager';
 import { UIService } from '../../services/ui-service';
 import { BackgroundTaskManager } from '../../core/BackgroundTaskManager';
 import { TYPES } from '../../types/inversify.types';
+import { isPluginUnloading } from './ThunkUtils';
 
 /**
  * Thunks for direct version management (CRUD operations).
  */
 
 export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const { isAuto = false } = options;
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const uiService = container.get<UIService>(TYPES.UIService);
@@ -47,6 +49,16 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => 
         }
 
         const result = await versionManager.saveNewVersionForFile(liveFile);
+
+        // Re-validate state after await
+        const stateAfterSave = getState();
+        if (isPluginUnloading(container) || stateAfterSave.status !== AppStatus.READY || stateAfterSave.file?.path !== initialFileFromState.path) {
+            if (result.status === 'saved') {
+                uiService.showNotice(`Version ${result.displayName} saved for "${liveFile.basename}" in the background.`, 4000);
+            }
+            // Abort UI update for the now-incorrect context.
+            return;
+        }
         
         if (result.status === 'duplicate') {
             if (!isAuto) {
@@ -55,7 +67,7 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => 
             return; // Return early, finally block will still execute
         }
         
-        // It was saved
+        // It was saved, and we are still on the same note.
         const { newVersionEntry, displayName, newNoteId } = result;
         if (newVersionEntry) {
             if (initialState.noteId !== newNoteId) {
@@ -76,15 +88,18 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => 
         }
         dispatch(initializeView(app.workspace.activeLeaf ?? null));
     } finally {
-        backgroundTaskManager.manageWatchModeInterval(); // Reset the timer after any save attempt.
-        const finalState = getState();
-        if (finalState.status === AppStatus.READY) {
-            dispatch(actions.setProcessing(false));
+        if (!isPluginUnloading(container)) {
+            backgroundTaskManager.syncWatchMode(); // Reset the timer after any save attempt.
+            const finalState = getState();
+            if (finalState.status === AppStatus.READY) {
+                dispatch(actions.setProcessing(false));
+            }
         }
     }
 };
 
 export const updateVersionDetails = (versionId: string, name: string): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
@@ -108,19 +123,25 @@ export const updateVersionDetails = (versionId: string, name: string): AppThunk 
         console.error(`VC: Failed to save name update for version ${versionId}. Reverting UI.`, error);
         uiService.showNotice("VC: Error: Could not save version details. Reverting changes.", 5000);
         // On failure, reload history to revert the optimistic update
-        dispatch(loadHistoryForNoteId(file, noteId));
+        if (!isPluginUnloading(container)) {
+            dispatch(loadHistoryForNoteId(file, noteId));
+        }
     } finally {
-        dispatch(actions.stopVersionEditing());
+        if (!isPluginUnloading(container)) {
+            dispatch(actions.stopVersionEditing());
+        }
     }
 };
 
-export const requestEditVersion = (version: VersionHistoryEntry): AppThunk => (dispatch, getState) => {
+export const requestEditVersion = (version: VersionHistoryEntry): AppThunk => (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const state = getState();
     if (state.status !== AppStatus.READY) return;
     dispatch(actions.startVersionEditing({ versionId: version.id }));
 };
 
-export const requestRestore = (version: VersionHistoryEntry): AppThunk => (dispatch, getState) => {
+export const requestRestore = (version: VersionHistoryEntry): AppThunk => (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const state = getState();
     if (state.status !== AppStatus.READY) return;
     
@@ -137,6 +158,7 @@ export const requestRestore = (version: VersionHistoryEntry): AppThunk => (dispa
 };
 
 export const restoreVersion = (versionId: string): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);
     const uiService = container.get<UIService>(TYPES.UIService);
@@ -165,6 +187,18 @@ export const restoreVersion = (versionId: string): AppThunk => async (dispatch, 
         }
 
         await versionManager.saveNewVersionForFile(liveFile, `Backup before restoring V${versionId.substring(0,6)}...`, { force: true });
+
+        // Re-validate state after the backup save operation.
+        const stateAfterBackup = getState();
+        if (isPluginUnloading(container) || stateAfterBackup.status !== AppStatus.READY || stateAfterBackup.noteId !== initialNoteIdFromState) {
+            uiService.showNotice(`Restore cancelled. Active note changed during backup.`, 5000);
+            // Re-initialize to the new context to avoid inconsistent state.
+            if (!isPluginUnloading(container)) {
+                dispatch(initializeView(app.workspace.activeLeaf ?? null));
+            }
+            return;
+        }
+
         const restoreSuccess = await versionManager.restoreVersion(liveFile, initialNoteIdFromState, versionId);
         
         if (restoreSuccess) {
@@ -176,13 +210,18 @@ export const restoreVersion = (versionId: string): AppThunk => async (dispatch, 
         const message = error instanceof Error ? error.message : "An unexpected error occurred.";
         console.error("Version Control: Error in restoreVersion thunk.", error);
         uiService.showNotice(`Restore failed: ${message}`, 7000);
-        dispatch(initializeView(app.workspace.activeLeaf ?? null));
+        if (!isPluginUnloading(container)) {
+            dispatch(initializeView(app.workspace.activeLeaf ?? null));
+        }
     } finally {
-        backgroundTaskManager.manageWatchModeInterval();
+        if (!isPluginUnloading(container)) {
+            backgroundTaskManager.syncWatchMode();
+        }
     }
 };
 
-export const requestDelete = (version: VersionHistoryEntry): AppThunk => (dispatch, getState) => {
+export const requestDelete = (version: VersionHistoryEntry): AppThunk => (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const state = getState();
     if (state.status === AppStatus.READY) {
         const { file, history } = state;
@@ -208,6 +247,7 @@ export const requestDelete = (version: VersionHistoryEntry): AppThunk => (dispat
 };
 
 export const deleteVersion = (versionId: string): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);
     const uiService = container.get<UIService>(TYPES.UIService);
@@ -239,6 +279,18 @@ export const deleteVersion = (versionId: string): AppThunk => async (dispatch, g
         const wasLastVersion = initialHistory.length === 1 && firstVersion && firstVersion.id === versionId;
 
         const success = await versionManager.deleteVersion(initialNoteIdFromState, versionId);
+
+        // Re-validate state after the delete operation.
+        const stateAfterDelete = getState();
+        if (isPluginUnloading(container) || stateAfterDelete.status !== AppStatus.READY || stateAfterDelete.noteId !== initialNoteIdFromState) {
+            if (success) {
+                uiService.showNotice(`Version deleted for "${initialFileFromState.basename}" in the background.`, 4000);
+            }
+            // The context has changed, so we don't need to update the UI for the old note.
+            // The new note's UI is already correct. Just abort.
+            return;
+        }
+
         if (success) {
             if (wasLastVersion) {
                 uiService.showNotice(`Last version deleted. "${initialFileFromState.basename}" is no longer under version control.`);
@@ -254,11 +306,14 @@ export const deleteVersion = (versionId: string): AppThunk => async (dispatch, g
         const message = error instanceof Error ? error.message : "An unexpected error occurred.";
         console.error("Version Control: Error in deleteVersion thunk.", error);
         uiService.showNotice(`Delete failed: ${message}`, 7000);
-        dispatch(initializeView(app.workspace.activeLeaf ?? null));
+        if (!isPluginUnloading(container)) {
+            dispatch(initializeView(app.workspace.activeLeaf ?? null));
+        }
     }
 };
 
-export const requestDeleteAll = (): AppThunk => (dispatch, getState) => {
+export const requestDeleteAll = (): AppThunk => (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const state = getState();
     if (state.status === AppStatus.READY) {
         const { file } = state;
@@ -276,6 +331,7 @@ export const requestDeleteAll = (): AppThunk => (dispatch, getState) => {
 };
 
 export const deleteAllVersions = (): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const uiService = container.get<UIService>(TYPES.UIService);
     const app = container.get<App>(TYPES.App);
@@ -292,6 +348,19 @@ export const deleteAllVersions = (): AppThunk => async (dispatch, getState, cont
 
     try {
         const success = await versionManager.deleteAllVersions(initialNoteIdFromState);
+
+        // Re-validate state after the delete operation.
+        const stateAfterDelete = getState();
+        // Check if the view is still on the same file. After this operation, the noteId will be gone,
+        // so checking the file path is the only reliable way.
+        if (isPluginUnloading(container) || stateAfterDelete.file?.path !== initialFileFromState.path) {
+            if (success) {
+                uiService.showNotice(`All versions for "${initialFileFromState.basename}" have been deleted in the background.`, 5000);
+            }
+            // Abort UI update for the wrong note.
+            return;
+        }
+
         if (success) {
             uiService.showNotice(`All versions for "${initialFileFromState.basename}" have been deleted.`);
             dispatch(initializeView(app.workspace.activeLeaf ?? null));
@@ -302,6 +371,8 @@ export const deleteAllVersions = (): AppThunk => async (dispatch, getState, cont
         const message = error instanceof Error ? error.message : "An unexpected error occurred.";
         console.error("Version Control: Error in deleteAllVersions thunk.", error);
         uiService.showNotice(`Delete all failed: ${message}`, 7000);
-        dispatch(initializeView(app.workspace.activeLeaf ?? null));
+        if (!isPluginUnloading(container)) {
+            dispatch(initializeView(app.workspace.activeLeaf ?? null));
+        }
     }
 };

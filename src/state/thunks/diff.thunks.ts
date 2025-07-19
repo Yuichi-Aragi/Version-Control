@@ -7,12 +7,14 @@ import { VIEW_TYPE_VERSION_DIFF } from '../../constants';
 import { UIService } from '../../services/ui-service';
 import { DiffManager } from '../../services/diff-manager';
 import { TYPES } from '../../types/inversify.types';
+import { isPluginUnloading } from './ThunkUtils';
 
 /**
  * Thunks for generating and displaying diffs between versions.
  */
 
 export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
 
@@ -41,6 +43,13 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
         return; // User cancelled
     }
 
+    // Re-validate state after user interaction
+    const stateAfterPrompt = getState();
+    if (stateAfterPrompt.status !== AppStatus.READY || stateAfterPrompt.noteId !== state.noteId) {
+        uiService.showNotice("Cannot start diff: view context has changed.", 3000);
+        return;
+    }
+
     const menuOptions = [
         {
             title: "Show Diff in Panel",
@@ -57,6 +66,7 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
 };
 
 export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: DiffTarget, mode: 'panel' | 'tab'): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const uiService = container.get<UIService>(TYPES.UIService);
     const diffManager = container.get<DiffManager>(TYPES.DiffManager);
     const app = container.get<App>(TYPES.App);
@@ -69,6 +79,14 @@ export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: Dif
         uiService.showNotice("Generating diff for new tab...", 2000);
         try {
             const diffChanges = await diffManager.generateDiff(noteId, version1, version2);
+
+            // Re-validate state after the potentially long diff generation
+            const stateAfterGen = getState();
+            if (isPluginUnloading(container) || stateAfterGen.status !== AppStatus.READY || stateAfterGen.noteId !== noteId || !stateAfterGen.file) {
+                uiService.showNotice("View context changed while generating diff. Tab opening cancelled.", 4000);
+                return;
+            }
+
             const leaf = app.workspace.getLeaf('tab');
             await leaf.setViewState({
                 type: VIEW_TYPE_VERSION_DIFF,
@@ -77,8 +95,8 @@ export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: Dif
                     version1,
                     version2,
                     diffChanges,
-                    noteName: file.basename,
-                    notePath: file.path,
+                    noteName: stateAfterGen.file.basename, // Use fresh data
+                    notePath: stateAfterGen.file.path,     // Use fresh data
                 }
             });
             app.workspace.revealLeaf(leaf);
@@ -97,7 +115,7 @@ export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: Dif
         const diffChanges = await diffManager.generateDiff(noteId, version1, version2);
 
         const finalState = getState();
-        if (finalState.status !== AppStatus.READY || finalState.noteId !== noteId) {
+        if (isPluginUnloading(container) || finalState.status !== AppStatus.READY || finalState.noteId !== noteId) {
             uiService.showNotice("View context changed, diff cancelled.", 3000);
             dispatch(actions.clearDiffRequest());
             return;
@@ -114,6 +132,7 @@ export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: Dif
 };
 
 export const viewReadyDiff = (): AppThunk => (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
 

@@ -8,12 +8,14 @@ import { initializeView } from './core.thunks';
 import { UIService } from '../../services/ui-service';
 import { VersionManager } from '../../core/version-manager';
 import { TYPES } from '../../types/inversify.types';
+import { isPluginUnloading } from './ThunkUtils';
 
 /**
  * Thunks related to UI interactions, such as opening panels, tabs, and modals.
  */
 
 export const viewVersionInPanel = (version: VersionHistoryEntry): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
@@ -28,6 +30,14 @@ export const viewVersionInPanel = (version: VersionHistoryEntry): AppThunk => as
             return;
         }
         const content = await versionManager.getVersionContent(state.noteId, version.id);
+
+        // Re-validate state after await
+        const stateAfterFetch = getState();
+        if (isPluginUnloading(container) || stateAfterFetch.status !== AppStatus.READY || stateAfterFetch.noteId !== state.noteId) {
+            // Context changed while fetching content. Abort opening the panel.
+            return;
+        }
+
         if (content !== null) {
             dispatch(actions.openPanel({ type: 'preview', version, content }));
         } else {
@@ -46,6 +56,7 @@ export const viewVersionInPanel = (version: VersionHistoryEntry): AppThunk => as
 };
 
 export const viewVersionInNewTab = (version: VersionHistoryEntry): AppThunk => async (_dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const uiService = container.get<UIService>(TYPES.UIService);
     const app = container.get<App>(TYPES.App);
@@ -59,11 +70,20 @@ export const viewVersionInNewTab = (version: VersionHistoryEntry): AppThunk => a
             return;
         }
         const content = await versionManager.getVersionContent(state.noteId, version.id);
+
+        // Re-validate state after await
+        const stateAfterFetch = getState();
+        if (isPluginUnloading(container) || stateAfterFetch.status !== AppStatus.READY || stateAfterFetch.noteId !== state.noteId || !stateAfterFetch.file) {
+            // Context changed while fetching content. Abort opening the tab.
+            return;
+        }
+
         if (content === null) {
             uiService.showNotice("VC: Error: Could not load version content for new tab.");
             return;
         }
-        const { file, noteId: currentNoteId } = state; 
+        // Use the latest state to populate the view state
+        const { file, noteId: currentNoteId } = stateAfterFetch; 
         
         const leaf = app.workspace.getLeaf('tab'); 
         await leaf.setViewState({
@@ -85,6 +105,7 @@ export const viewVersionInNewTab = (version: VersionHistoryEntry): AppThunk => a
 };
 
 export const createDeviation = (version: VersionHistoryEntry): AppThunk => async (_dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const uiService = container.get<UIService>(TYPES.UIService);
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const app = container.get<App>(TYPES.App);
@@ -107,7 +128,7 @@ export const createDeviation = (version: VersionHistoryEntry): AppThunk => async
 
         // Re-validate context after await
         const latestState = getState();
-        if (latestState.status !== AppStatus.READY || latestState.noteId !== initialState.noteId) {
+        if (isPluginUnloading(container) || latestState.status !== AppStatus.READY || latestState.noteId !== initialState.noteId) {
             uiService.showNotice("VC: Note context changed during folder selection. Deviation cancelled.");
             return;
         }
@@ -126,6 +147,7 @@ export const createDeviation = (version: VersionHistoryEntry): AppThunk => async
 };
 
 export const showVersionContextMenu = (version: VersionHistoryEntry, event: MouseEvent): AppThunk => (_dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
 
@@ -136,6 +158,7 @@ export const showVersionContextMenu = (version: VersionHistoryEntry, event: Mous
 };
 
 export const showSortMenu = (event: MouseEvent): AppThunk => (_dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
     const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
 
@@ -144,11 +167,13 @@ export const showSortMenu = (event: MouseEvent): AppThunk => (_dispatch, getStat
 };
 
 export const showNotice = (message: string, duration?: number): AppThunk => (_dispatch, _getState, container) => {
+    if (isPluginUnloading(container)) return;
     const uiService = container.get<UIService>(TYPES.UIService);
     uiService.showNotice(message, duration);
 };
 
 export const closeSettingsPanelWithNotice = (message: string, duration?: number): AppThunk => (dispatch, _getState, container) => {
+    if (isPluginUnloading(container)) return;
     const uiService = container.get<UIService>(TYPES.UIService);
     dispatch(actions.closePanel());
     uiService.showNotice(message, duration);
