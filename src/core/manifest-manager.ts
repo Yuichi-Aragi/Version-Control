@@ -11,6 +11,7 @@ import { TYPES } from "../types/inversify.types";
  * A high-level facade that coordinates operations across the manifest repositories.
  * It handles complex, multi-step operations that involve both the central and note manifests,
  * such as creating or deleting a note's entire version history.
+ * This class relies on the underlying repositories to handle concurrency control.
  */
 @injectable()
 export class ManifestManager {
@@ -66,10 +67,10 @@ export class ManifestManager {
                 await this.vault.createFolder(versionsPath);
             }
 
-            // 2. Create the note's own manifest file
+            // 2. Create the note's own manifest file (this is now a queued operation)
             const newNoteManifest = await this.noteManifestRepo.create(noteId, notePath);
 
-            // 3. Add entry to the central manifest
+            // 3. Add entry to the central manifest (this is now a queued operation)
             await this.centralManifestRepo.addNoteEntry(noteId, notePath, this.pathService.getNoteManifestPath(noteId));
             
             return newNoteManifest;
@@ -84,7 +85,7 @@ export class ManifestManager {
 
     public async deleteNoteEntry(noteId: string): Promise<void> {
         try {
-            // 1. Remove from central manifest first. This is the critical atomic operation.
+            // 1. Remove from central manifest first. This is a critical, queued operation.
             await this.centralManifestRepo.removeNoteEntry(noteId);
 
             // 2. If successful, delete the data directory.
@@ -93,7 +94,7 @@ export class ManifestManager {
                 await this.vault.adapter.rmdir(noteDbPath, true);
             }
 
-            // 3. Invalidate caches.
+            // 3. Invalidate caches and clear queues.
             this.noteManifestRepo.invalidateCache(noteId);
 
         } catch (error) {

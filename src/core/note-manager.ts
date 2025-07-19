@@ -9,8 +9,6 @@ import { TYPES } from "../types/inversify.types";
 
 @injectable()
 export class NoteManager {
-    private idCreationLocks = new Map<string, Promise<string | null>>();
-
     constructor(
         @inject(TYPES.App) private app: App, 
         @inject(TYPES.ManifestManager) private manifestManager: ManifestManager
@@ -71,6 +69,8 @@ export class NoteManager {
     }
 
     async getOrCreateNoteId(file: TFile): Promise<string | null> {
+        // This operation is now inherently safe because the underlying repository
+        // methods in ManifestManager are queued.
         const existingId = await this.getNoteId(file);
         if (existingId) {
             const manifestExists = await this.manifestManager.loadNoteManifest(existingId);
@@ -86,44 +86,27 @@ export class NoteManager {
             return existingId;
         }
 
-        // Check for an existing lock to prevent race conditions
-        if (this.idCreationLocks.has(file.path)) {
-            return this.idCreationLocks.get(file.path)!;
-        }
-
-        // Create a lock
-        const creationPromise = (async (): Promise<string | null> => {
-            // Safer order: Create manifest entry first, then write to frontmatter.
-            const newId = generateUniqueId();
-            try {
-                // Step 1: Create the manifest entry. This is the critical operation.
-                await this.manifestManager.createNoteEntry(newId, file.path);
-
-                // Step 2: If manifest creation succeeds, write the ID to the note's frontmatter.
-                const writeSuccess = await this.writeNoteIdToFrontmatter(file, newId);
-                if (!writeSuccess) {
-                    // This is a non-critical failure. The history exists but is "orphaned".
-                    // It can be reconciled later. Log a clear warning.
-                    console.warn(`VC: Created manifest for note "${file.path}" (ID: ${newId}) but failed to write vc-id to its frontmatter. The history is saved but the note needs reconciliation.`);
-                    throw new Error(`Failed to initialize version history for "${file.basename}". History was created but could not be linked to the note.`);
-                }
-                return newId;
-
-            } catch (error) {
-                console.error(`VC: Failed to get or create note ID for "${file.path}".`, error);
-                // The manifest manager's createNoteEntry already handles its own rollback.
-                // We just need to re-throw the error to the caller.
-                throw new Error(`Failed to initialize version history for "${file.basename}". Please try again.`);
-            }
-        })();
-
-        this.idCreationLocks.set(file.path, creationPromise);
-
+        // Safer order: Create manifest entry first, then write to frontmatter.
+        const newId = generateUniqueId();
         try {
-            return await creationPromise;
-        } finally {
-            // Always remove the lock once the operation is complete
-            this.idCreationLocks.delete(file.path);
+            // Step 1: Create the manifest entry. This is the critical, now-queued operation.
+            await this.manifestManager.createNoteEntry(newId, file.path);
+
+            // Step 2: If manifest creation succeeds, write the ID to the note's frontmatter.
+            const writeSuccess = await this.writeNoteIdToFrontmatter(file, newId);
+            if (!writeSuccess) {
+                // This is a non-critical failure. The history exists but is "orphaned".
+                // It can be reconciled later. Log a clear warning.
+                console.warn(`VC: Created manifest for note "${file.path}" (ID: ${newId}) but failed to write vc-id to its frontmatter. The history is saved but the note needs reconciliation.`);
+                throw new Error(`Failed to initialize version history for "${file.basename}". History was created but could not be linked to the note.`);
+            }
+            return newId;
+
+        } catch (error) {
+            console.error(`VC: Failed to get or create note ID for "${file.path}".`, error);
+            // The manifest manager's createNoteEntry already handles its own rollback.
+            // We just need to re-throw the error to the caller.
+            throw new Error(`Failed to initialize version history for "${file.basename}". Please try again.`);
         }
     }
 
@@ -140,12 +123,16 @@ export class NoteManager {
     }
 
     async handleNoteRename(file: TFile, oldPath: string): Promise<void> {
+        // This operation is now inherently safe because the underlying repository
+        // methods in ManifestManager are queued.
         try {
             const noteIdToUpdate = await this.manifestManager.getNoteIdByPath(oldPath);
 
             if (noteIdToUpdate) {
                 await this.manifestManager.updateNotePath(noteIdToUpdate, file.path);
             } else {
+                // If no ID was found for the old path, there's nothing to update in our DB,
+                // but we should still invalidate the central manifest cache in case it was stale.
                 this.manifestManager.invalidateCentralManifestCache();
             }
         } catch (error) {

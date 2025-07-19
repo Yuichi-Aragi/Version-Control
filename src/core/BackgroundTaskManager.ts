@@ -8,135 +8,107 @@ import { TYPES } from '../types/inversify.types';
 
 /**
  * Manages periodic background tasks for the plugin, such as
- * orphaned version cleanup and watch mode auto-saving.
+ * watch mode auto-saving. It is stateful and ensures that intervals are not
+ * needlessly reset.
  * Extends Component to tie its lifecycle to the plugin's.
  */
 @injectable()
 export class BackgroundTaskManager extends Component {
-    private store: AppStore;
-    private periodicOrphanCleanupInterval: number | null = null;
-    private initialOrphanCleanupTimeout: number | null = null;
-    private watchModeIntervalId: number | null = null;
-    private watchModeCountdownIntervalId: number | null = null;
+  private watchModeIntervalId: number | null = null;
+  private watchModeCountdownIntervalId: number | null = null;
 
-    private readonly ORPHAN_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+  // State to track the currently active interval's context
+  private activeIntervalNoteId: string | null = null;
+  private activeIntervalSeconds: number | null = null;
 
-    constructor(@inject(TYPES.Store) store: AppStore) {
-        super();
-        this.store = store;
-    }
+  constructor(@inject(TYPES.Store) private readonly store: AppStore) {
+    super();
+  }
 
-    public override onunload(): void {
-        // This method is called automatically by Obsidian when the plugin unloads
-        // because this component is registered as a child in main.ts.
-        this.clearAllIntervals();
-    }
+  /**
+   * This method is called automatically by Obsidian when the plugin unloads.
+   */
+  public override onunload(): void {
+    this.stopIntervals();
+  }
 
-    /**
-     * Starts or stops the periodic orphan cleanup task based on current settings.
-     */
-    public managePeriodicOrphanCleanup(): void {
-        // Clear existing interval and timeout before checking settings
-        if (this.periodicOrphanCleanupInterval !== null) {
-            window.clearInterval(this.periodicOrphanCleanupInterval);
-            this.periodicOrphanCleanupInterval = null;
-        }
-        if (this.initialOrphanCleanupTimeout !== null) {
-            window.clearTimeout(this.initialOrphanCleanupTimeout);
-            this.initialOrphanCleanupTimeout = null;
-        }
+  /**
+   * Synchronizes the watch mode state. It checks the current app state and settings,
+   * and then starts, stops, or updates the watch mode interval to match.
+   * This is the main entry point to be called when context (active note, settings) might have changed.
+   */
+  public syncWatchMode(): void {
+    const state = this.store.getState();
+    const settings = state.settings;
 
-        if (this.store.getState().settings.autoCleanupOrphanedVersions) {
-            // Initial cleanup after a delay. The timeout ID is stored and cleared
-            // in onunload to prevent it from firing after the plugin is disabled.
-            this.initialOrphanCleanupTimeout = window.setTimeout(() => {
-                // The thunk itself is safe, but this timeout must be cleared on unload.
-                this.store.dispatch(thunks.cleanupOrphanedVersions(false));
-            }, 5 * 60 * 1000);
+    const shouldBeRunning = settings.enableWatchMode && state.status === AppStatus.READY && !!state.noteId;
+    const isRunning = this.watchModeIntervalId !== null;
 
-            this.periodicOrphanCleanupInterval = window.setInterval(() => {
-                this.store.dispatch(thunks.cleanupOrphanedVersions(false));
-            }, this.ORPHAN_CLEANUP_INTERVAL_MS);
-        }
-    }
+    if (shouldBeRunning) {
+        const currentNoteId = state.noteId!; // We know it's not null from shouldBeRunning check
+        const currentIntervalSeconds = settings.watchModeInterval;
 
-    /**
-     * Starts or stops the watch mode auto-save task based on current settings and app state.
-     */
-    public manageWatchModeInterval(): void {
-        // Clear existing intervals first
-        if (this.watchModeIntervalId) {
-            window.clearInterval(this.watchModeIntervalId);
-            this.watchModeIntervalId = null;
-        }
-        if (this.watchModeCountdownIntervalId) {
-            window.clearInterval(this.watchModeCountdownIntervalId);
-            this.watchModeCountdownIntervalId = null;
-            this.store.dispatch(actions.setWatchModeCountdown(null)); // Clear from UI
-        }
-
-        const state = this.store.getState();
-        const settings = state.settings;
-
-        // Exit if watch mode is not enabled for the current context.
-        if (!settings.enableWatchMode) {
+        // If it's already running for the correct note and with the correct interval, do nothing.
+        if (isRunning && this.activeIntervalNoteId === currentNoteId && this.activeIntervalSeconds === currentIntervalSeconds) {
             return;
         }
 
-        // Exit if the application is not in a state where auto-saving is possible.
-        if (state.status !== AppStatus.READY || !state.noteId) {
-            return;
-        }
+        // Otherwise, the state is out of sync. Stop the old one (if any) and start the new one.
+        this.stopIntervals();
+        this.startIntervals(currentNoteId, currentIntervalSeconds);
 
-        // If we've reached here, all conditions are met. Start the intervals.
-        const watchedNoteId = state.noteId; // Capture the noteId for the interval's closure
-        const intervalSeconds = settings.watchModeInterval;
-        const intervalMs = intervalSeconds * 1000;
-        
-        this.watchModeIntervalId = window.setInterval(() => {
-            const currentState = this.store.getState();
-            // Re-check conditions inside the interval callback to ensure context hasn't changed.
-            // The active note must be the one we started watching, and the app must still be ready and not busy.
-            if (currentState.status === AppStatus.READY && 
-                !currentState.isProcessing &&
-                currentState.noteId === watchedNoteId) {
-                this.store.dispatch(thunks.saveNewVersion({ isAuto: true }));
-            }
-        }, intervalMs);
-
-        // UI Countdown timer
-        let countdown = intervalSeconds;
-        this.store.dispatch(actions.setWatchModeCountdown(countdown)); // Initial value
-        this.watchModeCountdownIntervalId = window.setInterval(() => {
-            countdown--;
-            if (countdown < 0) { // Use < 0 to show 0 before reset
-                countdown = intervalSeconds; // Reset for next cycle
-            }
-            this.store.dispatch(actions.setWatchModeCountdown(countdown));
-        }, 1000);
-    }
-
-    /**
-     * Clears all running intervals. Called on plugin unload via the Component lifecycle.
-     */
-    private clearAllIntervals(): void {
-        if (this.periodicOrphanCleanupInterval !== null) {
-            window.clearInterval(this.periodicOrphanCleanupInterval);
-            this.periodicOrphanCleanupInterval = null;
-        }
-        if (this.watchModeIntervalId !== null) {
-            window.clearInterval(this.watchModeIntervalId);
-            this.watchModeIntervalId = null;
-        }
-        if (this.watchModeCountdownIntervalId !== null) {
-            window.clearInterval(this.watchModeCountdownIntervalId);
-            this.watchModeCountdownIntervalId = null;
-        }
-        // This is the critical fix for the unload crash. The timeout must be cleared
-        // to prevent its callback from executing on a stale plugin instance.
-        if (this.initialOrphanCleanupTimeout !== null) {
-            window.clearTimeout(this.initialOrphanCleanupTimeout);
-            this.initialOrphanCleanupTimeout = null;
+    } else {
+        // It should not be running. If it is, stop it.
+        if (isRunning) {
+            this.stopIntervals();
         }
     }
+  }
+
+  private startIntervals(noteId: string, intervalSeconds: number): void {
+    // Store the context of the new interval
+    this.activeIntervalNoteId = noteId;
+    this.activeIntervalSeconds = intervalSeconds;
+    const intervalMs = intervalSeconds * 1000;
+
+    this.watchModeIntervalId = window.setInterval(() => {
+      // Re-check conditions inside the interval callback to ensure context hasn't changed.
+      const currentState = this.store.getState();
+      if (currentState.status === AppStatus.READY && !currentState.isProcessing && currentState.noteId === this.activeIntervalNoteId) {
+        this.store.dispatch(thunks.saveNewVersion({ isAuto: true }));
+      }
+    }, intervalMs);
+
+    // UI Countdown timer
+    let countdown = intervalSeconds;
+    this.store.dispatch(actions.setWatchModeCountdown(countdown)); // Initial value
+    this.watchModeCountdownIntervalId = window.setInterval(() => {
+      countdown--;
+      if (countdown < 0) {
+        // Use stored value to reset, in case settings changed but interval hasn't restarted yet
+        countdown = this.activeIntervalSeconds ?? intervalSeconds; 
+      }
+      this.store.dispatch(actions.setWatchModeCountdown(countdown));
+    }, 1000);
+  }
+
+  private stopIntervals(): void {
+    if (this.watchModeIntervalId !== null) {
+      window.clearInterval(this.watchModeIntervalId);
+      this.watchModeIntervalId = null;
+    }
+    if (this.watchModeCountdownIntervalId !== null) {
+      window.clearInterval(this.watchModeCountdownIntervalId);
+      this.watchModeCountdownIntervalId = null;
+    }
+    
+    // Reset tracking state
+    this.activeIntervalNoteId = null;
+    this.activeIntervalSeconds = null;
+
+    // Clear from UI if it hasn't been cleared already
+    if (this.store.getState().watchModeCountdown !== null) {
+        this.store.dispatch(actions.setWatchModeCountdown(null));
+    }
+  }
 }
