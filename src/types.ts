@@ -1,4 +1,9 @@
 import type { TFile } from "obsidian";
+// FIX: Changed from a type-only export to a type-only import. The original
+// `export type { Change } from "diff";` syntax, while valid for re-exporting,
+// was not making the `Change` type available for use within the interfaces
+// defined in this file, leading to a "Cannot find name 'Change'" error.
+// A direct import resolves the issue.
 import type { Change } from "diff";
 
 export interface VersionControlSettings {
@@ -10,15 +15,12 @@ export interface VersionControlSettings {
   enableVersionNaming: boolean;
   isListView: boolean;
   renderMarkdownInPreview: boolean;
-  autoCleanupOrphanedVersions: boolean;
   enableWatchMode: boolean;
   watchModeInterval: number; // in seconds
 }
 
 export interface CentralManifest {
   version: string;
-  // NEW: Add a place for settings that are global to the entire version database.
-  globalSettings?: Partial<Pick<VersionControlSettings, 'autoCleanupOrphanedVersions'>>;
   notes: {
     [noteId: string]: {
       notePath: string;
@@ -43,8 +45,8 @@ export interface NoteManifest {
   totalVersions: number;
   createdAt: string;
   lastModified: string;
-  // Per-note settings can override any global setting EXCEPT the orphan cleanup setting.
-  settings?: Partial<Omit<VersionControlSettings, 'autoCleanupOrphanedVersions'>>;
+  // Per-note settings can override any global setting.
+  settings?: Partial<VersionControlSettings>;
 }
 
 export interface VersionData {

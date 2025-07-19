@@ -9,13 +9,12 @@ export const NOTE_FRONTMATTER_KEY = "vc-id";
 export const DEFAULT_SETTINGS: VersionControlSettings = {
   maxVersionsPerNote: 50,
   autoCleanupOldVersions: false,
-  autoCleanupDays: 30,
+  autoCleanupDays: 60,
   defaultExportFormat: 'md',
   useRelativeTimestamps: true,
   enableVersionNaming: true,
   isListView: false,
   renderMarkdownInPreview: true,
-  autoCleanupOrphanedVersions: false,
   enableWatchMode: false,
   watchModeInterval: 60, // 60 seconds
 };

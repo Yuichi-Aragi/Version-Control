@@ -1,6 +1,6 @@
 import 'reflect-metadata'; // Must be the first import
-import { Plugin, Notice } from 'obsidian';
-import { get } from 'lodash-es';
+import { Plugin, Notice, WorkspaceLeaf } from 'obsidian';
+import { get, debounce } from 'lodash-es';
 import type { Container } from 'inversify';
 import type { AppStore } from './state/store';
 import { appSlice } from './state/appSlice';
@@ -14,14 +14,20 @@ import { configureServices } from './inversify.config';
 import { registerViews, addRibbonIcon, registerCommands } from './setup/UISetup';
 import { registerSystemEventListeners } from './setup/EventSetup';
 import { TYPES } from './types/inversify.types';
+import type { CentralManifestRepository } from './core/storage/central-manifest-repository';
+import type { NoteManifestRepository } from './core/storage/note-manifest-repository';
+import type { QueueService } from './services/queue-service';
 
 export default class VersionControlPlugin extends Plugin {
 	private container!: Container;
     private store!: AppStore;
     private cleanupManager!: CleanupManager;
     private backgroundTaskManager!: BackgroundTaskManager;
+    public debouncedLeafChangeHandler?: ReturnType<typeof debounce>;
+    public isUnloading: boolean = false;
 
 	override async onload() {
+        this.isUnloading = false; // Reset the guard flag on every load
 		try {
 			// The settings object is no longer loaded here.
             // configureServices will handle setting up the initial state.
@@ -75,16 +81,47 @@ export default class VersionControlPlugin extends Plugin {
 	}
 
 	override async onunload() {
-        await this.cleanupManager?.completePendingCleanups();
-	}
+        this.isUnloading = true; // Set the guard flag immediately to halt new operations
 
-	// This method is no longer used for settings. It's kept for future plugin-wide data.
-	async loadPluginData(): Promise<any> {
-		return (await this.loadData()) || {};
-	}
+        // 1. Cancel any pending debounced operations to prevent them from firing during or after unload.
+        this.debouncedLeafChangeHandler?.cancel();
 
-    // This method is no longer used for settings. It's kept for future plugin-wide data.
-    override async saveData(data: any): Promise<void> {
-        await super.saveData(data);
-    }
+        // 2. Ensure any critical, queued file operations are completed before shutdown.
+        // This is wrapped in a try-catch to guarantee that the unload process continues
+        // even if this step fails, which is critical for preventing resource leaks.
+        try {
+            await this.cleanupManager?.completePendingCleanups();
+        } catch (error) {
+            console.error("Version Control: Error while completing pending cleanups on unload.", error);
+        }
+
+        // 3. The base Plugin class will automatically call `unload` on all child Components
+        // that were added via `this.addChild()`. This handles the automatic cleanup of:
+        //  - Event listeners registered in components.
+        //  - Caches cleared via `component.register(() => cache.clear())`.
+        //  - Intervals cleared in component `onunload` methods.
+
+        // 4. Manually clean up the dependency injection container and its non-component services.
+        if (this.container) {
+            try {
+                // Get services that hold state but aren't components.
+                const centralRepo = this.container.get<CentralManifestRepository>(TYPES.CentralManifestRepo);
+                const noteRepo = this.container.get<NoteManifestRepository>(TYPES.NoteManifestRepo);
+                const queueService = this.container.get<QueueService>(TYPES.QueueService);
+
+                // Invalidate caches and clear all pending task queues to prevent orphaned operations.
+                centralRepo.invalidateCache();
+                noteRepo.clearCache();
+                queueService.clearAll();
+
+                // Unbind all services from the DI container. This is a crucial step to allow
+                // the garbage collector to reclaim memory and prevent issues on plugin reload.
+                this.container.unbindAll();
+
+            } catch (error) {
+                // This might happen if the container failed to initialize or was already unbound.
+                console.error("Version Control: Error during container cleanup on unload.", error);
+            }
+        }
+	}
 }
