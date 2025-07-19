@@ -35,7 +35,7 @@ export class VersionDiffView extends ItemView {
                 v2Label = 'Current';
             }
             
-            return `Diff: ${noteName} (${v2Label} vs ${v1Label})`;
+            return `Diff: ${noteName} (${v1Label} vs ${v2Label})`;
         }
         return "Version Diff";
     }

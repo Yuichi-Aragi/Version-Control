@@ -1,16 +1,37 @@
 import { App, TFolder, FuzzySuggestModal, moment, type FuzzyMatch } from "obsidian";
 import type { DiffTarget, VersionHistoryEntry } from "../types";
 
-export class FolderSuggest extends FuzzySuggestModal<TFolder> {
-    onChoose: (result: TFolder) => void;
-    // FIX: Explicitly type as possibly undefined to satisfy `exactOptionalPropertyTypes`.
-    onCancel: (() => void) | undefined;
+/**
+ * A base class for suggestion modals that standardizes the handling of
+ * choosing an item versus cancelling the modal.
+ */
+abstract class BaseSuggestModal<T> extends FuzzySuggestModal<T> {
     private itemChosen: boolean = false;
 
-    constructor(app: App, onChoose: (result: TFolder) => void, onCancel?: () => void) {
+    constructor(
+        app: App,
+        private onChooseCallback: (result: T) => void,
+        private onCancelCallback?: () => void
+    ) {
         super(app);
-        this.onChoose = onChoose;
-        this.onCancel = onCancel;
+    }
+
+    override onChooseItem(item: T, _evt: MouseEvent | KeyboardEvent): void {
+        this.itemChosen = true;
+        this.onChooseCallback(item);
+    }
+
+    override onClose(): void {
+        super.onClose();
+        if (!this.itemChosen && this.onCancelCallback) {
+            this.onCancelCallback();
+        }
+    }
+}
+
+export class FolderSuggest extends BaseSuggestModal<TFolder> {
+    constructor(app: App, onChoose: (result: TFolder) => void, onCancel?: () => void) {
+        super(app, onChoose, onCancel);
         this.setPlaceholder("Select a folder for export or deviation...");
     }
 
@@ -22,32 +43,14 @@ export class FolderSuggest extends FuzzySuggestModal<TFolder> {
     getItemText(item: TFolder): string {
         return item.isRoot() ? "/" : item.path;
     }
-
-    onChooseItem(item: TFolder, _evt: MouseEvent | KeyboardEvent): void {
-        this.itemChosen = true;
-        this.onChoose(item);
-    }
-
-    override onClose(): void {
-        super.onClose();
-        if (!this.itemChosen && this.onCancel) {
-            this.onCancel();
-        }
-    }
 }
 
-export class VersionSuggest extends FuzzySuggestModal<DiffTarget> {
+export class VersionSuggest extends BaseSuggestModal<DiffTarget> {
     private targets: DiffTarget[];
-    onChoose: (result: DiffTarget) => void;
-    // FIX: Explicitly type as possibly undefined to satisfy `exactOptionalPropertyTypes`.
-    onCancel: (() => void) | undefined;
-    private itemChosen: boolean = false;
 
     constructor(app: App, targets: DiffTarget[], onChoose: (result: DiffTarget) => void, onCancel?: () => void) {
-        super(app);
+        super(app, onChoose, onCancel);
         this.targets = targets;
-        this.onChoose = onChoose;
-        this.onCancel = onCancel;
         this.setPlaceholder("Select a version to compare against...");
     }
 
@@ -85,18 +88,6 @@ export class VersionSuggest extends FuzzySuggestModal<DiffTarget> {
             // It must be the CurrentNoteState type
             title.setText(target.name);
             note.setText('The current, unsaved content of the note.');
-        }
-    }
-
-    onChooseItem(item: DiffTarget, _evt: MouseEvent | KeyboardEvent): void {
-        this.itemChosen = true;
-        this.onChoose(item);
-    }
-
-    override onClose(): void {
-        super.onClose();
-        if (!this.itemChosen && this.onCancel) {
-            this.onCancel();
         }
     }
 }

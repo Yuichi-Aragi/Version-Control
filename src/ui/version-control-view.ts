@@ -74,32 +74,36 @@ export class VersionControlView extends ItemView {
     }
 
     private initComponents() {
-        // Action bar is now a direct child of mainContainer, initialized first.
+        // Action bar is a direct child of mainContainer, initialized first.
         this.actionBarComponent = this.addChild(new ActionBarComponent(this.mainContainer, this.store));
         
         this.placeholderComponent = this.addChild(new PlaceholderComponent(this.mainContainer));
         this.errorDisplayComponent = this.addChild(new ErrorDisplayComponent(this.mainContainer, this.store, this.app));
         
-        // readyStateContainer now holds only the history list and panels
+        // readyStateContainer now holds only the history list.
         this.readyStateContainer = this.mainContainer.createDiv('v-ready-state-container');
         
-        this.settingsPanelComponent = this.addChild(new SettingsPanelComponent(this.readyStateContainer, this.store));
         this.historyListComponent = this.addChild(new HistoryListComponent(this.readyStateContainer, this.store));
         
-        this.previewPanelComponent = this.addChild(new PreviewPanelComponent(this.readyStateContainer, this.store, this.app));
-        this.diffPanelComponent = this.addChild(new DiffPanelComponent(this.readyStateContainer, this.store));
-        this.confirmationPanelComponent = this.addChild(new ConfirmationPanelComponent(this.readyStateContainer, this.store));
+        // All panels are now children of mainContainer to overlay the ready state.
+        this.settingsPanelComponent = this.addChild(new SettingsPanelComponent(this.mainContainer, this.store));
+        this.previewPanelComponent = this.addChild(new PreviewPanelComponent(this.mainContainer, this.store, this.app));
+        this.diffPanelComponent = this.addChild(new DiffPanelComponent(this.mainContainer, this.store));
+        this.confirmationPanelComponent = this.addChild(new ConfirmationPanelComponent(this.mainContainer, this.store));
     }
 
     private render(state: AppState) {
-        const isAppProcessing = state.status === AppStatus.READY && state.isProcessing;
-        this.contentEl.classList.toggle('is-processing', isAppProcessing);
-
         // Hide all major components by default and selectively show them.
         this.placeholderComponent.getContainer().hide();
         this.errorDisplayComponent.getContainer().hide();
         this.actionBarComponent.getContainer().hide();
         this.readyStateContainer.hide();
+
+        // An overlay that covers the action bar is considered a "full" overlay.
+        // The settings panel is a partial overlay and should not trigger this.
+        const isFullOverlayPanelVisible = state.panel && (state.panel.type === 'preview' || state.panel.type === 'diff' || state.panel.type === 'confirmation');
+        const isAppBusy = isFullOverlayPanelVisible || (state.status === AppStatus.READY && state.isProcessing);
+        this.contentEl.classList.toggle('is-overlay-active', isAppBusy);
 
         switch (state.status) {
             case AppStatus.INITIALIZING:
@@ -121,15 +125,16 @@ export class VersionControlView extends ItemView {
                 // In loading state, we show the container for the skeleton list
                 this.readyStateContainer.show();
                 this.historyListComponent.renderAsLoading(state.settings); // Pass settings for accurate skeleton
-                // Ensure panels are hidden
-                this.settingsPanelComponent.getContainer().hide();
-                this.previewPanelComponent.getContainer().hide();
-                this.diffPanelComponent.getContainer().hide();
-                this.confirmationPanelComponent.getContainer().hide();
+                // Ensure all overlay panels are hidden
+                this.settingsPanelComponent.render(null, state);
+                this.previewPanelComponent.render(null, state);
+                this.diffPanelComponent.render(null);
+                this.confirmationPanelComponent.render(null);
                 break;
 
             case AppStatus.READY:
-                // Action bar is always visible in the READY state.
+                // Action bar is now always visible in READY state.
+                // Its interactivity is controlled by the `is-overlay-active` class on `contentEl`.
                 this.actionBarComponent.getContainer().show();
                 this.actionBarComponent.render(state);
 
@@ -138,16 +143,17 @@ export class VersionControlView extends ItemView {
                     this.placeholderComponent.render("No versions saved yet.", "inbox");
                     this.placeholderComponent.getContainer().show();
                 } else {
-                    // Active note with versions. Show the history list and panels.
+                    // Active note with versions. Show the history list.
                     this.readyStateContainer.show();
                     this.historyListComponent.getContainer().show();
                     this.historyListComponent.render(state);
-                    
-                    this.settingsPanelComponent.render(state.panel?.type === 'settings', state);
-                    this.previewPanelComponent.render(state.panel?.type === 'preview' ? state.panel : null, state);
-                    this.diffPanelComponent.render(state.panel?.type === 'diff' ? state.panel : null);
-                    this.confirmationPanelComponent.render(state.panel?.type === 'confirmation' ? state.panel : null);
                 }
+                
+                // Render all overlay panels. They will manage their own visibility.
+                this.settingsPanelComponent.render(state.panel?.type === 'settings' ? state.panel : null, state);
+                this.previewPanelComponent.render(state.panel?.type === 'preview' ? state.panel : null, state);
+                this.diffPanelComponent.render(state.panel?.type === 'diff' ? state.panel : null);
+                this.confirmationPanelComponent.render(state.panel?.type === 'confirmation' ? state.panel : null);
                 break;
             
             default:
