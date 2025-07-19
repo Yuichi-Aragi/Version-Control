@@ -1,24 +1,30 @@
-name: Build and Release Plugin
+name: Build And Release
 
 on:
   push:
-    tags:
-      - '*' # This workflow runs on any tag push
+    branches:
+      - main # Or master, depending on your default branch
 
 permissions:
-  contents: write # Required to create releases and push commits
+  contents: write # Needed to create releases and commit files
 
 jobs:
-  build_and_release:
+  build-and-release:
     runs-on: ubuntu-latest
     steps:
-      # 1. Checkout the repository code at the specific tag
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Required to switch branches later
+          # We need to fetch all history to be able to push commits
+          fetch-depth: 0
+          # This token is used to push commits back to the repo
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 2. Check for package-lock.json to determine caching strategy
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' # Specify your desired Node.js version
+
       - name: Check for package-lock.json
         id: check_lockfile
         run: |
@@ -28,73 +34,33 @@ jobs:
             echo "lockfile_exists=false" >> $GITHUB_OUTPUT
           fi
 
-      # 3. Set up Node.js with conditional caching
-      - name: Set up Node.js with caching
+      - name: Install dependencies with npm ci
         if: steps.check_lockfile.outputs.lockfile_exists == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Set up Node.js without caching
-        if: steps.check_lockfile.outputs.lockfile_exists == 'false'
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      # 4. Install dependencies
-      - name: Install dependencies with npm ci (if lockfile exists)
-        if: steps.check_lockfile.outputs.lockfile_exists == 'true'
-        id: npm_ci
-        continue-on-error: true
         run: npm ci
 
-      - name: Install dependencies with npm install (if lockfile is missing or ci failed)
-        if: steps.check_lockfile.outputs.lockfile_exists == 'false' || steps.npm_ci.outcome == 'failure'
-        run: |
-          if [ -f package-lock.json ]; then
-            echo "Corrupted package-lock.json detected. Removing and regenerating."
-            rm package-lock.json
-          fi
-          npm install
+      - name: Install dependencies with npm install
+        if: steps.check_lockfile.outputs.lockfile_exists == 'false'
+        run: npm install
 
-      # 5. Check if package-lock.json was created or modified
-      - name: Check for changes in package-lock.json
-        id: lockfile_status
+      - name: Run Version Sync and Release Script
+        run: node ./version-manager.mjs
+        env:
+          # The GITHUB_TOKEN is automatically provided by GitHub Actions
+          # and is required for the GitHub CLI to interact with the repo
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit and push changes
         run: |
-          if [[ -n $(git status --porcelain package-lock.json) ]]; then
-            echo "changed=true" >> $GITHUB_OUTPUT
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Add all potential changes
+          git add versions.json package.json package-lock.json
+          
+          # Commit only if there are staged changes
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: Sync version files and lockfile"
+            git push
           else
-            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No changes to commit."
           fi
-
-      # 6. Build the plugin for production
-      - name: Build plugin
-        run: npm run build
-
-      
-
-      # 9. Create GitHub Release and Upload Assets
-      # This single, modern step replaces the previous "delete" and "create" steps.
-      # It handles overwriting releases and uploading files gracefully.
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          # The `files` parameter supports glob patterns and multiline lists.
-          files: |
-            build/main.js
-            build/styles.css
-            manifest.json
-          # This option automatically overwrites a release if one with the same tag already exists.
-          make_latest: true
-
-      # 10. Commit and push package-lock.json to the main branch (if changed)
-      - name: Commit and push package-lock.json
-        if: steps.lockfile_status.outputs.changed == 'true'
-        run: |
-          git checkout "${{ github.event.repository.default_branch }}"
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add package-lock.json
-          git commit -m "chore: update package-lock.json [skip ci]"
-          git push
