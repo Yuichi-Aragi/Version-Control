@@ -34,27 +34,25 @@ export class QueueService {
      */
     public enqueue<T>(key: string, task: () => Promise<T> | T): Promise<T> {
         const queue = this.getQueue(key);
-
-        const promiseReturningTask = (): Promise<T> => {
-            try {
-                // Wrap the result of the task in Promise.resolve().
-                // This handles both cases:
-                // 1. If task() returns a value `T`, it becomes `Promise<T>`.
-                // 2. If task() returns a `Promise<T>`, it remains `Promise<T>`.
-                return Promise.resolve(task());
-            } catch (error) {
-                // If the task function itself throws a synchronous error,
-                // we catch it and return a rejected promise to maintain the promise chain.
-                return Promise.reject(error);
-            }
-        };
-
-        // The TypeScript compiler has difficulty inferring the return type correctly
-        // in this specific scenario with nested generics from the p-queue library,
-        // sometimes resulting in `Promise<T | void>`.
-        // However, our `promiseReturningTask` wrapper guarantees the return type is `Promise<T>`.
-        // We use a type assertion to inform the compiler of the correct type, which is safe here.
-        return queue.add(promiseReturningTask) as Promise<T>;
+        return new Promise<T>((resolve, reject) => {
+            // We add a task to the queue. We don't use the return value of `add` itself,
+            // as we will resolve/reject our own promise from within the task's execution.
+            queue.add(async () => {
+                try {
+                    // Await the original task. This correctly handles both plain values and promises.
+                    const result = await task();
+                    // If the task succeeds, resolve our outer promise with the result.
+                    resolve(result);
+                } catch (error) {
+                    // If the task throws an error, reject our outer promise.
+                    reject(error);
+                }
+            }).catch(error => {
+                // This secondary catch handles errors related to the queue operation itself,
+                // such as the queue being cleared before the task can run.
+                reject(error);
+            });
+        });
     }
 
     /**
@@ -68,6 +66,17 @@ export class QueueService {
             queue.clear();
             this.fileQueues.delete(key);
         }
+    }
+
+    /**
+     * Clears all managed queues and stops any pending tasks.
+     * This is a critical cleanup step during plugin unload to prevent orphaned operations.
+     */
+    public clearAll(): void {
+        for (const queue of this.fileQueues.values()) {
+            queue.clear();
+        }
+        this.fileQueues.clear();
     }
 
     /**
