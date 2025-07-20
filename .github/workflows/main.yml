@@ -3,8 +3,10 @@ name: Build And Release
 on:
   push:
     branches:
-      - main # Or master, depending on your default branch
-
+      - main
+    paths:
+      - 'manifest.json'
+      
 permissions:
   contents: write # Needed to create releases and commit files
 
