@@ -39,7 +39,11 @@ export class ErrorDisplayComponent extends Component {
         const retryBtn = this.container.createEl("button", { text: "Retry initialization", cls: "mod-cta" });
         retryBtn.setAttribute("aria-label", "Retry initializing the version control view");
         retryBtn.addEventListener("click", () => {
-            this.store.dispatch(thunks.initializeView(this.app.workspace.activeLeaf));
+            // FIX: Replaced the deprecated `app.workspace.activeLeaf` with a call
+            // to `initializeView()` without arguments. The thunk is designed to
+            // safely find the active markdown view using the recommended API
+            // (`getActiveViewOfType`) when no leaf is provided.
+            this.store.dispatch(thunks.initializeView());
         });
     }
     
