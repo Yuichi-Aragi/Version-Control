@@ -1,4 +1,4 @@
-import { App } from "obsidian";
+import { App, TFile } from "obsidian";
 import { injectable, inject } from "inversify";
 import { PathService } from "./path-service";
 import type { NoteManifest } from "../../types";
@@ -23,21 +23,26 @@ export class VersionContentRepository {
     versionId: string
   ): Promise<string | null> {
     if (!noteId || !versionId) return null;
+    const versionFilePath = this.pathService.getNoteVersionPath(
+      noteId,
+      versionId
+    );
     try {
-      const versionFilePath = this.pathService.getNoteVersionPath(
-        noteId,
-        versionId
-      );
+      // Use the vault's adapter to read files directly from the filesystem.
+      // This bypasses Obsidian's cache, which can be inconsistent for files in
+      // hidden directories like `.versiondb`, resolving race conditions where a
+      // file is read immediately after being written.
       if (!(await this.app.vault.adapter.exists(versionFilePath))) {
-        console.error(
-          `VC: Data integrity issue. Version file missing: ${versionFilePath}`
+        // This is not a critical error, the file might have been deleted by a cleanup process.
+        console.warn(
+          `VC: Version file not found on read: ${versionFilePath}`
         );
         return null;
       }
       return await this.app.vault.adapter.read(versionFilePath);
     } catch (error) {
       console.error(
-        `VC: Failed to read content for note ${noteId}, version ${versionId}.`,
+        `VC: Failed to read content for note ${noteId}, version ${versionId} using adapter.`,
         error
       );
       return null;
@@ -54,21 +59,18 @@ export class VersionContentRepository {
           noteId,
           versionId
         );
+        
+        // Use the vault's adapter for direct, cache-free writing. This
+        // ensures the file operation completes reliably without being affected
+        // by cache latency.
         await this.app.vault.adapter.write(versionFilePath, content);
 
-        let fileSize = content.length;
-        try {
-          const stats = await this.app.vault.adapter.stat(versionFilePath);
-          // Ensure stats is defined and has a numeric size property
-          if (stats?.size !== undefined) {
-            fileSize = stats.size;
-          }
-        } catch (statError) {
-          console.warn(
-            `VC: Could not get file stats for ${versionFilePath}. Using content length.`,
-            statError
-          );
-        }
+        // Calculate file size directly from the content. This is the most
+        // reliable method, as TFile.stat.size can be stale after a write.
+        // Using `new Blob([content]).size` correctly calculates the byte length
+        // of the UTF-8 encoded string.
+        const fileSize = new Blob([content]).size;
+        
         return { size: fileSize };
     });
   }
@@ -82,12 +84,24 @@ export class VersionContentRepository {
           noteId,
           versionId
         );
-        if (await this.app.vault.adapter.exists(versionFilePath)) {
-          await this.app.vault.adapter.remove(versionFilePath);
+        
+        const fileToDelete = this.app.vault.getAbstractFileByPath(versionFilePath);
+
+        if (fileToDelete instanceof TFile) {
+            // We have a TFile, so we can use the safe trash method.
+            await this.app.vault.trash(fileToDelete, true);
         } else {
-          console.warn(
-            `VC: Version file to delete was already missing: ${versionFilePath}`
-          );
+            // No TFile object. This might be an orphan or un-cached file.
+            // Fallback to adapter-level permanent deletion.
+            if (await this.app.vault.adapter.exists(versionFilePath)) {
+                console.warn(`VC: Could not find TFile for ${versionFilePath}. Using permanent deletion as a fallback to trashing.`);
+                await this.app.vault.adapter.remove(versionFilePath);
+            } else {
+                // This is not an error, just a state check.
+                console.warn(
+                    `VC: Version file to delete was already missing: ${versionFilePath}`
+                );
+            }
         }
     });
   }
@@ -104,7 +118,7 @@ export class VersionContentRepository {
       ([, a], [, b]) => b.versionNumber - a.versionNumber
     );
 
-    // Fix: Instead of checking the array's length and then accessing the element,
+    // Instead of checking the array's length and then accessing the element,
     // we access the element first and then check if the result is undefined.
     // This creates a direct and unambiguous type guard for the compiler.
     const latestVersionEntry = versions[0];

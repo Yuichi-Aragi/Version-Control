@@ -1,6 +1,7 @@
 import { injectable, inject } from 'inversify';
+import { produce } from 'immer';
+import type { App } from 'obsidian';
 import type { CentralManifest } from '../../types';
-import { AtomicFileIO } from './atomic-file-io';
 import { PathService } from './path-service';
 import { TYPES } from '../../types/inversify.types';
 import { QueueService } from '../../services/queue-service';
@@ -17,9 +18,13 @@ export class CentralManifestRepository {
     private cache: CentralManifest | null = null;
     private pathToIdMap: Map<string, string> | null = null;
     private readonly manifestPath: string;
+    private readonly defaultManifest: CentralManifest = {
+        version: '1.0.0',
+        notes: {},
+    };
 
     constructor(
-        @inject(TYPES.AtomicFileIO) private atomicFileIO: AtomicFileIO,
+        @inject(TYPES.App) private app: App,
         @inject(TYPES.PathService) private pathService: PathService,
         @inject(TYPES.QueueService) private queueService: QueueService
     ) {
@@ -31,17 +36,9 @@ export class CentralManifestRepository {
             return this.cache;
         }
 
-        const defaultManifest: CentralManifest = {
-            version: '1.0.0',
-            notes: {},
-        };
+        const loaded = await this.readManifest();
 
-        const loaded = await this.atomicFileIO.readJsonFile<CentralManifest>(
-            this.manifestPath,
-            defaultManifest
-        );
-
-        this.cache = loaded && typeof loaded.notes === 'object' ? loaded : defaultManifest;
+        this.cache = loaded && typeof loaded.notes === 'object' ? loaded : this.defaultManifest;
         this.rebuildPathToIdMap();
         return this.cache;
     }
@@ -63,54 +60,66 @@ export class CentralManifestRepository {
         notePath: string,
         noteManifestPath: string
     ): Promise<void> {
-        const now = new Date().toISOString();
-        await this.update((manifest) => {
-            manifest.notes[noteId] = {
-                notePath,
-                manifestPath: noteManifestPath,
-                createdAt: now,
-                lastModified: now,
-            };
-            return manifest;
+        return this.queueService.enqueue(CENTRAL_MANIFEST_QUEUE_KEY, async () => {
+            const currentManifest = await this.load(true);
+            const now = new Date().toISOString();
+
+            const newManifest = produce(currentManifest, draft => {
+                draft.notes[noteId] = {
+                    notePath,
+                    manifestPath: noteManifestPath,
+                    createdAt: now,
+                    lastModified: now,
+                };
+            });
+
+            await this.writeManifest(newManifest);
+            
+            this.cache = newManifest;
+            this.rebuildPathToIdMap();
         });
     }
 
     public async removeNoteEntry(noteId: string): Promise<void> {
-        await this.update((manifest) => {
-            if (manifest.notes[noteId]) {
-                delete manifest.notes[noteId];
-            } else {
-                console.warn(
-                    `VC: deleteNoteEntry: Note ID ${noteId} not found in central manifest. It might have been removed in a concurrent operation.`
-                );
+        return this.queueService.enqueue(CENTRAL_MANIFEST_QUEUE_KEY, async () => {
+            const currentManifest = await this.load(true);
+
+            if (!currentManifest.notes[noteId]) {
+                console.warn(`VC: removeNoteEntry: Note ID ${noteId} not found. No changes made.`);
+                return;
             }
-            return manifest;
+
+            const newManifest = produce(currentManifest, draft => {
+                delete draft.notes[noteId];
+            });
+
+            await this.writeManifest(newManifest);
+            this.cache = newManifest;
+            this.rebuildPathToIdMap();
         });
     }
 
     public async updateNotePath(noteId: string, newPath: string): Promise<void> {
-        const now = new Date().toISOString();
-        await this.update((manifest) => {
-            if (manifest.notes[noteId]) {
-                manifest.notes[noteId].notePath = newPath;
-                manifest.notes[noteId].lastModified = now;
-            } else {
-                console.warn(
-                    `VC: Attempted to update path in central manifest for non-existent entry: ${noteId}`
-                );
-            }
-            return manifest;
-        });
-    }
-
-    private async update(updateFn: (manifest: CentralManifest) => CentralManifest): Promise<CentralManifest> {
         return this.queueService.enqueue(CENTRAL_MANIFEST_QUEUE_KEY, async () => {
-            const manifest = await this.load(true);
-            const newManifest = updateFn(manifest);
-            await this.atomicFileIO.writeJsonFile(this.manifestPath, newManifest);
+            const currentManifest = await this.load(true);
+            const now = new Date().toISOString();
+
+            if (!currentManifest.notes[noteId]) {
+                console.warn(`VC: updateNotePath: Note ID ${noteId} not found. No changes made.`);
+                return;
+            }
+
+            const newManifest = produce(currentManifest, draft => {
+                const noteEntry = draft.notes[noteId];
+                if (noteEntry) {
+                    noteEntry.notePath = newPath;
+                    noteEntry.lastModified = now;
+                }
+            });
+
+            await this.writeManifest(newManifest);
             this.cache = newManifest;
             this.rebuildPathToIdMap();
-            return newManifest;
         });
     }
 
@@ -126,6 +135,45 @@ export class CentralManifestRepository {
             if (noteData && noteData.notePath) {
                 this.pathToIdMap.set(noteData.notePath, noteId);
             }
+        }
+    }
+
+    private async readManifest(): Promise<CentralManifest> {
+        try {
+            if (!await this.app.vault.adapter.exists(this.manifestPath)) {
+                return this.defaultManifest;
+            }
+            const content = await this.app.vault.adapter.read(this.manifestPath);
+            if (!content || content.trim() === '') {
+                console.warn(`VC: Manifest file ${this.manifestPath} is empty. Returning default.`);
+                return this.defaultManifest;
+            }
+            return JSON.parse(content) as CentralManifest;
+        } catch (error) {
+            console.error(`VC: Failed to load/parse manifest ${this.manifestPath}.`, error);
+            if (error instanceof SyntaxError) {
+                console.error(`VC: Manifest ${this.manifestPath} is corrupt! A backup of the corrupt file has been created.`);
+                await this.tryBackupCorruptFile(this.manifestPath);
+            }
+            return this.defaultManifest;
+        }
+    }
+
+    private async writeManifest(data: CentralManifest): Promise<void> {
+        try {
+            const content = JSON.stringify(data, null, 2);
+            await this.app.vault.adapter.write(this.manifestPath, content);
+        } catch (error) {
+            console.error(`VC: CRITICAL: Failed to save manifest to ${this.manifestPath}.`, error);
+            throw error;
+        }
+    }
+
+    private async tryBackupCorruptFile(path: string): Promise<void> {
+        try {
+            await this.app.vault.adapter.copy(path, `${path}.corrupt.${Date.now()}`);
+        } catch (backupError) {
+            console.error(`VC: Failed to backup corrupt manifest ${path}`, backupError);
         }
     }
 }
