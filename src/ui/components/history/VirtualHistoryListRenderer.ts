@@ -1,5 +1,4 @@
-import { Component } from "obsidian";
-import { debounce } from 'lodash-es';
+import { Component, debounce } from "obsidian";
 import type { VersionHistoryEntry } from "../../../types";
 import type { AppState } from "../../../state/state";
 import { HistoryEntryRenderer } from "./HistoryEntryRenderer";
@@ -28,12 +27,12 @@ export class VirtualHistoryListRenderer extends Component {
     ) {
         super();
         this.sizerEl = this.viewportEl.createDiv('v-history-list-sizer');
-        this.debouncedUpdate = debounce(this.update, RENDER_DEBOUNCE_MS, { leading: false, trailing: true });
+        this.debouncedUpdate = debounce(this.update, RENDER_DEBOUNCE_MS);
         this.totalItemHeight = this.itemHeight + this.itemGap;
     }
 
     override onload() {
-        this.viewportEl.addEventListener('scroll', this.debouncedUpdate);
+        this.registerDomEvent(this.viewportEl, 'scroll', this.debouncedUpdate);
         
         // Defer initial render until after the next frame to ensure layout is stable
         requestAnimationFrame(() => {
@@ -47,7 +46,7 @@ export class VirtualHistoryListRenderer extends Component {
     }
 
     override onunload() {
-        this.viewportEl.removeEventListener('scroll', this.debouncedUpdate);
+        // No need to remove scroll listener manually; registerDomEvent handles it.
         this.viewportEl.empty();
         this.renderedNodes.clear();
     }

@@ -211,7 +211,7 @@ export class HistoryEntryRenderer {
     private createActionButtons(container: HTMLElement, version: VersionHistoryEntry, isPanelOpen: boolean): void {
         const viewBtn = container.createEl("button", {
             cls: "v-action-btn",
-            attr: { "aria-label": "Preview in Panel", "title": "Preview in Panel" }
+            attr: { "aria-label": "Preview in panel", "title": "Preview in panel" }
         });
         setIcon(viewBtn, "eye");
         if (!isPanelOpen) {
