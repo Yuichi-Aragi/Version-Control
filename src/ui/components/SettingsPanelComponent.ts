@@ -1,5 +1,4 @@
-import { Setting, setIcon } from "obsidian";
-import { debounce } from 'lodash-es';
+import { Setting, setIcon, debounce } from "obsidian";
 import type { AppStore } from "../../state/store";
 import { AppStatus, type SettingsPanel as SettingsPanelState } from "../../state/state";
 import type { AppState } from "../../state/state";
@@ -15,16 +14,28 @@ export class SettingsPanelComponent extends BasePanelComponent {
     constructor(parent: HTMLElement, store: AppStore) {
         super(parent, store, ["v-settings-panel"]); 
         
-        // FIX: The close button has been removed. The panel is closed by clicking the settings icon in the action bar again.
-        
         // Create the content wrapper once. Its content will be re-rendered.
         this.innerPanel = this.container.createDiv('v-settings-panel-content-wrapper');
+
+        // Register events once. The handler will manage logic based on state.
+        this.registerDomEvent(this.innerPanel, 'click', this.resetAutoCloseTimer, { capture: true });
+        this.registerDomEvent(this.innerPanel, 'input', this.resetAutoCloseTimer, { capture: true });
+
+        // Register a single cleanup function for the timer. This function will be
+        // called automatically when the component is unloaded, removing the need
+        // for a manual `onunload` method for this purpose.
+        this.register(() => {
+            if (this.autoCloseTimer) {
+                window.clearTimeout(this.autoCloseTimer);
+            }
+        });
     }
 
     render(panelState: SettingsPanelState | null, state: AppState) { 
         const isOpen = !!panelState;
         this.toggle(isOpen); 
         
+        // Clear any previously running timer before proceeding.
         if (this.autoCloseTimer) {
             window.clearTimeout(this.autoCloseTimer);
             this.autoCloseTimer = null;
@@ -36,6 +47,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
         
         this.innerPanel.empty(); 
 
+        // Set a new auto-close timer. The cleanup is handled by the registered function.
         this.autoCloseTimer = window.setTimeout(() => {
             const currentState = this.store.getState();
             if (currentState.status === AppStatus.READY && currentState.panel?.type === 'settings') {
@@ -51,15 +63,15 @@ export class SettingsPanelComponent extends BasePanelComponent {
                 cls: 'v-settings-section-title'
             });
             const noteActionsContainer = noteSection.createDiv("v-settings-actions");
-            this.createSettingsAction(noteActionsContainer, "Refresh History", "refresh-cw", () => this.handleRefresh());
-            this.createSettingsAction(noteActionsContainer, "Export History", "download-cloud", () => this.handleExport());
+            this.createSettingsAction(noteActionsContainer, "Refresh history", "refresh-cw", () => this.handleRefresh());
+            this.createSettingsAction(noteActionsContainer, "Export history", "download-cloud", () => this.handleExport());
             if (state.noteId && state.history.length > 0) { 
-                 this.createSettingsAction(noteActionsContainer, "Delete All Versions", "trash-2", () => this.store.dispatch(thunks.requestDeleteAll()), "mod-warning");
+                 this.createSettingsAction(noteActionsContainer, "Delete all versions", "trash-2", () => this.store.dispatch(thunks.requestDeleteAll()), "mod-warning");
             }
         }
         
         const pluginSettingsSection = this.innerPanel.createDiv('v-settings-section');
-        const descTitle = state.noteId ? `Note-Specific Settings` : `Default Settings`;
+        const descTitle = state.noteId ? `Note-specific settings` : `Default settings`;
         pluginSettingsSection.createEl('h4', {
             text: descTitle,
             cls: 'v-settings-section-title'
@@ -72,17 +84,17 @@ export class SettingsPanelComponent extends BasePanelComponent {
         }
 
         this.createPluginSettingsControls(this.innerPanel, state);
-
-        this.innerPanel.addEventListener('click', this.resetAutoCloseTimer, { capture: true });
-        this.innerPanel.addEventListener('input', this.resetAutoCloseTimer, { capture: true });
     }
 
     private resetAutoCloseTimer = () => {
+        // Clear the existing timer.
         if (this.autoCloseTimer) {
             window.clearTimeout(this.autoCloseTimer);
         }
+        
         const currentState = this.store.getState();
         if (currentState.status === AppStatus.READY && currentState.panel?.type === 'settings') {
+            // Set a new timer.
             this.autoCloseTimer = window.setTimeout(() => {
                 const latestState = this.store.getState();
                 if (latestState.status === AppStatus.READY && latestState.panel?.type === 'settings') {
@@ -172,7 +184,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
         
         new Setting(parent)
             .setName('Use relative timestamps')
-            .setDesc("ON: Show relative times (e.g., '2 hours ago'). OFF: Show full date and time.")
+            .setDesc("On: show relative times (e.g., '2 hours ago'). Off: show full date and time.")
             .addToggle(toggle => {
                 toggle 
                     .setValue(settings.useRelativeTimestamps)
@@ -183,8 +195,8 @@ export class SettingsPanelComponent extends BasePanelComponent {
             });
         
         new Setting(parent)
-            .setName('Render Markdown in preview')
-            .setDesc('If enabled, version previews will render Markdown. Otherwise, plain text.')
+            .setName('Render markdown in preview')
+            .setDesc('If enabled, version previews will render markdown. Otherwise, plain text.')
             .addToggle(toggle => {
                 toggle
                     .setValue(settings.renderMarkdownInPreview)
@@ -253,7 +265,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                 .setDesc('placeholder')
                 .then(setting => {
                     descEl = setting.descEl;
-                    descEl.setText(`Applies if "Auto-cleanup by age" is on. Min 7, Max 365. Current: ${settings.autoCleanupDays} days.`);
+                    descEl.setText(`Applies if "auto-cleanup by age" is on. Min 7, max 365. Current: ${settings.autoCleanupDays} days.`);
                 })
                 .addSlider(slider => {
                     const debouncedSave = debounce((value: number) => {
@@ -266,7 +278,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                         .setDynamicTooltip()
                         .onChange((value) => {
                             if (descEl) {
-                                descEl.setText(`Applies if "Auto-cleanup by age" is on. Min 7, Max 365. Current: ${value} days.`);
+                                descEl.setText(`Applies if "auto-cleanup by age" is on. Min 7, max 365. Current: ${value} days.`);
                             }
                             debouncedSave(value);
                         });
@@ -276,7 +288,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
 
         new Setting(parent)
             .setName('Max versions per note')
-            .setDesc('Maximum number of versions to keep per note. Oldest versions are deleted first. Set to 0 for infinite. Current: ' + (settings.maxVersionsPerNote === 0 ? "Infinite" : settings.maxVersionsPerNote))
+            .setDesc('Maximum number of versions to keep per note. Oldest versions are deleted first. Set to 0 for infinite. Current: ' + (settings.maxVersionsPerNote === 0 ? "infinite" : settings.maxVersionsPerNote))
             .addText(text => {
                 text
                     .setPlaceholder("e.g., 50 or 0 for infinite")
@@ -292,14 +304,5 @@ export class SettingsPanelComponent extends BasePanelComponent {
                     }, 700));
                 if (!isNoteReady) text.setDisabled(true);
             });
-    }
-
-    override onunload() {
-        if (this.autoCloseTimer) {
-            window.clearTimeout(this.autoCloseTimer);
-        }
-        this.innerPanel.removeEventListener('click', this.resetAutoCloseTimer, { capture: true });
-        this.innerPanel.removeEventListener('input', this.resetAutoCloseTimer, { capture: true });
-        super.onunload(); 
     }
 }

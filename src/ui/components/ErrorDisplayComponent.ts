@@ -36,7 +36,7 @@ export class ErrorDisplayComponent extends Component {
             detailsPre.setText(error.details);
         }
 
-        const retryBtn = this.container.createEl("button", { text: "Retry Initialization", cls: "mod-cta" });
+        const retryBtn = this.container.createEl("button", { text: "Retry initialization", cls: "mod-cta" });
         retryBtn.setAttribute("aria-label", "Retry initializing the version control view");
         retryBtn.addEventListener("click", () => {
             this.store.dispatch(thunks.initializeView(this.app.workspace.activeLeaf));

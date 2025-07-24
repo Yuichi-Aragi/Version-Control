@@ -1,5 +1,4 @@
-import { setIcon, Component } from "obsidian";
-import { debounce } from 'lodash-es';
+import { setIcon, Component, debounce } from "obsidian";
 import type { AppStore } from "../../state/store";
 import type { AppState } from "../../state/state";
 import { AppStatus } from "../../state/state";
@@ -40,9 +39,9 @@ export class ActionBarComponent extends Component {
         
         const leftGroup = this.defaultActionsEl.createDiv('v-top-actions-left-group');
 
-        this.saveButton = leftGroup.createEl("button", { text: "Save New Version", cls: "v-save-button" });
+        this.saveButton = leftGroup.createEl("button", { text: "Save new version", cls: "v-save-button" });
         this.saveButton.setAttribute("aria-label", "Save a new version of the current note");
-        this.saveButton.addEventListener("click", () => this.handleSaveVersionClick());
+        this.registerDomEvent(this.saveButton, "click", () => this.handleSaveVersionClick());
 
         this.watchModeTimerEl = leftGroup.createDiv('v-watch-mode-timer');
         this.watchModeTimerEl.hide();
@@ -51,21 +50,21 @@ export class ActionBarComponent extends Component {
 
         this.diffIndicatorButton = rightGroup.createEl("button", { cls: "clickable-icon v-diff-indicator", attr: { "aria-label": "View ready diff" } });
         this.diffIndicatorButton.hide();
-        this.diffIndicatorButton.addEventListener("click", () => {
+        this.registerDomEvent(this.diffIndicatorButton, "click", () => {
             this.store.dispatch(thunks.viewReadyDiff());
         });
 
         this.searchToggleButton = rightGroup.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Search history" } });
         setIcon(this.searchToggleButton, "search");
-        this.searchToggleButton.addEventListener("click", () => {
+        this.registerDomEvent(this.searchToggleButton, "click", () => {
             const currentState = this.store.getState();
             if (currentState.status !== AppStatus.READY) return;
             this.store.dispatch(actions.toggleSearch(!currentState.isSearchActive));
         });
         
-        this.settingsButton = rightGroup.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Toggle Settings" } });
+        this.settingsButton = rightGroup.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Toggle settings" } });
         setIcon(this.settingsButton, "settings-2");
-        this.settingsButton.addEventListener("click", () => {
+        this.registerDomEvent(this.settingsButton, "click", () => {
             const currentState = this.store.getState();
             if (currentState.status !== AppStatus.READY) return;
 
@@ -86,7 +85,7 @@ export class ActionBarComponent extends Component {
         setIcon(this.searchIconEl, 'x-circle');
         this.searchIconEl.setAttribute('role', 'button');
         this.searchIconEl.setAttribute('aria-label', 'Close search');
-        this.searchIconEl.addEventListener('mousedown', (event: MouseEvent) => {
+        this.registerDomEvent(this.searchIconEl, 'mousedown', (event: MouseEvent) => {
             event.preventDefault();
             this.store.dispatch(actions.toggleSearch(false));
         });
@@ -99,12 +98,12 @@ export class ActionBarComponent extends Component {
 
         const debouncedSearch = debounce((value: string) => {
             this.store.dispatch(actions.setSearchQuery(value));
-        }, 300, { leading: true, trailing: true });
+        }, 300, true);
 
-        this.searchInput.addEventListener('input', () => {
+        this.registerDomEvent(this.searchInput, 'input', () => {
             debouncedSearch(this.searchInput.value);
         });
-        this.searchInput.addEventListener('keydown', (e) => {
+        this.registerDomEvent(this.searchInput, 'keydown', (e) => {
             if (e.key === 'Escape') {
                 this.store.dispatch(actions.toggleSearch(false));
             }
@@ -116,7 +115,7 @@ export class ActionBarComponent extends Component {
             cls: 'clickable-icon', attr: { 'aria-label': 'Toggle case sensitivity' }
         });
         setIcon(this.caseButton, 'case-sensitive');
-        this.caseButton.addEventListener('mousedown', (event: MouseEvent) => {
+        this.registerDomEvent(this.caseButton, 'mousedown', (event: MouseEvent) => {
             event.preventDefault();
             const state = this.store.getState();
             if (state.status === AppStatus.READY) {
@@ -129,7 +128,7 @@ export class ActionBarComponent extends Component {
             cls: 'clickable-icon', attr: { 'aria-label': 'Clear search' }
         });
         setIcon(this.clearButton, 'x');
-        this.clearButton.addEventListener('mousedown', (event: MouseEvent) => {
+        this.registerDomEvent(this.clearButton, 'mousedown', (event: MouseEvent) => {
             event.preventDefault();
             this.store.dispatch(actions.setSearchQuery(''));
             this.searchInput.focus();
@@ -139,7 +138,7 @@ export class ActionBarComponent extends Component {
             cls: 'clickable-icon v-filter-button', attr: { 'aria-label': 'Sort options' }
         });
         setIcon(this.filterButton, 'filter');
-        this.filterButton.addEventListener('mousedown', (event: MouseEvent) => {
+        this.registerDomEvent(this.filterButton, 'mousedown', (event: MouseEvent) => {
             event.preventDefault();
             this.store.dispatch(thunks.showSortMenu(event));
         });

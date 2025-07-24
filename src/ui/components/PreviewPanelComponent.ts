@@ -63,7 +63,7 @@ export class PreviewPanelComponent extends BasePanelComponent {
             this.localRenderMarkdown = false; // Reset to plaintext view
             const toggleBtn = headerActions.createEl("button", {
                 cls: "v-action-btn v-preview-toggle-btn",
-                attr: { "aria-label": "Toggle Markdown Rendering", "title": "Toggle Markdown Rendering" }
+                attr: { "aria-label": "Toggle markdown rendering", "title": "Toggle markdown rendering" }
             });
             setIcon(toggleBtn, "book-open"); // Icon to turn ON rendering
             toggleBtn.addEventListener("click", () => {
@@ -112,7 +112,7 @@ export class PreviewPanelComponent extends BasePanelComponent {
             this.previewContentEl.empty();
             this.previewContentEl.addClass('is-plaintext');
             this.previewContentEl.setText(this.currentContent);
-            this.previewContentEl.createEl('p', { text: 'Failed to render Markdown. Displaying as plain text.', cls: 'text-error' });
+            this.previewContentEl.createEl('p', { text: 'Failed to render markdown. Displaying as plain text.', cls: 'text-error' });
         }
     }
 

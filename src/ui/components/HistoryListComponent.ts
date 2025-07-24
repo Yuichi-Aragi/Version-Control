@@ -116,7 +116,7 @@ export class HistoryListComponent extends Component {
     private buildSkeletonDOM(): void {
         const header = this.container.createDiv("v-history-header");
         setIcon(header, "history");
-        header.createSpan({ text: " Version History" });
+        header.createSpan({ text: " Version history" });
         this.countEl = header.createSpan("v-history-count");
         this.listViewport = this.container.createDiv("v-history-list");
     }

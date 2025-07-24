@@ -13,7 +13,7 @@ export class PlaceholderComponent extends Component {
     }
 
     render(title?: string, iconName?: string) {
-        const newTitle = title || "Open a Markdown note to see its version history.";
+        const newTitle = title || "Open a markdown note to see its version history.";
         const newIcon = iconName || "file-text";
 
         // Only re-render if content actually changes to prevent unnecessary DOM manipulation

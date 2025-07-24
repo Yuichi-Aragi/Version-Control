@@ -37,7 +37,7 @@ export class DiffPanelComponent extends BasePanelComponent {
 
         const header = this.innerPanel.createDiv("v-panel-header");
         
-        header.createEl("h3", { text: `Comparing Versions` });
+        header.createEl("h3", { text: `Comparing versions` });
 
         const headerActions = header.createDiv('v-panel-header-actions');
         const closeBtn = headerActions.createEl("button", { 
@@ -59,7 +59,7 @@ export class DiffPanelComponent extends BasePanelComponent {
             const v1Label = version1.name ? `"${version1.name}" (V${version1.versionNumber})` : `Version ${version1.versionNumber}`;
             let v2Label: string;
             if (version2.id === 'current') {
-                v2Label = 'Current Note State';
+                v2Label = 'Current note state';
             } else if ('versionNumber' in version2) {
                 v2Label = version2.name ? `"${version2.name}" (V${version2.versionNumber})` : `Version ${version2.versionNumber}`;
             } else {
@@ -69,11 +69,11 @@ export class DiffPanelComponent extends BasePanelComponent {
             // Add descriptive labels for clarity, similar to the dedicated diff view
             const metaContainer = contentWrapper.createDiv({ cls: 'v-diff-meta-container' });
             metaContainer.createDiv({
-                text: `Base (Red, -): ${v1Label}`,
+                text: `Base (red, -): ${v1Label}`,
                 cls: "v-meta-label"
             });
             metaContainer.createDiv({
-                text: `Compared (Green, +): ${v2Label}`,
+                text: `Compared (green, +): ${v2Label}`,
                 cls: "v-meta-label"
             });
             
