@@ -14,8 +14,8 @@ export async function generateUniqueFilePath(app: App, baseName: string, parentP
     const folderPath: string = (parentPath && parentPath !== '/') ? parentPath : '';
     const base = folderPath ? `${folderPath}/` : '';
     
-    // Sanitize baseName once before the loop.
-    const sanitizedBaseName = baseName.replace(/[\\/:*?"<>|]/g, '_').trim();
+    // Use the robust customSanitizeFileName function for consistency and safety.
+    const sanitizedBaseName = customSanitizeFileName(baseName);
 
     let fileName = sanitizedBaseName + extension;
     let filePath = normalizePath(base + fileName);
