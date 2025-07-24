@@ -37,7 +37,7 @@ export class VersionDiffView extends ItemView {
             
             return `Diff: ${noteName} (${v1Label} vs ${v2Label})`;
         }
-        return "Version Diff";
+        return "Version diff";
     }
 
     override async setState(state: any, options: any): Promise<void> {
@@ -86,16 +86,16 @@ export class VersionDiffView extends ItemView {
             v2Label = version2.name ? `"${version2.name}" (V${version2.versionNumber})` : `Version ${version2.versionNumber}`;
         } else {
             // This is a DiffTargetCurrent
-            v2Label = 'Current Note State';
+            v2Label = 'Current note state';
         }
         
         headerEl.createEl("h3", { text: `Comparing versions of "${noteName}"` });
         headerEl.createDiv({
-            text: `Base (Red, -): ${v1Label} - ${moment(version1.timestamp).format('LLL')}`,
+            text: `Base (red, -): ${v1Label} - ${moment(version1.timestamp).format('LLL')}`,
             cls: "v-meta-label"
         });
         headerEl.createDiv({
-            text: `Compared (Green, +): ${v2Label} - ${'versionNumber' in version2 ? moment(version2.timestamp).format('LLL') : 'Now'}`,
+            text: `Compared (green, +): ${v2Label} - ${'versionNumber' in version2 ? moment(version2.timestamp).format('LLL') : 'Now'}`,
             cls: "v-meta-label"
         });
 
@@ -107,6 +107,6 @@ export class VersionDiffView extends ItemView {
     private renderPlaceholder() {
         if (!this.tabContentEl) return;
         this.tabContentEl.empty();
-        this.tabContentEl.setText("No diff data to display. Open a diff from the Version Control panel.");
+        this.tabContentEl.setText("No diff data to display. Open a diff from the version control panel.");
     }
 }

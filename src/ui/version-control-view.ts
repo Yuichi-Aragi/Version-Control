@@ -43,7 +43,7 @@ export class VersionControlView extends ItemView {
     }
 
     override getDisplayText(): string {
-        return "Version Control";
+        return "Version control";
     }
 
     override async onOpen() {
@@ -107,7 +107,7 @@ export class VersionControlView extends ItemView {
 
         switch (state.status) {
             case AppStatus.INITIALIZING:
-                this.placeholderComponent.render("Initializing Version Control...", "sync");
+                this.placeholderComponent.render("Initializing version control...", "sync");
                 this.placeholderComponent.getContainer().show();
                 break;
 

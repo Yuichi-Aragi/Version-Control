@@ -46,7 +46,7 @@ export class VersionPreviewView extends ItemView {
             const shortVersionLabel = versionLabel.length > 30 ? versionLabel.substring(0, 27) + '...' : versionLabel;
             return `${shortNoteName} (${shortVersionLabel})`;
         }
-        return "Version Preview"; 
+        return "Version preview"; 
     }
 
     override async setState(state: any, options: any): Promise<void> {
@@ -120,18 +120,18 @@ export class VersionPreviewView extends ItemView {
             const liveFile = this.app.vault.getAbstractFileByPath(previewingNotePath);
             if (!(liveFile instanceof TFile)) {
                 isStale = true;
-                staleReason = "Original Note Deleted/Moved";
+                staleReason = "Original note deleted/moved";
             } else {
                 const fileCache = this.app.metadataCache.getFileCache(liveFile);
                 const idFromFrontmatter = fileCache?.frontmatter?.[NOTE_FRONTMATTER_KEY] ?? null;
                 if (idFromFrontmatter !== previewingNoteId) {
                     isStale = true;
-                    staleReason = "History Dissociated from File";
+                    staleReason = "History dissociated from file";
                 } else if (appState.status === AppStatus.READY && appState.noteId === previewingNoteId) {
                     const versionExistsInCurrentHistory = appState.history.some(v => v.id === previewingVersionId);
                     if (!versionExistsInCurrentHistory) {
                         isStale = true;
-                        staleReason = "Version Deleted from Active History";
+                        staleReason = "Version deleted from active history";
                     }
                 }
             }
@@ -177,7 +177,7 @@ export class VersionPreviewView extends ItemView {
         this.tabContentEl.empty(); 
 
         if (!this.currentDisplayState) {
-            this.tabContentEl.setText("No version data to display. Open a version preview from the Version Control panel.");
+            this.tabContentEl.setText("No version data to display. Open a version preview from the version control panel.");
             return;
         }
 
@@ -198,7 +198,7 @@ export class VersionPreviewView extends ItemView {
             this.localRenderMarkdown = false; // Reset
             const toggleBtn = titleRow.createEl("button", {
                 cls: "v-action-btn",
-                attr: { "aria-label": "Toggle Markdown Rendering", "title": "Toggle Markdown Rendering" }
+                attr: { "aria-label": "Toggle markdown rendering", "title": "Toggle markdown rendering" }
             });
             setIcon(toggleBtn, "book-open");
             toggleBtn.addEventListener("click", () => {
@@ -245,7 +245,7 @@ export class VersionPreviewView extends ItemView {
                 this.contentPreviewEl.empty(); 
                 this.contentPreviewEl.addClass('is-plaintext');
                 this.contentPreviewEl.setText(this.currentContent);
-                this.contentPreviewEl.createEl('p', { text: 'Failed to render Markdown. Displaying as plain text.', cls: 'text-error' });
+                this.contentPreviewEl.createEl('p', { text: 'Failed to render markdown. Displaying as plain text.', cls: 'text-error' });
             }
         }
     }
