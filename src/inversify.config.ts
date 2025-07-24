@@ -6,7 +6,6 @@ import { createAppStore, type AppStore } from './state/store';
 import { getInitialState } from './state/state';
 import { PluginEvents } from './core/plugin-events';
 import { PathService } from './core/storage/path-service';
-import { AtomicFileIO } from './core/storage/atomic-file-io';
 import { QueueService } from './services/queue-service';
 import { CentralManifestRepository } from './core/storage/central-manifest-repository';
 import { NoteManifestRepository } from './core/storage/note-manifest-repository';
@@ -42,7 +41,6 @@ export function configureServices(plugin: VersionControlPlugin): Container {
   container.bind<QueueService>(TYPES.QueueService).to(QueueService);
   // Low-level Storage Services
   container.bind<PathService>(TYPES.PathService).to(PathService);
-  container.bind<AtomicFileIO>(TYPES.AtomicFileIO).to(AtomicFileIO);
   // Repositories
   container.bind<CentralManifestRepository>(TYPES.CentralManifestRepo).to(CentralManifestRepository);
   container.bind<NoteManifestRepository>(TYPES.NoteManifestRepo).to(NoteManifestRepository);

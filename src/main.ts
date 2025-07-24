@@ -1,6 +1,6 @@
 import 'reflect-metadata'; // Must be the first import
-import { Plugin, Notice, WorkspaceLeaf } from 'obsidian';
-import { get, debounce } from 'lodash-es';
+import { Plugin, Notice, WorkspaceLeaf, debounce, type Debouncer } from 'obsidian';
+import { get } from 'lodash-es';
 import type { Container } from 'inversify';
 import type { AppStore } from './state/store';
 import { appSlice } from './state/appSlice';
@@ -17,20 +17,27 @@ import { TYPES } from './types/inversify.types';
 import type { CentralManifestRepository } from './core/storage/central-manifest-repository';
 import type { NoteManifestRepository } from './core/storage/note-manifest-repository';
 import type { QueueService } from './services/queue-service';
+import { DEFAULT_SETTINGS } from './constants';
+import type { VersionControlSettings } from './types';
 
 export default class VersionControlPlugin extends Plugin {
-	private container!: Container;
+    private container!: Container;
     private store!: AppStore;
     private cleanupManager!: CleanupManager;
     private backgroundTaskManager!: BackgroundTaskManager;
-    public debouncedLeafChangeHandler?: ReturnType<typeof debounce>;
+    public debouncedLeafChangeHandler?: Debouncer<[WorkspaceLeaf | null], void>;
     public isUnloading: boolean = false;
+    public settings!: VersionControlSettings;
 
 	override async onload() {
         this.isUnloading = false; // Reset the guard flag on every load
 		try {
-			// The settings object is no longer loaded here.
-            // configureServices will handle setting up the initial state.
+			// Load and save settings for compliance with Obsidian guidelines.
+			// The plugin's core logic initializes from hardcoded DEFAULT_SETTINGS
+			// to maintain the existing behavior, making this primarily for compliance.
+			await this.loadSettings();
+
+            // configureServices will handle setting up the initial state using hardcoded defaults.
             this.container = configureServices(this);
 
             this.store = this.container.get<AppStore>(TYPES.Store);
@@ -53,27 +60,23 @@ export default class VersionControlPlugin extends Plugin {
 			registerCommands(this, this.store);
 			registerSystemEventListeners(this, this.store);
 
-            const onLayoutReady = () => {
+            // Use the dedicated `onLayoutReady` helper. It fires once and requires no cleanup.
+            this.app.workspace.onLayoutReady(() => {
                 // This thunk will now load the correct settings for the active note (or defaults)
-                this.store.dispatch(thunks.initializeView(this.app.workspace.activeLeaf));
-            };
-
-            if (this.app.workspace.layoutReady) {
-                onLayoutReady();
-            } else {             
-                this.app.workspace.onLayoutReady(onLayoutReady);
-            }
+                // by using the recommended API to find the active view.
+                this.store.dispatch(thunks.initializeView());
+            });
 			
-			this.addStatusBarItem().setText('VC Ready');
+			this.addStatusBarItem().setText('VC ready');
 
 		} catch (error) {
 			console.error("Version Control: CRITICAL: Plugin failed to load.", error);
             const message = get(error, 'message', "Unknown error during loading");
-			new Notice(`Version Control plugin failed to load. Please check the console for details.\nError: ${message}`, 0);
+			new Notice(`Version control plugin failed to load. Please check the console for details.\nError: ${message}`, 0);
             if (this.store) {
                 this.store.dispatch(appSlice.actions.reportError({
-                    title: "Plugin Load Failed",
-                    message: "The Version Control plugin encountered a critical error during loading.",
+                    title: "Plugin load failed",
+                    message: "The version control plugin encountered a critical error during loading.",
                     details: message,
                 }));
             }
@@ -124,4 +127,17 @@ export default class VersionControlPlugin extends Plugin {
             }
         }
 	}
+
+    async loadSettings() {
+        // Load data from disk and combine it with the hardcoded defaults.
+        // We save it back immediately to ensure the data.json file is always
+        // present and up-to-date with the latest default settings structure.
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+        await this.saveSettings();
+    }
+
+    async saveSettings() {
+        // Save the current settings to disk.
+        await this.saveData(this.settings);
+    }
 }
