@@ -21,7 +21,9 @@ export async function generateUniqueFilePath(app: App, baseName: string, parentP
     let filePath = normalizePath(base + fileName);
     let counter = 1;
 
-    while (await app.vault.adapter.exists(filePath)) {
+    // Use the Vault API's getAbstractFileByPath, which returns a file object or null.
+    // This is preferred over using the adapter's `exists` method directly.
+    while (app.vault.getAbstractFileByPath(filePath)) {
         fileName = `${sanitizedBaseName} ${counter}${extension}`;
         filePath = normalizePath(base + fileName);
         counter++;
