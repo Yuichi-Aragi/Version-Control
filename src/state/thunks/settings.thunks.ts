@@ -102,7 +102,7 @@ export const requestExportAllVersions = (): AppThunk => (dispatch, getState, con
 
     const formats: Array<'md' | 'json' | 'ndjson' | 'txt'> = ['md', 'json', 'ndjson', 'txt'];
     const menuOptions = formats.map(format => ({
-        title: `Export All as ${format.toUpperCase()}`,
+        title: `Export all as ${format.toUpperCase()}`,
         icon: { md: "file-text", json: "braces", ndjson: "list-ordered", txt: "file-code" }[format],
         callback: () => dispatch(exportAllVersions(noteId, format))
     }));

@@ -86,7 +86,7 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => 
         if (!isAuto) {
             uiService.showNotice("An unexpected error occurred while saving the version. Please check the console.");
         }
-        dispatch(initializeView(app.workspace.activeLeaf ?? null));
+        dispatch(initializeView());
     } finally {
         if (!isPluginUnloading(container)) {
             backgroundTaskManager.syncWatchMode(); // Reset the timer after any save attempt.
@@ -151,7 +151,7 @@ export const requestRestore = (version: VersionHistoryEntry): AppThunk => (dispa
     const versionLabel = version.name ? `"${version.name}" (V${version.versionNumber})` : `Version ${version.versionNumber}`;
     dispatch(actions.openPanel({
         type: 'confirmation',
-        title: "Confirm Restore",
+        title: "Confirm restore",
         message: `This will overwrite the current content of "${file.basename}" with ${versionLabel}. A backup of the current content will be saved as a new version before restoring. Are you sure?`,
         onConfirmAction: restoreVersion(version.id),
     }));
@@ -162,7 +162,6 @@ export const restoreVersion = (versionId: string): AppThunk => async (dispatch, 
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);
     const uiService = container.get<UIService>(TYPES.UIService);
-    const app = container.get<App>(TYPES.App);
     const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
     
     const initialState = getState();
@@ -176,7 +175,7 @@ export const restoreVersion = (versionId: string): AppThunk => async (dispatch, 
     dispatch(actions.closePanel()); 
 
     try {
-        const liveFile = app.vault.getAbstractFileByPath(initialFileFromState.path);
+        const liveFile = container.get<App>(TYPES.App).vault.getAbstractFileByPath(initialFileFromState.path);
         if (!(liveFile instanceof TFile)) {
             throw new Error(`Restore failed. Note "${initialFileFromState.basename}" may have been deleted or moved.`);
         }
@@ -194,7 +193,7 @@ export const restoreVersion = (versionId: string): AppThunk => async (dispatch, 
             uiService.showNotice(`Restore cancelled. Active note changed during backup.`, 5000);
             // Re-initialize to the new context to avoid inconsistent state.
             if (!isPluginUnloading(container)) {
-                dispatch(initializeView(app.workspace.activeLeaf ?? null));
+                dispatch(initializeView());
             }
             return;
         }
@@ -211,7 +210,7 @@ export const restoreVersion = (versionId: string): AppThunk => async (dispatch, 
         console.error("Version Control: Error in restoreVersion thunk.", error);
         uiService.showNotice(`Restore failed: ${message}`, 7000);
         if (!isPluginUnloading(container)) {
-            dispatch(initializeView(app.workspace.activeLeaf ?? null));
+            dispatch(initializeView());
         }
     } finally {
         if (!isPluginUnloading(container)) {
@@ -239,7 +238,7 @@ export const requestDelete = (version: VersionHistoryEntry): AppThunk => (dispat
 
         dispatch(actions.openPanel({
             type: 'confirmation',
-            title: "Confirm Delete Version",
+            title: "Confirm delete version",
             message: message,
             onConfirmAction: deleteVersion(version.id),
         }));
@@ -294,7 +293,7 @@ export const deleteVersion = (versionId: string): AppThunk => async (dispatch, g
         if (success) {
             if (wasLastVersion) {
                 uiService.showNotice(`Last version deleted. "${initialFileFromState.basename}" is no longer under version control.`);
-                dispatch(initializeView(app.workspace.activeLeaf ?? null));
+                dispatch(initializeView());
             } else {
                  dispatch(loadHistoryForNoteId(initialFileFromState, initialNoteIdFromState)); 
                  uiService.showNotice(`Version ${versionId.substring(0,6)}... deleted successfully.`);
@@ -307,7 +306,7 @@ export const deleteVersion = (versionId: string): AppThunk => async (dispatch, g
         console.error("Version Control: Error in deleteVersion thunk.", error);
         uiService.showNotice(`Delete failed: ${message}`, 7000);
         if (!isPluginUnloading(container)) {
-            dispatch(initializeView(app.workspace.activeLeaf ?? null));
+            dispatch(initializeView());
         }
     }
 };
@@ -323,7 +322,7 @@ export const requestDeleteAll = (): AppThunk => (dispatch, getState, container) 
         const basename = file.basename;
         dispatch(actions.openPanel({
             type: 'confirmation',
-            title: "Confirm Delete All Versions",
+            title: "Confirm delete all versions",
             message: `This will permanently delete all version history for "${basename}" and remove it from version control (its ${NOTE_FRONTMATTER_KEY} will be cleared). This action cannot be undone. Are you sure?`,
             onConfirmAction: deleteAllVersions(),
         }));
@@ -363,7 +362,7 @@ export const deleteAllVersions = (): AppThunk => async (dispatch, getState, cont
 
         if (success) {
             uiService.showNotice(`All versions for "${initialFileFromState.basename}" have been deleted.`);
-            dispatch(initializeView(app.workspace.activeLeaf ?? null));
+            dispatch(initializeView());
         } else {
             throw new Error(`Failed to delete all versions for "${initialFileFromState.basename}".`);
         }
@@ -372,7 +371,7 @@ export const deleteAllVersions = (): AppThunk => async (dispatch, getState, cont
         console.error("Version Control: Error in deleteAllVersions thunk.", error);
         uiService.showNotice(`Delete all failed: ${message}`, 7000);
         if (!isPluginUnloading(container)) {
-            dispatch(initializeView(app.workspace.activeLeaf ?? null));
+            dispatch(initializeView());
         }
     }
 };

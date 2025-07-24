@@ -1,4 +1,4 @@
-import { TFile, type WorkspaceLeaf, type CachedMetadata, App } from 'obsidian';
+import { TFile, type WorkspaceLeaf, type CachedMetadata, App, MarkdownView } from 'obsidian';
 import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
 import type { AppError, VersionControlSettings } from '../../types';
@@ -55,7 +55,18 @@ export const initializeView = (leaf?: WorkspaceLeaf | null): AppThunk => async (
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);
 
     try {
-        const targetLeaf = leaf ?? app.workspace.activeLeaf;
+        let targetLeaf: WorkspaceLeaf | null;
+        // If a leaf is explicitly provided (e.g., from an event), use it.
+        // This is the source of truth when handling leaf-change events.
+        if (leaf !== undefined) {
+            targetLeaf = leaf;
+        } else {
+            // Otherwise, determine the active leaf using the recommended, safer API.
+            // This is for calls that need to initialize based on the current app state.
+            const activeMarkdownView = app.workspace.getActiveViewOfType(MarkdownView);
+            targetLeaf = activeMarkdownView ? activeMarkdownView.leaf : null;
+        }
+
         const activeNoteInfo = await noteManager.getActiveNoteState(targetLeaf);
         
         dispatch(actions.initializeView(activeNoteInfo));
@@ -80,8 +91,8 @@ export const initializeView = (leaf?: WorkspaceLeaf | null): AppThunk => async (
     } catch (error) {
         console.error("Version Control: CRITICAL: Failed to initialize view.", error);
         const appError: AppError = {
-            title: "Initialization Failed",
-            message: "Could not initialize the Version Control view.",
+            title: "Initialization failed",
+            message: "Could not initialize the version control view.",
             details: error instanceof Error ? error.message : String(error),
         };
         dispatch(actions.reportError(appError));
@@ -96,7 +107,7 @@ export const reconcileNoteId = (file: TFile, noteId: string): AppThunk => async 
     try {
         const success = await noteManager.writeNoteIdToFrontmatter(file, noteId);
         if (success) {
-            uiService.showNotice(`Version Control: Restored missing vc-id for "${file.basename}".`, 3000);
+            uiService.showNotice(`Version control: Restored missing vc-id for "${file.basename}".`, 3000);
         }
     } catch (error) {
         console.error(`Version Control: Error during vc-id reconciliation for "${file.path}".`, error);
@@ -127,7 +138,7 @@ export const loadHistory = (file: TFile): AppThunk => async (dispatch, _getState
     } catch (error) {
         console.error(`Version Control: Failed to load version history for "${file.path}".`, error);
         const appError: AppError = {
-            title: "History Load Failed",
+            title: "History load failed",
             message: `Could not load version history for "${file.basename}".`,
             details: error instanceof Error ? error.message : String(error),
         };
@@ -149,7 +160,7 @@ export const loadHistoryForNoteId = (file: TFile, noteId: string): AppThunk => a
     } catch (error) {
         console.error(`Version Control: Failed to load version history for note ID "${noteId}" ("${file.path}").`, error);
         const appError: AppError = {
-            title: "History Load Failed",
+            title: "History load failed",
             message: `Could not load version history for "${file.basename}".`,
             details: error instanceof Error ? error.message : String(error),
         };
@@ -170,7 +181,6 @@ export const handleMetadataChange = (file: TFile, cache: CachedMetadata): AppThu
     }
 
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
-    const app = container.get<App>(TYPES.App);
 
     const fileCache = cache;
     const newNoteIdFromFrontmatter = fileCache?.frontmatter?.[NOTE_FRONTMATTER_KEY] ?? null;
@@ -188,7 +198,7 @@ export const handleMetadataChange = (file: TFile, cache: CachedMetadata): AppThu
 
         const currentState = getState();
         if ((currentState.status === AppStatus.READY || currentState.status === AppStatus.LOADING) && currentState.file?.path === file.path) {
-            dispatch(initializeView(app.workspace.activeLeaf));
+            dispatch(initializeView());
         }
     }
 };
@@ -199,14 +209,13 @@ export const handleFileRename = (file: TFile, oldPath: string): AppThunk => asyn
 
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);
-    const app = container.get<App>(TYPES.App);
 
     const oldNoteId = await manifestManager.getNoteIdByPath(oldPath);
     await noteManager.handleNoteRename(file, oldPath);
     
     const state = getState();
     if (state.file?.path === oldPath || (oldNoteId && state.noteId === oldNoteId)) {
-        dispatch(initializeView(app.workspace.activeLeaf));
+        dispatch(initializeView());
     }
 };
 

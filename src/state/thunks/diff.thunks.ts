@@ -52,12 +52,12 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
 
     const menuOptions = [
         {
-            title: "Show Diff in Panel",
+            title: "Show diff in panel",
             icon: "sidebar-right",
             callback: () => dispatch(generateAndShowDiff(version1, selectedTarget, 'panel'))
         },
         {
-            title: "Show Diff in New Tab",
+            title: "Show diff in new tab",
             icon: "file-diff",
             callback: () => dispatch(generateAndShowDiff(version1, selectedTarget, 'tab'))
         }
