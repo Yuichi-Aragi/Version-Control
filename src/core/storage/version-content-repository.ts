@@ -85,23 +85,15 @@ export class VersionContentRepository {
           versionId
         );
         
-        const fileToDelete = this.app.vault.getAbstractFileByPath(versionFilePath);
-
-        if (fileToDelete instanceof TFile) {
-            // We have a TFile, so we can use the safe trash method.
-            await this.app.vault.trash(fileToDelete, true);
+        // Use the adapter API for direct, permanent deletion of internal database files.
+        // This bypasses user's trash settings, which is desired for the .versiondb directory.
+        if (await this.app.vault.adapter.exists(versionFilePath)) {
+            await this.app.vault.adapter.remove(versionFilePath);
         } else {
-            // No TFile object. This might be an orphan or un-cached file.
-            // Fallback to adapter-level permanent deletion.
-            if (await this.app.vault.adapter.exists(versionFilePath)) {
-                console.warn(`VC: Could not find TFile for ${versionFilePath}. Using permanent deletion as a fallback to trashing.`);
-                await this.app.vault.adapter.remove(versionFilePath);
-            } else {
-                // This is not an error, just a state check.
-                console.warn(
-                    `VC: Version file to delete was already missing: ${versionFilePath}`
-                );
-            }
+            // This is not an error, just a state check.
+            console.warn(
+                `VC: Version file to delete was already missing: ${versionFilePath}`
+            );
         }
     });
   }
