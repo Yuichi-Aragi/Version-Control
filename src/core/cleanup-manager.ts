@@ -148,12 +148,15 @@ export class CleanupManager extends Component {
 
             const dbSubfolder = this.app.vault.getAbstractFileByPath(dbSubfolderPath);
             if (dbSubfolder instanceof TFolder) {
-                for (const noteDir of dbSubfolder.children) {
+                // We iterate over a copy of children because the collection might be modified during iteration.
+                const childrenCopy = [...dbSubfolder.children];
+                for (const noteDir of childrenCopy) {
                     if (!(noteDir instanceof TFolder)) continue;
 
                     const noteId = noteDir.name;
                     if (noteId && !validNoteIds.has(noteId)) {
-                        await this.app.vault.trash(noteDir, true);
+                        // Permanently delete the orphaned note directory.
+                        await this.permanentlyDeleteFolder(noteDir.path);
                         deletedNoteDirs++;
                     }
                 }
@@ -172,14 +175,17 @@ export class CleanupManager extends Component {
 
                 const versionsFolder = this.app.vault.getAbstractFileByPath(versionsPath);
                 if (versionsFolder instanceof TFolder) {
-                    for (const versionFile of versionsFolder.children) {
+                    // Iterate over a copy of children.
+                    const childrenCopy = [...versionsFolder.children];
+                    for (const versionFile of childrenCopy) {
                         if (!(versionFile instanceof TFile)) continue;
                         
                         const fileName = versionFile.name;
                         if (fileName && fileName.endsWith('.md')) {
                             const versionId = fileName.slice(0, -3); // remove .md
                             if (!validVersionIds.has(versionId)) {
-                                await this.app.vault.trash(versionFile, true);
+                                // Permanently delete the orphaned version file.
+                                await this.app.vault.adapter.remove(versionFile.path);
                                 deletedVersionFiles++;
                             }
                         }
@@ -201,5 +207,22 @@ export class CleanupManager extends Component {
       await Promise.allSettled(pending);
     }
     this.cleanupPromises.clear();
+  }
+
+  /**
+   * Permanently and recursively deletes a folder using the vault adapter.
+   * This is for internal use on the `.versiondb` directory and bypasses trash settings.
+   * @param path The path of the folder to delete.
+   */
+  private async permanentlyDeleteFolder(path: string): Promise<void> {
+    const adapter = this.app.vault.adapter;
+    try {
+        if (await adapter.exists(path)) {
+            // The `true` flag enables recursive deletion. This is a permanent operation.
+            await adapter.rmdir(path, true);
+        }
+    } catch (error) {
+        console.error(`VC: CRITICAL: Failed to permanently delete folder ${path}. Manual cleanup may be needed.`, error);
+    }
   }
 }

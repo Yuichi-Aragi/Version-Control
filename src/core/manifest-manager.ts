@@ -88,12 +88,9 @@ export class ManifestManager {
             // 1. Remove from central manifest first. This is a critical, queued operation.
             await this.centralManifestRepo.removeNoteEntry(noteId);
 
-            // 2. If successful, trash the data directory for recoverability.
+            // 2. If successful, permanently delete the data directory.
             const noteDbPath = this.pathService.getNoteDbPath(noteId);
-            const folderToDelete = this.vault.getAbstractFileByPath(noteDbPath);
-            if (folderToDelete instanceof TFolder) {
-                await this.vault.trash(folderToDelete, true);
-            }
+            await this.permanentlyDeleteFolder(noteDbPath);
 
             // 3. Invalidate caches and clear queues.
             this.noteManifestRepo.invalidateCache(noteId);
@@ -180,13 +177,25 @@ export class ManifestManager {
     }
 
     private async rollbackCreateNoteEntry(noteDbPath: string): Promise<void> {
-        const folderToRollback = this.vault.getAbstractFileByPath(noteDbPath);
-        if (folderToRollback instanceof TFolder) {
-            try {
-                await this.vault.trash(folderToRollback, true);
-            } catch (rmdirError) {
-                console.error(`VC: CRITICAL: Failed to rollback (trash) directory ${noteDbPath}. Manual cleanup may be needed.`, rmdirError);
+        // This is a rollback for an internal database operation, so we use permanent deletion.
+        await this.permanentlyDeleteFolder(noteDbPath);
+    }
+
+    /**
+     * Permanently and recursively deletes a folder using the vault adapter.
+     * This is for internal use on the `.versiondb` directory and bypasses trash settings.
+     * @param path The path of the folder to delete.
+     */
+    private async permanentlyDeleteFolder(path: string): Promise<void> {
+        const adapter = this.vault.adapter;
+        try {
+            if (await adapter.exists(path)) {
+                // The `true` flag enables recursive deletion. This is a permanent operation.
+                await adapter.rmdir(path, true);
             }
+        } catch (error) {
+            console.error(`VC: CRITICAL: Failed to permanently delete folder ${path}. Manual cleanup may be needed.`, error);
+            // We don't re-throw, to allow the calling operation to continue if possible.
         }
     }
 }
