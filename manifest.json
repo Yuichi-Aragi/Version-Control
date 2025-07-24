@@ -3,8 +3,7 @@
 	"name": "Version Control",
 	"version": "1.8.0",
 	"minAppVersion": "1.7.0",
-	"description": "A local, snapshot-based version control system. Lets you create finite number of versions of any note.",
+	"description": "Lets you create finite number of versions of any note only, when you want it.",
 	"author": "Yuichi-Aragi",
-	"authorUrl": "Yuichi-Aragi/Version-Control",
 	"isDesktopOnly": false
 }
