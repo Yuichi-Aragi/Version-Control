@@ -1,4 +1,4 @@
-import { App, moment, Component } from 'obsidian';
+import { App, moment, Component, TFolder, TFile } from 'obsidian';
 import { orderBy } from 'lodash-es';
 import { injectable, inject } from 'inversify';
 import { ManifestManager } from './manifest-manager';
@@ -103,12 +103,12 @@ export class CleanupManager extends Component {
     }
 
     // Update manifest
+    // FIX: Corrected immer usage. The recipe should mutate the draft and return void, not the draft itself.
     await this.manifestManager.updateNoteManifest(noteId, (m) => {
       for (const id of del) {
         delete m.versions[id];
       }
       m.lastModified = new Date().toISOString();
-      return m;
     });
 
     // Delete files using the now-queued repository method.
@@ -141,19 +141,19 @@ export class CleanupManager extends Component {
         let deletedVersionFiles = 0;
 
         try {
-            const adapter = this.app.vault.adapter;
-
             // --- Task 1: Cleanup Orphaned Note Histories ---
             const centralManifest = await this.manifestManager.loadCentralManifest(true);
             const validNoteIds = new Set(Object.keys(centralManifest.notes));
             const dbSubfolderPath = this.pathService.getDbSubfolder();
 
-            if (await adapter.exists(dbSubfolderPath)) {
-                const listResult = await adapter.list(dbSubfolderPath);
-                for (const noteDirPath of listResult.folders) {
-                    const noteId = noteDirPath.split('/').pop();
+            const dbSubfolder = this.app.vault.getAbstractFileByPath(dbSubfolderPath);
+            if (dbSubfolder instanceof TFolder) {
+                for (const noteDir of dbSubfolder.children) {
+                    if (!(noteDir instanceof TFolder)) continue;
+
+                    const noteId = noteDir.name;
                     if (noteId && !validNoteIds.has(noteId)) {
-                        await adapter.rmdir(noteDirPath, true);
+                        await this.app.vault.trash(noteDir, true);
                         deletedNoteDirs++;
                     }
                 }
@@ -170,14 +170,16 @@ export class CleanupManager extends Component {
                 const validVersionIds = new Set(Object.keys(noteManifest.versions || {}));
                 const versionsPath = this.pathService.getNoteVersionsPath(noteId);
 
-                if (await adapter.exists(versionsPath)) {
-                    const listResult = await adapter.list(versionsPath);
-                    for (const versionFilePath of listResult.files) {
-                        const fileName = versionFilePath.split('/').pop();
+                const versionsFolder = this.app.vault.getAbstractFileByPath(versionsPath);
+                if (versionsFolder instanceof TFolder) {
+                    for (const versionFile of versionsFolder.children) {
+                        if (!(versionFile instanceof TFile)) continue;
+                        
+                        const fileName = versionFile.name;
                         if (fileName && fileName.endsWith('.md')) {
                             const versionId = fileName.slice(0, -3); // remove .md
                             if (!validVersionIds.has(versionId)) {
-                                await adapter.remove(versionFilePath);
+                                await this.app.vault.trash(versionFile, true);
                                 deletedVersionFiles++;
                             }
                         }

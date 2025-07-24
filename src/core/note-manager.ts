@@ -68,45 +68,31 @@ export class NoteManager {
         return null;
     }
 
+    /**
+     * Ensures a note has a version control ID in its frontmatter.
+     * If an ID already exists, it's returned. If not, a new ID is generated,
+     * written to the note's frontmatter, and then returned.
+     * This method does NOT create any database entries; that is deferred until the first save.
+     * @param file The TFile to get or create an ID for.
+     * @returns The note's version control ID, or null if one couldn't be assigned.
+     */
     async getOrCreateNoteId(file: TFile): Promise<string | null> {
-        // This operation is now inherently safe because the underlying repository
-        // methods in ManifestManager are queued.
         const existingId = await this.getNoteId(file);
         if (existingId) {
-            const manifestExists = await this.manifestManager.loadNoteManifest(existingId);
-            if (!manifestExists) {
-                console.warn(`VC: Note "${file.path}" has vc-id "${existingId}" but no manifest. Re-creating entry.`);
-                try {
-                    await this.manifestManager.createNoteEntry(existingId, file.path);
-                } catch (recreateError) {
-                    console.error(`VC: Failed to repair missing manifest for existing vc-id "${existingId}".`, recreateError);
-                    throw new Error(`Could not repair version history for "${file.basename}".`);
-                }
-            }
+            // The manifest existence will be checked later by the VersionManager during save.
+            // This method's only job is to ensure an ID is present in the frontmatter.
             return existingId;
         }
 
-        // Safer order: Create manifest entry first, then write to frontmatter.
+        // If no ID, create one and write it to the file.
         const newId = generateUniqueId();
         try {
-            // Step 1: Create the manifest entry. This is the critical, now-queued operation.
-            await this.manifestManager.createNoteEntry(newId, file.path);
-
-            // Step 2: If manifest creation succeeds, write the ID to the note's frontmatter.
-            const writeSuccess = await this.writeNoteIdToFrontmatter(file, newId);
-            if (!writeSuccess) {
-                // This is a non-critical failure. The history exists but is "orphaned".
-                // It can be reconciled later. Log a clear warning.
-                console.warn(`VC: Created manifest for note "${file.path}" (ID: ${newId}) but failed to write vc-id to its frontmatter. The history is saved but the note needs reconciliation.`);
-                throw new Error(`Failed to initialize version history for "${file.basename}". History was created but could not be linked to the note.`);
-            }
+            await this.writeNoteIdToFrontmatter(file, newId);
             return newId;
-
         } catch (error) {
-            console.error(`VC: Failed to get or create note ID for "${file.path}".`, error);
-            // The manifest manager's createNoteEntry already handles its own rollback.
-            // We just need to re-throw the error to the caller.
-            throw new Error(`Failed to initialize version history for "${file.basename}". Please try again.`);
+            console.error(`VC: Failed to write new vc-id to frontmatter for "${file.path}".`, error);
+            // If we can't write the ID, we can't proceed with versioning.
+            throw new Error(`Failed to initialize version history for "${file.basename}". Could not write to frontmatter.`);
         }
     }
 

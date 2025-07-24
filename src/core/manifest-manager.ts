@@ -1,10 +1,10 @@
-import { App, Vault } from "obsidian";
+import { App, Vault, TFolder, TFile } from "obsidian";
 import { injectable, inject } from 'inversify';
+import type { Draft } from 'immer';
 import type { NoteManifest } from "../types";
 import { PathService } from "./storage/path-service";
 import { CentralManifestRepository } from "./storage/central-manifest-repository";
 import { NoteManifestRepository } from "./storage/note-manifest-repository";
-import { AtomicFileIO } from "./storage/atomic-file-io";
 import { TYPES } from "../types/inversify.types";
 
 /**
@@ -21,32 +21,36 @@ export class ManifestManager {
         @inject(TYPES.App) app: App,
         @inject(TYPES.PathService) private pathService: PathService,
         @inject(TYPES.CentralManifestRepo) private centralManifestRepo: CentralManifestRepository,
-        @inject(TYPES.NoteManifestRepo) private noteManifestRepo: NoteManifestRepository,
-        @inject(TYPES.AtomicFileIO) private atomicFileIO: AtomicFileIO
+        @inject(TYPES.NoteManifestRepo) private noteManifestRepo: NoteManifestRepository
     ) {
         this.vault = app.vault;
     }
 
     async initializeDatabase(): Promise<void> {
         try {
-            const dbRoot = this.pathService.getDbRoot();
-            if (!await this.vault.adapter.exists(dbRoot)) {
-                await this.vault.createFolder(dbRoot);
-            }
-            const dbSubFolder = this.pathService.getDbSubfolder();
-            if (!await this.vault.adapter.exists(dbSubFolder)) {
-                await this.vault.createFolder(dbSubFolder);
+            // --- 1. Ensure DB Root and Subfolders exist ---
+            await this.ensureFolderExists(this.pathService.getDbRoot());
+            await this.ensureFolderExists(this.pathService.getDbSubfolder());
+
+            // --- 2. Ensure Central Manifest file exists and is a file ---
+            const centralManifestPath = this.pathService.getCentralManifestPath();
+            const centralManifestFile = this.vault.getAbstractFileByPath(centralManifestPath);
+            if (centralManifestFile) {
+                if (!(centralManifestFile instanceof TFile)) {
+                     throw new Error(`Central manifest path "${centralManifestPath}" exists but is a folder, not a file. Please remove it and restart.`);
+                }
+            } else {
+                // Write the initial manifest directly using the vault adapter.
+                const defaultManifestContent = JSON.stringify({ version: "1.0.0", notes: {} }, null, 2);
+                await this.vault.adapter.write(centralManifestPath, defaultManifestContent);
             }
 
-            const centralManifestPath = this.pathService.getCentralManifestPath();
-            if (!await this.vault.adapter.exists(centralManifestPath)) {
-                // Use the injected AtomicFileIO instance for this one-time setup
-                await this.atomicFileIO.writeJsonFile(centralManifestPath, { version: "1.0.0", notes: {} });
-            }
+            // --- 3. Load the manifest into the repository ---
             await this.centralManifestRepo.load(true);
         } catch (error) {
             console.error("VC: CRITICAL: Failed to initialize database structure.", error);
-            throw new Error("Could not initialize database. Check vault permissions and console.");
+            const message = error instanceof Error ? error.message : "Could not initialize database. Check vault permissions and console.";
+            throw new Error(message);
         }
     }
 
@@ -59,13 +63,9 @@ export class ManifestManager {
         const versionsPath = this.pathService.getNoteVersionsPath(noteId);
 
         try {
-            // 1. Create filesystem structure
-            if (!await this.vault.adapter.exists(noteDbPath)) {
-                await this.vault.createFolder(noteDbPath);
-            }
-            if (!await this.vault.adapter.exists(versionsPath)) {
-                await this.vault.createFolder(versionsPath);
-            }
+            // 1. Create filesystem structure using the robust helper
+            await this.ensureFolderExists(noteDbPath);
+            await this.ensureFolderExists(versionsPath);
 
             // 2. Create the note's own manifest file (this is now a queued operation)
             const newNoteManifest = await this.noteManifestRepo.create(noteId, notePath);
@@ -88,10 +88,11 @@ export class ManifestManager {
             // 1. Remove from central manifest first. This is a critical, queued operation.
             await this.centralManifestRepo.removeNoteEntry(noteId);
 
-            // 2. If successful, delete the data directory.
+            // 2. If successful, trash the data directory for recoverability.
             const noteDbPath = this.pathService.getNoteDbPath(noteId);
-            if (await this.vault.adapter.exists(noteDbPath)) {
-                await this.vault.adapter.rmdir(noteDbPath, true);
+            const folderToDelete = this.vault.getAbstractFileByPath(noteDbPath);
+            if (folderToDelete instanceof TFolder) {
+                await this.vault.trash(folderToDelete, true);
             }
 
             // 3. Invalidate caches and clear queues.
@@ -108,7 +109,6 @@ export class ManifestManager {
         await this.noteManifestRepo.update(noteId, (manifest) => {
             manifest.notePath = newPath;
             manifest.lastModified = new Date().toISOString();
-            return manifest;
         }).catch(err => {
             console.warn(`VC: Attempted to update path for non-existent note manifest: ${noteId}. Error: ${err.message}`);
         });
@@ -134,7 +134,8 @@ export class ManifestManager {
         return this.noteManifestRepo.load(noteId);
     }
 
-    public updateNoteManifest(noteId: string, updateFn: (manifest: NoteManifest) => NoteManifest | Promise<NoteManifest>) {
+    public updateNoteManifest(noteId: string, updateFn: (draft: Draft<NoteManifest>) => void) {
+        // FIX: The signature now only accepts a synchronous recipe function, matching the repository.
         return this.noteManifestRepo.update(noteId, updateFn);
     }
 
@@ -144,12 +145,47 @@ export class ManifestManager {
 
     // --- Helper Methods ---
 
+    /**
+     * Robustly ensures a folder exists. It first checks for a file conflict,
+     * then checks for folder existence, and only then attempts to create it.
+     * This minimizes errors and handles race conditions gracefully.
+     * @param path The full path of the folder to ensure existence of.
+     */
+    private async ensureFolderExists(path: string): Promise<void> {
+        const item = this.vault.getAbstractFileByPath(path);
+    
+        if (item) {
+            if (item instanceof TFolder) {
+                // Folder already exists, our job is done.
+                return;
+            } else {
+                // A file exists where we need a folder. This is a critical, unrecoverable state.
+                throw new Error(`A file exists at the required folder path "${path}". Please remove it and restart the plugin.`);
+            }
+        }
+    
+        try {
+            // Attempt to create the folder, as we've established it doesn't exist.
+            await this.vault.createFolder(path);
+        } catch (error) {
+            // This catch block is a fallback for race conditions. If another process
+            // creates the folder between our check and our create call, this error is ignored.
+            if (error instanceof Error && error.message.includes('Folder already exists')) {
+                return;
+            }
+            // Any other error (e.g., file system permissions) is a real problem.
+            console.error(`VC: Critical error while trying to create folder at "${path}".`, error);
+            throw error;
+        }
+    }
+
     private async rollbackCreateNoteEntry(noteDbPath: string): Promise<void> {
-        if (await this.vault.adapter.exists(noteDbPath)) {
+        const folderToRollback = this.vault.getAbstractFileByPath(noteDbPath);
+        if (folderToRollback instanceof TFolder) {
             try {
-                await this.vault.adapter.rmdir(noteDbPath, true);
+                await this.vault.trash(folderToRollback, true);
             } catch (rmdirError) {
-                console.error(`VC: CRITICAL: Failed to rollback directory ${noteDbPath}. Manual cleanup may be needed.`, rmdirError);
+                console.error(`VC: CRITICAL: Failed to rollback (trash) directory ${noteDbPath}. Manual cleanup may be needed.`, rmdirError);
             }
         }
     }
