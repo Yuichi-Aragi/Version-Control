@@ -100,7 +100,10 @@ export class DiffManager extends Component {
                     promise.resolve(event.data.changes);
                 } else {
                     const error = new Error(event.data.error.message);
-                    error.stack = event.data.error.stack;
+                    // Conditionally assign stack to comply with `exactOptionalPropertyTypes`
+                    if (event.data.error.stack) {
+                        error.stack = event.data.error.stack;
+                    }
                     promise.reject(error);
                 }
                 this.requests.delete(requestId);

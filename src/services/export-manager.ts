@@ -1,4 +1,4 @@
-import { App, TFolder, normalizePath } from "obsidian"; 
+import { App, TFile, TFolder, normalizePath } from "obsidian"; 
 import { injectable, inject } from 'inversify';
 import { VersionManager } from "../core/version-manager";
 import type { VersionData, VersionHistoryEntry } from "../types";
@@ -95,11 +95,14 @@ export class ExportManager {
         let filePath = normalizePath(`${folderPath}/${fileName}`);
         
         try {
-            if (await this.app.vault.adapter.exists(filePath)) {
+            const existingFile = this.app.vault.getAbstractFileByPath(filePath);
+            if (existingFile instanceof TFile) {
                 console.warn(`VC: File "${fileName}" already exists. Overwriting.`);
+                await this.app.vault.modify(existingFile, content);
+            } else {
+                // If it exists but is a folder, this will fail, which is correct.
+                await this.app.vault.create(filePath, content);
             }
-            // `create` can overwrite, which is what we want.
-            await this.app.vault.create(filePath, content);
             return filePath;
         } catch (error) {
             console.error(`Version Control: Failed to write export file "${filePath}".`, error);

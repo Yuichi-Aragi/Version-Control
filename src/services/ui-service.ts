@@ -1,4 +1,4 @@
-import { App, Menu, Notice, TFolder, Component } from 'obsidian';
+import { App, Menu, Notice, TFolder, Component, View } from 'obsidian';
 import { injectable, inject } from 'inversify';
 import type { AppStore } from '../state/store';
 import type { DiffTarget, VersionHistoryEntry } from '../types';
@@ -117,9 +117,12 @@ export class UIService extends Component {
         if (event) {
             menu.showAtMouseEvent(event);
         } else {
-            const activeLeafView = this.app.workspace.activeLeaf?.view;
-            if (activeLeafView) {
-                const rect = activeLeafView.containerEl.getBoundingClientRect();
+            // FIX: Use `View` instead of `Component`. `getActiveViewOfType` expects a
+            // constructor for a class that extends `View`. `View` itself is the most
+            // generic valid type, while `Component` is its parent and thus invalid.
+            const activeView = this.app.workspace.getActiveViewOfType(View);
+            if (activeView) {
+                const rect = activeView.containerEl.getBoundingClientRect();
                 menu.showAtPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 3 });
             } else {
                 menu.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
