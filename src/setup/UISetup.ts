@@ -81,17 +81,17 @@ export function registerCommands(plugin: Plugin, store: AppStore): void {
  */
 async function activateViewAndDispatch(plugin: Plugin, store: AppStore) {
     let contextLeaf: WorkspaceLeaf | null = null;
-    // FIX: Coalesce `undefined` to `null`. `activeLeaf` can be `undefined`,
-    // but thunks and other logic consistently handle `WorkspaceLeaf | null`.
-    const currentActiveLeaf = plugin.app.workspace.activeLeaf ?? null;
+    // Use the recommended API to find the active markdown view. This is safer
+    // than relying on `activeLeaf` which could be a non-markdown view.
+    const activeMarkdownView = plugin.app.workspace.getActiveViewOfType(MarkdownView);
 
-    if (currentActiveLeaf && currentActiveLeaf.view instanceof MarkdownView) {
-        const mdView = currentActiveLeaf.view as MarkdownView;
-        if (mdView.file && mdView.file.extension === 'md') {
-            contextLeaf = currentActiveLeaf;
-        }
+    // If there's an active markdown view with a file, its leaf is our context.
+    if (activeMarkdownView && activeMarkdownView.file) {
+        contextLeaf = activeMarkdownView.leaf;
     }
     
+    // Dispatch the initialization thunk. It will use the provided leaf as context,
+    // or determine the context itself if the leaf is null.
     store.dispatch(thunks.initializeView(contextLeaf));
 
     const existingLeaves = plugin.app.workspace.getLeavesOfType(VIEW_TYPE_VERSION_CONTROL);

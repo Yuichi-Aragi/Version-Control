@@ -1,6 +1,5 @@
-import { TFile, WorkspaceLeaf } from 'obsidian';
+import { TFile, WorkspaceLeaf, debounce } from 'obsidian';
 import type { CachedMetadata } from 'obsidian';
-import { debounce } from 'lodash-es';
 import type { AppStore } from '../state/store';
 import { thunks } from '../state/thunks';
 import { VIEW_TYPE_VERSION_CONTROL, VIEW_TYPE_VERSION_PREVIEW, VIEW_TYPE_VERSION_DIFF } from '../constants';
@@ -14,7 +13,7 @@ import type VersionControlPlugin from '../main';
 export function registerSystemEventListeners(plugin: VersionControlPlugin, store: AppStore): void {
     plugin.debouncedLeafChangeHandler = debounce((leaf: WorkspaceLeaf | null) => {
         store.dispatch(thunks.initializeView(leaf));
-    }, 100, { leading: false, trailing: true });
+    }, 100);
 
     plugin.registerEvent(plugin.app.workspace.on('active-leaf-change', (leaf) => {
         const view = leaf?.view;
