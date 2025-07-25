@@ -1,5 +1,5 @@
 import 'reflect-metadata'; // Must be the first import
-import { Plugin, Notice, WorkspaceLeaf, debounce, type Debouncer } from 'obsidian';
+import { Plugin, Notice, WorkspaceLeaf, debounce, type Debouncer, TFile } from 'obsidian';
 import { get } from 'lodash-es';
 import type { Container } from 'inversify';
 import type { AppStore } from './state/store';
@@ -20,12 +20,18 @@ import type { QueueService } from './services/queue-service';
 import { DEFAULT_SETTINGS } from './constants';
 import type { CentralManifest, VersionControlSettings } from './types';
 
+export interface DebouncerInfo {
+    debouncer: Debouncer<[TFile], void>;
+    interval: number; // in milliseconds
+}
+
 export default class VersionControlPlugin extends Plugin {
     private container!: Container;
     private store!: AppStore;
     private cleanupManager!: CleanupManager;
     private backgroundTaskManager!: BackgroundTaskManager;
     public debouncedLeafChangeHandler?: Debouncer<[WorkspaceLeaf | null], void>;
+    public autoSaveDebouncers = new Map<string, DebouncerInfo>();
     public isUnloading: boolean = false;
     public settings!: VersionControlSettings;
 
@@ -89,6 +95,8 @@ export default class VersionControlPlugin extends Plugin {
 
         // 1. Cancel any pending debounced operations to prevent them from firing during or after unload.
         this.debouncedLeafChangeHandler?.cancel();
+        this.autoSaveDebouncers.forEach(info => info.debouncer.cancel());
+        this.autoSaveDebouncers.clear();
 
         // 2. Ensure any critical, queued file operations are completed before shutdown.
         // This is wrapped in a try-catch to guarantee that the unload process continues

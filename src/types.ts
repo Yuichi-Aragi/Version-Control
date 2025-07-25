@@ -13,6 +13,7 @@ export interface VersionControlSettings {
   enableWatchMode: boolean;
   watchModeInterval: number; // in seconds
   autoSaveOnSave: boolean;
+  autoSaveOnSaveInterval: number; // in seconds
   centralManifest: CentralManifest;
 }
 
