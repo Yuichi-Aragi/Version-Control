@@ -1,9 +1,4 @@
 import type { TFile } from "obsidian";
-// FIX: Changed from a type-only export to a type-only import. The original
-// `export type { Change } from "diff";` syntax, while valid for re-exporting,
-// was not making the `Change` type available for use within the interfaces
-// defined in this file, leading to a "Cannot find name 'Change'" error.
-// A direct import resolves the issue.
 import type { Change } from "diff";
 
 export interface VersionControlSettings {
@@ -17,6 +12,8 @@ export interface VersionControlSettings {
   renderMarkdownInPreview: boolean;
   enableWatchMode: boolean;
   watchModeInterval: number; // in seconds
+  autoSaveOnSave: boolean;
+  centralManifest: CentralManifest;
 }
 
 export interface CentralManifest {

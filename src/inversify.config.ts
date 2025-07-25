@@ -18,22 +18,16 @@ import { ExportManager } from './services/export-manager';
 import { DiffManager } from './services/diff-manager';
 import { UIService } from './services/ui-service';
 import { BackgroundTaskManager } from './core/BackgroundTaskManager';
-import { DEFAULT_SETTINGS } from './constants';
 
-// FIX: The function no longer accepts globalSettings.
 export function configureServices(plugin: VersionControlPlugin): Container {
   const container = new Container({
-    // Inversify v7+ recommends defaultScope: 'Singleton' for performance
-    // if most of your services are singletons.
-    defaultScope: 'Singleton',
+        defaultScope: 'Singleton',
   });
 
   // == CORE & CONSTANT BINDINGS ==
   container.bind<VersionControlPlugin>(TYPES.Plugin).toConstantValue(plugin);
   container.bind<App>(TYPES.App).toConstantValue(plugin.app);
   container.bind<Container>(TYPES.Container).toConstantValue(container);
-
-  // FIX: The GlobalSettingsManager is removed as settings are no longer in data.json.
 
   // == SINGLETON CLASS BINDINGS ==
   // Foundational services
@@ -56,18 +50,10 @@ export function configureServices(plugin: VersionControlPlugin): Container {
   container.bind<UIService>(TYPES.UIService).to(UIService);
   container.bind<BackgroundTaskManager>(TYPES.BackgroundTaskManager).to(BackgroundTaskManager);
 
-  // == STORE BINDING (MUST BE LAST) ==
-  // The store needs access to the container for its thunks' `extraArgument`.
-  // We use `toDynamicValue` to defer the store's creation until it's requested,
-  // by which point all other services have been bound. `toDynamicValue` is
-  // executed only once for singletons, caching the result.
-  container.bind<AppStore>(TYPES.Store).toDynamicValue(() => {
-    // FIX: The initial state is now created from the hardcoded DEFAULT_SETTINGS.
-    // Effective settings for the active note will be loaded via a thunk after initialization.
-    const initialState = getInitialState(DEFAULT_SETTINGS);
-    // The container is passed to the store factory, which configures it as middleware extraArgument.
-    // Use the 'container' instance from the closure, which has the concrete `Container` type.
-    return createAppStore(initialState, container);
+  container.bind<AppStore>(TYPES.Store).toDynamicValue(() => {    
+  const initialState = getInitialState(plugin.settings);
+    
+  return createAppStore(initialState, container);
   });
 
   return container;

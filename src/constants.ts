@@ -17,4 +17,9 @@ export const DEFAULT_SETTINGS: VersionControlSettings = {
   renderMarkdownInPreview: true,
   enableWatchMode: false,
   watchModeInterval: 60, // 60 seconds
+  autoSaveOnSave: false,
+  centralManifest: {
+    version: "1.0.0",
+    notes: {},
+  },
 };
