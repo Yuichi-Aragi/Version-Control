@@ -28,24 +28,14 @@ export class ManifestManager {
 
     async initializeDatabase(): Promise<void> {
         try {
-            // --- 1. Ensure DB Root and Subfolders exist ---
+            // --- 1. Ensure DB Root exists ---
+            // The per-note folders will be created inside this root.
             await this.ensureFolderExists(this.pathService.getDbRoot());
-            await this.ensureFolderExists(this.pathService.getDbSubfolder());
 
-            // --- 2. Ensure Central Manifest file exists and is a file ---
-            const centralManifestPath = this.pathService.getCentralManifestPath();
-            const centralManifestFile = this.vault.getAbstractFileByPath(centralManifestPath);
-            if (centralManifestFile) {
-                if (!(centralManifestFile instanceof TFile)) {
-                     throw new Error(`Central manifest path "${centralManifestPath}" exists but is a folder, not a file. Please remove it and restart.`);
-                }
-            } else {
-                // Write the initial manifest directly using the vault adapter.
-                const defaultManifestContent = JSON.stringify({ version: "1.0.0", notes: {} }, null, 2);
-                await this.vault.adapter.write(centralManifestPath, defaultManifestContent);
-            }
+            // --- 2. Central Manifest is now in data.json, no file to check/create ---
 
             // --- 3. Load the manifest into the repository ---
+            // This will now read from the plugin's settings object.
             await this.centralManifestRepo.load(true);
         } catch (error) {
             console.error("VC: CRITICAL: Failed to initialize database structure.", error);
@@ -59,6 +49,7 @@ export class ManifestManager {
             throw new Error("VC: Invalid noteId or notePath for createNoteEntry.");
         }
 
+        // The path to the note's own folder, e.g., .versiondb/xxxxxxxx
         const noteDbPath = this.pathService.getNoteDbPath(noteId);
         const versionsPath = this.pathService.getNoteVersionsPath(noteId);
 

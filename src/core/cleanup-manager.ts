@@ -126,7 +126,7 @@ export class CleanupManager extends Component {
    * Cleans up orphaned data within the `.versiondb` directory. This is a data
    * integrity check and does not interact with live notes in the vault.
    * It performs two main tasks:
-   * 1. Deletes any note-specific data directories (`.versiondb/db/[noteId]`)
+   * 1. Deletes any note-specific data directories (`.versiondb/[noteId]`)
    *    that are not listed in the central manifest.
    * 2. For each valid note, it deletes any version files (`.../versions/[versionId].md`)
    *    that are not listed in that note's individual manifest.
@@ -144,12 +144,14 @@ export class CleanupManager extends Component {
             // --- Task 1: Cleanup Orphaned Note Histories ---
             const centralManifest = await this.manifestManager.loadCentralManifest(true);
             const validNoteIds = new Set(Object.keys(centralManifest.notes));
-            const dbSubfolderPath = this.pathService.getDbSubfolder();
+            
+            // The root folder where all note-specific data directories are stored.
+            const dbRootPath = this.pathService.getDbRoot();
 
-            const dbSubfolder = this.app.vault.getAbstractFileByPath(dbSubfolderPath);
-            if (dbSubfolder instanceof TFolder) {
+            const dbRootFolder = this.app.vault.getAbstractFileByPath(dbRootPath);
+            if (dbRootFolder instanceof TFolder) {
                 // We iterate over a copy of children because the collection might be modified during iteration.
-                const childrenCopy = [...dbSubfolder.children];
+                const childrenCopy = [...dbRootFolder.children];
                 for (const noteDir of childrenCopy) {
                     if (!(noteDir instanceof TFolder)) continue;
 
