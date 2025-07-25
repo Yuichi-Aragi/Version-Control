@@ -218,6 +218,34 @@ export class SettingsPanelComponent extends BasePanelComponent {
                 if (!isNoteReady) toggle.setDisabled(true);
             });
 
+        if (settings.autoSaveOnSave) {
+            let descEl: HTMLElement;
+            new Setting(parent)
+                .setName('Auto-save delay')
+                .setDesc('placeholder') // Will be replaced
+                .then(setting => {
+                    descEl = setting.descEl;
+                    descEl.setText(`Time to wait after last change before auto-saving. Current: ${settings.autoSaveOnSaveInterval} sec.`);
+                })
+                .addSlider(slider => {
+                    const debouncedSave = debounce((value: number) => {
+                        this.store.dispatch(thunks.updateSettings({ autoSaveOnSaveInterval: value }));
+                    }, 500);
+
+                    slider
+                        .setLimits(1, 10, 1) // 1 to 10 seconds
+                        .setValue(settings.autoSaveOnSaveInterval)
+                        .setDynamicTooltip()
+                        .onChange((value) => {
+                            if (descEl) {
+                                descEl.setText(`Time to wait after last change before auto-saving. Current: ${value} sec.`);
+                            }
+                            debouncedSave(value);
+                        });
+                    if (!isNoteReady) slider.setDisabled(true);
+                });
+        }
+
         new Setting(parent)
             .setName('Enable watch mode')
             .setDesc('Automatically save a new version if the note has changed after a set interval.')
