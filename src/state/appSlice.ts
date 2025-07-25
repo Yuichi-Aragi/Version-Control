@@ -111,11 +111,13 @@ export const appSlice = createSlice({
             if (state.status === AppStatus.READY) {
                 const version = find(state.history, { id: action.payload.versionId });
                 if (version) {
-                    // The `name` property on the payload is optional. The error TS2412 indicates
-                    // that `version.name` is of type `string` and cannot be assigned `undefined`.
-                    // We only perform the assignment if a name is actually provided in the payload.
-                    if (action.payload.name !== undefined) {
-                        version.name = action.payload.name;
+                    const newName = action.payload.name;
+                    // This logic mirrors the one in `version-manager` for consistency:
+                    // a non-empty name is set, while an empty or undefined name is removed.
+                    if (newName) {
+                        version.name = newName;
+                    } else {
+                        delete version.name;
                     }
                 }
             }
