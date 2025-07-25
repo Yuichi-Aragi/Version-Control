@@ -64,7 +64,7 @@ export const updateSettings = (settingsUpdate: Partial<VersionControlSettings>):
                 delete manifest.settings;
             }
             
-            return manifest;
+            // An immer recipe that mutates the draft should not return a value.
         });
 
         // Re-validate state after await.

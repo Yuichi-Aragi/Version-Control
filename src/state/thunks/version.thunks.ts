@@ -3,12 +3,13 @@ import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
 import type { VersionHistoryEntry } from '../../types';
 import { AppStatus } from '../state';
-import { NOTE_FRONTMATTER_KEY } from '../../constants';
+import { NOTE_FRONTMATTER_KEY, DEFAULT_SETTINGS } from '../../constants';
 import { loadHistoryForNoteId, initializeView } from './core.thunks';
 import { VersionManager } from '../../core/version-manager';
 import { NoteManager } from '../../core/note-manager';
 import { UIService } from '../../services/ui-service';
 import { BackgroundTaskManager } from '../../core/BackgroundTaskManager';
+import { ManifestManager } from '../../core/manifest-manager';
 import { TYPES } from '../../types/inversify.types';
 import { isPluginUnloading } from './ThunkUtils';
 
@@ -372,6 +373,43 @@ export const deleteAllVersions = (): AppThunk => async (dispatch, getState, cont
         uiService.showNotice(`Delete all failed: ${message}`, 7000);
         if (!isPluginUnloading(container)) {
             dispatch(initializeView());
+        }
+    }
+};
+
+export const handleVaultSave = (file: TFile): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
+    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+  
+    const noteId = await noteManager.getNoteId(file) ?? await manifestManager.getNoteIdByPath(file.path);
+    if (!noteId) return;
+  
+    let autoSaveOnSave = DEFAULT_SETTINGS.autoSaveOnSave;
+    try {
+        const noteManifest = await manifestManager.loadNoteManifest(noteId);
+        if (noteManifest?.settings?.autoSaveOnSave !== undefined) {
+            autoSaveOnSave = noteManifest.settings.autoSaveOnSave;
+        }
+    } catch (e) {
+        // Manifest might not exist yet if a vc-id was added but no version saved. This is fine.
+    }
+  
+    if (!autoSaveOnSave) return;
+  
+    // Use the existing core method, which is robust, queued, and handles duplicate content checks.
+    const result = await versionManager.saveNewVersionForFile(file, 'Auto-save', { force: false });
+  
+    // If the save was successful and this is the active note in the VC panel, update the UI.
+    if (result.status === 'saved' && result.newVersionEntry) {
+        const state = getState();
+        if (state.status === AppStatus.READY && state.file?.path === file.path) {
+            // If the note didn't have an ID in the state before (first version), update it.
+            if (state.noteId !== result.newNoteId) {
+                dispatch(actions.updateNoteIdInState({ noteId: result.newNoteId }));
+            }
+            dispatch(actions.addVersionSuccess({ newVersion: result.newVersionEntry }));
         }
     }
 };
