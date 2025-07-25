@@ -160,7 +160,7 @@ export class ActionBarComponent extends Component {
         
         // Control visibility of buttons
         this.searchToggleButton.style.display = history.length > 0 ? 'flex' : 'none';
-        this.settingsButton.style.display = !!noteId ? 'flex' : 'none';
+        this.settingsButton.style.display = history.length > 0 ? 'flex' : 'none';
 
         this.searchToggleButton.disabled = isProcessing;
         this.settingsButton.disabled = isProcessing;

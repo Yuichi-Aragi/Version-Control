@@ -207,6 +207,18 @@ export class SettingsPanelComponent extends BasePanelComponent {
             });
 
         new Setting(parent)
+            .setName('Auto-save on file save')
+            .setDesc('Automatically save a new version whenever the note file is saved (e.g., via Ctrl+S).')
+            .addToggle(toggle => {
+                toggle
+                    .setValue(settings.autoSaveOnSave)
+                    .onChange((value) => {
+                         this.store.dispatch(thunks.updateSettings({ autoSaveOnSave: value }));
+                    });
+                if (!isNoteReady) toggle.setDisabled(true);
+            });
+
+        new Setting(parent)
             .setName('Enable watch mode')
             .setDesc('Automatically save a new version if the note has changed after a set interval.')
             .addToggle(toggle => {
