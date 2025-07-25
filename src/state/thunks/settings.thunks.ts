@@ -11,6 +11,7 @@ import { BackgroundTaskManager } from '../../core/BackgroundTaskManager';
 import { TYPES } from '../../types/inversify.types';
 import { DEFAULT_SETTINGS } from '../../constants';
 import { isPluginUnloading } from './ThunkUtils';
+import type VersionControlPlugin from '../../main';
 
 /**
  * Thunks for updating settings and handling export functionality.
@@ -21,12 +22,10 @@ export const updateSettings = (settingsUpdate: Partial<VersionControlSettings>):
     const uiService = container.get<UIService>(TYPES.UIService);
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
     const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
+    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
 
     const stateBeforeUpdate = getState();
     
-    // FIX: Use a type-safe method to create a copy of the original settings.
-    // The spread syntax within reduce is correctly inferred by TypeScript and avoids
-    // the "is not assignable to type 'never'" error that occurs with direct indexed assignment.
     const originalSettings = (Object.keys(settingsUpdate) as Array<keyof VersionControlSettings>)
         .reduce((acc, key) => ({
             ...acc,
@@ -34,11 +33,23 @@ export const updateSettings = (settingsUpdate: Partial<VersionControlSettings>):
         }), {} as Partial<VersionControlSettings>);
 
     // --- Handle all per-note settings ---
-    if (stateBeforeUpdate.status !== AppStatus.READY || !stateBeforeUpdate.noteId) {
+    if (stateBeforeUpdate.status !== AppStatus.READY || !stateBeforeUpdate.noteId || !stateBeforeUpdate.file) {
         uiService.showNotice("A note with version history must be active to change its settings.", 5000);
         return;
     }
-    const { noteId } = stateBeforeUpdate;
+    const { noteId, file } = stateBeforeUpdate;
+
+    // If auto-save settings are changed, we must clear the existing debouncer
+    // so it can be recreated with the new settings on the next file modification.
+    if (settingsUpdate.hasOwnProperty('autoSaveOnSaveInterval') || settingsUpdate.hasOwnProperty('autoSaveOnSave')) {
+        const debouncerInfo = plugin.autoSaveDebouncers.get(file.path);
+        if (debouncerInfo) {
+            // FIX: Access the 'debouncer' property on the DebouncerInfo object to call cancel.
+            // This prevents an old, stale debouncer from firing after settings have changed.
+            debouncerInfo.debouncer.cancel();
+            plugin.autoSaveDebouncers.delete(file.path);
+        }
+    }
 
     // Optimistic UI update
     dispatch(actions.updateSettings(settingsUpdate));
@@ -63,8 +74,6 @@ export const updateSettings = (settingsUpdate: Partial<VersionControlSettings>):
                 // If no overrides remain, remove the settings object entirely.
                 delete manifest.settings;
             }
-            
-            // An immer recipe that mutates the draft should not return a value.
         });
 
         // Re-validate state after await.

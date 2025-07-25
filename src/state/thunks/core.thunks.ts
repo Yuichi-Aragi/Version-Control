@@ -13,6 +13,7 @@ import { BackgroundTaskManager } from '../../core/BackgroundTaskManager';
 import { TYPES } from '../../types/inversify.types';
 import { DEFAULT_SETTINGS } from '../../constants';
 import { isPluginUnloading } from './ThunkUtils';
+import type VersionControlPlugin from '../../main';
 
 /**
  * Thunks related to the core application lifecycle, such as view initialization and history loading.
@@ -207,8 +208,16 @@ export const handleFileRename = (file: TFile, oldPath: string): AppThunk => asyn
     if (isPluginUnloading(container)) return;
     if (file.extension !== 'md') return;
 
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);
+    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    
+    // Clean up any debouncer associated with the old file path to prevent leaks.
+    const debouncerInfo = plugin.autoSaveDebouncers.get(oldPath);
+    if (debouncerInfo) {
+        debouncerInfo.debouncer.cancel();
+        plugin.autoSaveDebouncers.delete(oldPath);
+    }
 
     const oldNoteId = await manifestManager.getNoteIdByPath(oldPath);
     await noteManager.handleNoteRename(file, oldPath);
@@ -222,9 +231,17 @@ export const handleFileRename = (file: TFile, oldPath: string): AppThunk => asyn
 export const handleFileDelete = (file: TFile): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     if (file.extension !== 'md') return;
-
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    
+    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);
+    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+
+    // Clean up any debouncer associated with the deleted file path to prevent leaks.
+    const debouncerInfo = plugin.autoSaveDebouncers.get(file.path);
+    if (debouncerInfo) {
+        debouncerInfo.debouncer.cancel();
+        plugin.autoSaveDebouncers.delete(file.path);
+    }
 
     const deletedNoteId = await manifestManager.getNoteIdByPath(file.path); 
     

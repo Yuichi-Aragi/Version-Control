@@ -1,4 +1,4 @@
-import { TFile, App } from 'obsidian';
+import { TFile, App, debounce } from 'obsidian';
 import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
 import type { VersionHistoryEntry } from '../../types';
@@ -12,6 +12,7 @@ import { BackgroundTaskManager } from '../../core/BackgroundTaskManager';
 import { ManifestManager } from '../../core/manifest-manager';
 import { TYPES } from '../../types/inversify.types';
 import { isPluginUnloading } from './ThunkUtils';
+import type VersionControlPlugin from '../../main';
 
 /**
  * Thunks for direct version management (CRUD operations).
@@ -350,10 +351,9 @@ export const deleteAllVersions = (): AppThunk => async (dispatch, getState, cont
         const success = await versionManager.deleteAllVersions(initialNoteIdFromState);
 
         // Re-validate state after the delete operation.
-        const stateAfterDelete = getState();
         // Check if the view is still on the same file. After this operation, the noteId will be gone,
         // so checking the file path is the only reliable way.
-        if (isPluginUnloading(container) || stateAfterDelete.file?.path !== initialFileFromState.path) {
+        if (isPluginUnloading(container) || getState().file?.path !== initialFileFromState.path) {
             if (success) {
                 uiService.showNotice(`All versions for "${initialFileFromState.basename}" have been deleted in the background.`, 5000);
             }
@@ -377,33 +377,20 @@ export const deleteAllVersions = (): AppThunk => async (dispatch, getState, cont
     }
 };
 
-export const handleVaultSave = (file: TFile): AppThunk => async (dispatch, getState, container) => {
+/**
+ * The actual auto-save logic. This is called by the debounced function.
+ */
+export const performAutoSave = (file: TFile): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
-    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
-  
-    const noteId = await noteManager.getNoteId(file) ?? await manifestManager.getNoteIdByPath(file.path);
-    if (!noteId) return;
-  
-    let autoSaveOnSave = DEFAULT_SETTINGS.autoSaveOnSave;
-    try {
-        const noteManifest = await manifestManager.loadNoteManifest(noteId);
-        if (noteManifest?.settings?.autoSaveOnSave !== undefined) {
-            autoSaveOnSave = noteManifest.settings.autoSaveOnSave;
-        }
-    } catch (e) {
-        // Manifest might not exist yet if a vc-id was added but no version saved. This is fine.
-    }
-  
-    if (!autoSaveOnSave) return;
-  
-    // Use the existing core method, which is robust, queued, and handles duplicate content checks.
+
+    // The saveNewVersionForFile is already robust, queued, and handles duplicate content checks.
     const result = await versionManager.saveNewVersionForFile(file, 'Auto-save', { force: false });
   
     // If the save was successful and this is the active note in the VC panel, update the UI.
     if (result.status === 'saved' && result.newVersionEntry) {
         const state = getState();
+        // Check if the UI needs updating. It only should if the user is looking at the panel for this file.
         if (state.status === AppStatus.READY && state.file?.path === file.path) {
             // If the note didn't have an ID in the state before (first version), update it.
             if (state.noteId !== result.newNoteId) {
@@ -411,5 +398,69 @@ export const handleVaultSave = (file: TFile): AppThunk => async (dispatch, getSt
             }
             dispatch(actions.addVersionSuccess({ newVersion: result.newVersionEntry }));
         }
+    }
+};
+
+/**
+ * Handles the vault's `modify` event. This thunk is responsible for debouncing
+ * auto-save requests to prevent queue flooding.
+ */
+export const handleVaultSave = (file: TFile): AppThunk => async (dispatch, _getState, container) => {
+    if (isPluginUnloading(container)) return;
+    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
+    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
+  
+    // Find noteId from frontmatter first, then manifest.
+    const noteId = await noteManager.getNoteId(file) ?? await manifestManager.getNoteIdByPath(file.path);
+    // If the note is not versioned at all, there's nothing to do.
+    if (!noteId) return;
+  
+    // Determine the effective settings for this specific note, falling back to defaults.
+    let effectiveSettings = { ...DEFAULT_SETTINGS };
+    try {
+        const noteManifest = await manifestManager.loadNoteManifest(noteId);
+        if (noteManifest?.settings) {
+            effectiveSettings = { ...effectiveSettings, ...noteManifest.settings };
+        }
+    } catch (e) {
+        // Manifest might not exist yet if this is the first interaction after getting a vc-id.
+        // This is a normal condition; we'll simply use the default settings.
+    }
+  
+    const debouncerInfo = plugin.autoSaveDebouncers.get(file.path);
+
+    // If auto-save is disabled for this note, ensure any lingering debouncer is cancelled and removed.
+    if (!effectiveSettings.autoSaveOnSave) {
+        if (debouncerInfo) {
+            debouncerInfo.debouncer.cancel();
+            plugin.autoSaveDebouncers.delete(file.path);
+        }
+        return;
+    }
+    
+    // Auto-save is enabled. Get or create a debouncer with the correct interval.
+    const intervalMs = (effectiveSettings.autoSaveOnSaveInterval || 2) * 1000;
+
+    // If a correct debouncer already exists, just trigger it.
+    if (debouncerInfo && debouncerInfo.interval === intervalMs) {
+        debouncerInfo.debouncer(file);
+    } else {
+        // Otherwise, the debouncer is missing or its interval is stale. Re-create it.
+        // Cancel the old one if it exists to prevent it from firing.
+        debouncerInfo?.debouncer.cancel();
+
+        const newDebouncerFunc = debounce(
+            (f: TFile) => {
+                // The debounced function dispatches the thunk that performs the actual save.
+                dispatch(performAutoSave(f));
+            },
+            intervalMs
+        );
+
+        plugin.autoSaveDebouncers.set(file.path, { debouncer: newDebouncerFunc, interval: intervalMs });
+        
+        // Trigger the newly created debouncer.
+        newDebouncerFunc(file);
     }
 };
