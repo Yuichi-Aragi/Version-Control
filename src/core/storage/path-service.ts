@@ -12,16 +12,9 @@ export class PathService {
         return DB_PATH;
     }
 
-    public getDbSubfolder(): string {
-        return normalizePath(`${DB_PATH}/db`);
-    }
-
-    public getCentralManifestPath(): string {
-        return normalizePath(`${DB_PATH}/central-manifest.json`);
-    }
-
     public getNoteDbPath(noteId: string): string {
-        return normalizePath(`${this.getDbSubfolder()}/${noteId}`);
+        // Note folders are now directly under the DB_PATH root.
+        return normalizePath(`${this.getDbRoot()}/${noteId}`);
     }
 
     public getNoteManifestPath(noteId: string): string {
