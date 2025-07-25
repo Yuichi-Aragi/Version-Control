@@ -1,4 +1,4 @@
-import { TFile, WorkspaceLeaf, debounce } from 'obsidian';
+import { TFile, WorkspaceLeaf, debounce, TAbstractFile } from 'obsidian';
 import type { CachedMetadata } from 'obsidian';
 import type { AppStore } from '../state/store';
 import { thunks } from '../state/thunks';
@@ -37,6 +37,14 @@ export function registerSystemEventListeners(plugin: VersionControlPlugin, store
     plugin.registerEvent(plugin.app.vault.on('delete', (file) => {
         if (file instanceof TFile) {
             store.dispatch(thunks.handleFileDelete(file));
+        }
+    }));
+
+    // This event fires when a file is modified on disk, which is the most reliable
+    // proxy for a "save" event (e.g., from Ctrl+S or external changes).
+    plugin.registerEvent(plugin.app.vault.on('modify', (file: TAbstractFile) => {
+        if (file instanceof TFile && file.extension === 'md') {
+            store.dispatch(thunks.handleVaultSave(file));
         }
     }));
 }
