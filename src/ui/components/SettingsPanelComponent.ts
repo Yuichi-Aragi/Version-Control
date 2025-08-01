@@ -208,7 +208,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
 
         new Setting(parent)
             .setName('Auto-save on file save')
-            .setDesc('Automatically save a new version whenever the note file is saved (e.g., via Ctrl+S).')
+            .setDesc('Automatically save a new version whenever the note file is saved (e.g., via ctrl+s).')
             .addToggle(toggle => {
                 toggle
                     .setValue(settings.autoSaveOnSave)
