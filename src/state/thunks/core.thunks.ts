@@ -112,7 +112,7 @@ export const reconcileNoteId = (file: TFile, noteId: string): AppThunk => async 
         }
     } catch (error) {
         console.error(`Version Control: Error during vc-id reconciliation for "${file.path}".`, error);
-        uiService.showNotice(`VC: Failed to restore vc-id for "${file.basename}". Check console.`, 5000);
+        uiService.showNotice(`VC: Failed to restore vc-id for "${file.basename}". Check the console for details.`, 5000);
     }
 };
 
@@ -278,10 +278,10 @@ export const cleanupOrphanedVersions = (): AppThunk => async (_dispatch, _getSta
                 uiService.showNotice("No orphaned version data found to clean up.", 5000);
             }
         } else {
-            uiService.showNotice("Orphaned data cleanup failed. Check console for details.", 7000);
+            uiService.showNotice("Orphaned data cleanup failed. Check the console for details.", 7000);
         }
     } catch (err) {
         console.error("Version Control: Error during orphan cleanup thunk:", err);
-        uiService.showNotice("An unexpected error occurred during orphan cleanup. Check console.", 7000);
+        uiService.showNotice("An unexpected error occurred during orphan cleanup. Check the console for details.", 7000);
     }
 };

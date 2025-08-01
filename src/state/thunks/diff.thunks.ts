@@ -18,7 +18,7 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
     const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
 
-    if (state.status !== AppStatus.READY || !state.noteId || !state.file || state.noteId !== version1.noteId) {
+    if (state.status !== AppStatus.READY || !state.noteId || !state.file) {
         uiService.showNotice("Cannot start diff: view context has changed.", 3000);
         return;
     }
@@ -32,9 +32,14 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
     const otherVersions = state.history.filter(v => v.id !== version1.id);
     const currentStateTarget: DiffTarget = {
         id: 'current',
-        name: 'Current Note State',
+        name: 'Current note state',
         timestamp: new Date().toISOString(),
         notePath: state.file.path,
+        // FIX: Add missing properties to satisfy the DiffTarget type, which expects
+        // a structure similar to VersionHistoryEntry for all its variants.
+        noteId: state.noteId,
+        versionNumber: 0, // Placeholder for the current state, which has no version number.
+        size: state.file.stat.size,
     };
     const targets: DiffTarget[] = [currentStateTarget, ...otherVersions];
 
@@ -102,7 +107,7 @@ export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: Dif
             app.workspace.revealLeaf(leaf);
         } catch (error) {
             console.error("Version Control: Error generating diff for tab.", error);
-            uiService.showNotice("Failed to generate diff. Check console for details.");
+            uiService.showNotice("Failed to generate diff. Check the console for details.");
         }
         return;
     }
@@ -126,7 +131,7 @@ export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: Dif
 
     } catch (error) {
         console.error("Version Control: Error during background diff generation.", error);
-        uiService.showNotice("Failed to generate diff. Check console.", 5000);
+        uiService.showNotice("Failed to generate diff. Check the console for details.", 5000);
         dispatch(actions.diffGenerationFailed({ version1Id: version1.id, version2Id: version2.id }));
     }
 };

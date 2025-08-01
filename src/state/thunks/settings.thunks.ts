@@ -104,14 +104,14 @@ export const requestExportAllVersions = (): AppThunk => (dispatch, getState, con
     const state = getState();
 
     if (state.status !== AppStatus.READY || !state.noteId) {
-        uiService.showNotice("VC: Cannot export. Note not ready or not under version control.", 3000);
+        uiService.showNotice("VC: Cannot export because the note is not ready or is not under version control.", 3000);
         return;
     }
     const noteId = state.noteId;
 
     const formats: Array<'md' | 'json' | 'ndjson' | 'txt'> = ['md', 'json', 'ndjson', 'txt'];
     const menuOptions = formats.map(format => ({
-        title: `Export all as ${format.toUpperCase()}`,
+        title: `Export all versions as ${format.toUpperCase()}`,
         icon: { md: "file-text", json: "braces", ndjson: "list-ordered", txt: "file-code" }[format],
         callback: () => dispatch(exportAllVersions(noteId, format))
     }));
@@ -127,7 +127,7 @@ export const exportAllVersions = (noteId: string, format: 'md' | 'json' | 'ndjso
 
     const initialState = getState();
     if (initialState.status !== AppStatus.READY || initialState.noteId !== noteId) {
-        uiService.showNotice("VC: Export cancelled. View context changed.", 3000);
+        uiService.showNotice("VC: Export cancelled because the view context changed.", 3000);
         return;
     }
     dispatch(actions.setProcessing(true));
@@ -160,7 +160,7 @@ export const exportAllVersions = (noteId: string, format: 'md' | 'json' | 'ndjso
         // Re-validate context after await
         const latestState = getState();
         if (isPluginUnloading(container) || latestState.status !== AppStatus.READY || latestState.noteId !== initialState.noteId) {
-            uiService.showNotice("VC: Note context changed during folder selection. Export cancelled.");
+            uiService.showNotice("VC: Export cancelled because the note context changed during folder selection.");
             return;
         }
 
@@ -188,13 +188,13 @@ export const requestExportSingleVersion = (version: VersionHistoryEntry): AppThu
     const state = getState();
 
     if (state.status !== AppStatus.READY || state.noteId !== version.noteId) {
-        uiService.showNotice("VC: Cannot export version. View context is not ready or has changed.", 3000);
+        uiService.showNotice("VC: Cannot export version because the view context is not ready or has changed.", 3000);
         return;
     }
 
     const formats: Array<'md' | 'json' | 'ndjson' | 'txt'> = ['md', 'json', 'ndjson', 'txt'];
     const menuOptions = formats.map(format => ({
-        title: `Export as ${format.toUpperCase()}`,
+        title: `Export version as ${format.toUpperCase()}`,
         icon: { md: "file-text", json: "braces", ndjson: "list-ordered", txt: "file-code" }[format],
         callback: () => dispatch(exportSingleVersion(version, format))
     }));
@@ -211,7 +211,7 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: '
 
     const initialState = getState();
     if (initialState.status !== AppStatus.READY || initialState.noteId !== versionEntry.noteId) {
-        uiService.showNotice("VC: Export cancelled. View context changed.", 3000);
+        uiService.showNotice("VC: Export cancelled because the view context changed.", 3000);
         return;
     }
     dispatch(actions.setProcessing(true));
@@ -253,7 +253,7 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: '
         // Re-validate context after await
         const latestState = getState();
         if (isPluginUnloading(container) || latestState.status !== AppStatus.READY || latestState.noteId !== initialState.noteId) {
-            uiService.showNotice("VC: Note context changed during folder selection. Export cancelled.");
+            uiService.showNotice("VC: Export cancelled because the note context changed during folder selection.");
             return;
         }
         

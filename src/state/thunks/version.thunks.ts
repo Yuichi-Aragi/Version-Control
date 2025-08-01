@@ -30,13 +30,13 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => 
     if (initialState.status !== AppStatus.READY) {
         if (!isAuto) {
             console.warn("Version Control: Manual save attempt while not in Ready state. Aborting.", initialState.status);
-            uiService.showNotice("VC: Cannot save version, view not ready.", 3000);
+            uiService.showNotice("VC: Cannot save version, the view is not ready.", 3000);
         }
         return;
     }
     const initialFileFromState = initialState.file;
     if (!initialFileFromState) {
-        if (!isAuto) uiService.showNotice("VC: Cannot save, no active file in state.", 3000);
+        if (!isAuto) uiService.showNotice("VC: Cannot save, no active file is selected.", 3000);
         return;
     }
 
@@ -45,7 +45,7 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => 
     try {
         const liveFile = app.vault.getAbstractFileByPath(initialFileFromState.path);
         if (!(liveFile instanceof TFile)) {
-            uiService.showNotice(`VC: Cannot save. Note "${initialFileFromState.basename}" may have been moved or deleted.`);
+            uiService.showNotice(`VC: Cannot save because the note "${initialFileFromState.basename}" may have been moved or deleted.`);
             dispatch(initializeView());
             return;
         }
@@ -123,7 +123,7 @@ export const updateVersionDetails = (versionId: string, name: string): AppThunk 
         await versionManager.updateVersionDetails(noteId, versionId, version_name);
     } catch (error) {
         console.error(`VC: Failed to save name update for version ${versionId}. Reverting UI.`, error);
-        uiService.showNotice("VC: Error: Could not save version details. Reverting changes.", 5000);
+        uiService.showNotice("VC: Error, could not save version details. Reverting changes.", 5000);
         // On failure, reload history to revert the optimistic update
         if (!isPluginUnloading(container)) {
             dispatch(loadHistoryForNoteId(file, noteId));
@@ -192,7 +192,7 @@ export const restoreVersion = (versionId: string): AppThunk => async (dispatch, 
         // Re-validate state after the backup save operation.
         const stateAfterBackup = getState();
         if (isPluginUnloading(container) || stateAfterBackup.status !== AppStatus.READY || stateAfterBackup.noteId !== initialNoteIdFromState) {
-            uiService.showNotice(`Restore cancelled. Active note changed during backup.`, 5000);
+            uiService.showNotice(`Restore cancelled because the active note changed during backup.`, 5000);
             // Re-initialize to the new context to avoid inconsistent state.
             if (!isPluginUnloading(container)) {
                 dispatch(initializeView());
@@ -240,7 +240,7 @@ export const requestDelete = (version: VersionHistoryEntry): AppThunk => (dispat
 
         dispatch(actions.openPanel({
             type: 'confirmation',
-            title: "Confirm delete version",
+            title: "Confirm delete",
             message: message,
             onConfirmAction: deleteVersion(version.id),
         }));
@@ -324,7 +324,7 @@ export const requestDeleteAll = (): AppThunk => (dispatch, getState, container) 
         const basename = file.basename;
         dispatch(actions.openPanel({
             type: 'confirmation',
-            title: "Confirm delete all versions",
+            title: "Confirm delete all",
             message: `This will permanently delete all version history for "${basename}" and remove it from version control (its ${NOTE_FRONTMATTER_KEY} will be cleared). This action cannot be undone. Are you sure?`,
             onConfirmAction: deleteAllVersions(),
         }));

@@ -25,7 +25,7 @@ export const viewVersionInPanel = (version: VersionHistoryEntry): AppThunk => as
     dispatch(actions.setProcessing(true));
     try {
         if (state.noteId !== version.noteId) {
-            uiService.showNotice("VC: Note context changed. Cannot preview this version now.");
+            uiService.showNotice("VC: Cannot preview this version now because the note context changed.");
             dispatch(initializeView());
             return;
         }
@@ -45,7 +45,7 @@ export const viewVersionInPanel = (version: VersionHistoryEntry): AppThunk => as
         }
     } catch (error) {
         console.error("Version Control: Error fetching content for preview panel.", error);
-        uiService.showNotice("VC: Failed to load content for preview. Check console.");
+        uiService.showNotice("VC: Failed to load content for preview. Check the console for details.");
     } finally {
         const finalState = getState();
         // Ensure processing is turned off only if the panel is open or if it failed to open
@@ -66,7 +66,7 @@ export const viewVersionInNewTab = (version: VersionHistoryEntry): AppThunk => a
     
     try {
         if (state.noteId !== version.noteId) {
-            uiService.showNotice("VC: Note context changed. Cannot open this version in new tab now.");
+            uiService.showNotice("VC: Cannot open this version in a new tab because the note context changed.");
             return;
         }
         const content = await versionManager.getVersionContent(state.noteId, version.id);
@@ -100,7 +100,7 @@ export const viewVersionInNewTab = (version: VersionHistoryEntry): AppThunk => a
         app.workspace.revealLeaf(leaf);
     } catch (error) {
         console.error("Version Control: Error opening version in new tab.", error);
-        uiService.showNotice("VC: Failed to open version in new tab. Check console.");
+        uiService.showNotice("VC: Failed to open version in a new tab. Check the console for details.");
     }
 };
 
@@ -115,7 +115,7 @@ export const createDeviation = (version: VersionHistoryEntry): AppThunk => async
     if (initialState.status !== AppStatus.READY || !initialState.noteId) return;
     
     if (initialState.noteId !== version.noteId) {
-        uiService.showNotice("VC: Note context changed. Cannot create deviation from this version now.");
+        uiService.showNotice("VC: Cannot create a deviation from this version because the note context changed.");
         return;
     }
     
@@ -129,7 +129,7 @@ export const createDeviation = (version: VersionHistoryEntry): AppThunk => async
         // Re-validate context after await
         const latestState = getState();
         if (isPluginUnloading(container) || latestState.status !== AppStatus.READY || latestState.noteId !== initialState.noteId) {
-            uiService.showNotice("VC: Note context changed during folder selection. Deviation cancelled.");
+            uiService.showNotice("VC: Deviation cancelled because the note context changed during folder selection.");
             return;
         }
         
@@ -142,7 +142,7 @@ export const createDeviation = (version: VersionHistoryEntry): AppThunk => async
 
     } catch (error) {
         console.error("Version Control: Error creating deviation.", error);
-        uiService.showNotice("VC: Failed to create new note from version. Check console.");
+        uiService.showNotice("VC: Failed to create a new note from this version. Check the console for details.");
     }
 };
 
