@@ -74,7 +74,7 @@ export default class VersionControlPlugin extends Plugin {
                 this.store.dispatch(thunks.initializeView());
             });
 			
-			this.addStatusBarItem().setText('VC ready');
+			this.addStatusBarItem().setText('Version control ready');
 
 		} catch (error) {
 			console.error("Version Control: CRITICAL: Plugin failed to load.", error);
