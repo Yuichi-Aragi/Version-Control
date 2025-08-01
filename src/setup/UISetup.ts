@@ -32,7 +32,7 @@ export function registerViews(plugin: Plugin, store: AppStore): void {
  * @param store The application state store.
  */
 export function addRibbonIcon(plugin: Plugin, store: AppStore): void {
-    plugin.addRibbonIcon('history', 'Open Version Control', () => {
+    plugin.addRibbonIcon('history', 'Open version control', () => {
         activateViewAndDispatch(plugin, store);
     });
 }
@@ -45,7 +45,7 @@ export function addRibbonIcon(plugin: Plugin, store: AppStore): void {
 export function registerCommands(plugin: Plugin, store: AppStore): void {
     plugin.addCommand({
         id: 'open-version-control-view',
-        name: 'Open Version Control View',
+        name: 'Open version control view',
         callback: () => activateViewAndDispatch(plugin, store),
     });
 
@@ -115,7 +115,7 @@ async function activateViewAndDispatch(plugin: Plugin, store: AppStore) {
             plugin.app.workspace.revealLeaf(newLeaf);
         } else {
             console.error("Version Control: Could not get a leaf to activate the view.");
-            store.dispatch(thunks.showNotice("Error: Could not open Version Control view.", 7000));
+            store.dispatch(thunks.showNotice("Error: Could not open the version control view.", 7000));
         }
     }
 }
