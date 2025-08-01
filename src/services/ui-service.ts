@@ -69,13 +69,13 @@ export class UIService extends Component {
         // Direct Preview Actions
         menu.addItem((item) =>
             item
-                .setTitle("Preview in Panel")
+                .setTitle("Preview in panel")
                 .setIcon("sidebar-right")
                 .onClick(() => this.store.dispatch(thunks.viewVersionInPanel(version)))
         );
         menu.addItem((item) =>
             item
-                .setTitle("Preview in New Tab")
+                .setTitle("Preview in new tab")
                 .setIcon("file-text")
                 .onClick(() => this.store.dispatch(thunks.viewVersionInNewTab(version)))
         );
@@ -138,14 +138,14 @@ export class UIService extends Component {
     showSortMenu(currentSortOrder: SortOrder, event: MouseEvent): void {
         const menu = new Menu();
         const sortOptions: { label: string; property: SortProperty; direction: SortDirection }[] = [
-            { label: 'Version (New to Old)', property: 'versionNumber', direction: 'desc' },
-            { label: 'Version (Old to New)', property: 'versionNumber', direction: 'asc' },
-            { label: 'Timestamp (New to Old)', property: 'timestamp', direction: 'desc' },
-            { label: 'Timestamp (Old to New)', property: 'timestamp', direction: 'asc' },
+            { label: 'Version (new to old)', property: 'versionNumber', direction: 'desc' },
+            { label: 'Version (old to new)', property: 'versionNumber', direction: 'asc' },
+            { label: 'Timestamp (new to old)', property: 'timestamp', direction: 'desc' },
+            { label: 'Timestamp (old to new)', property: 'timestamp', direction: 'asc' },
             { label: 'Name (A to Z)', property: 'name', direction: 'asc' },
             { label: 'Name (Z to A)', property: 'name', direction: 'desc' },
-            { label: 'Size (Largest to Smallest)', property: 'size', direction: 'desc' },
-            { label: 'Size (Smallest to Largest)', property: 'size', 'direction': 'asc' },
+            { label: 'Size (largest to smallest)', property: 'size', direction: 'desc' },
+            { label: 'Size (smallest to largest)', property: 'size', 'direction': 'asc' },
         ];
 
         sortOptions.forEach(opt => {
