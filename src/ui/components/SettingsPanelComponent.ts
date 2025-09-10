@@ -14,16 +14,11 @@ export class SettingsPanelComponent extends BasePanelComponent {
     constructor(parent: HTMLElement, store: AppStore) {
         super(parent, store, ["v-settings-panel"]); 
         
-        // Create the content wrapper once. Its content will be re-rendered.
         this.innerPanel = this.container.createDiv('v-settings-panel-content-wrapper');
 
-        // Register events once. The handler will manage logic based on state.
         this.registerDomEvent(this.innerPanel, 'click', this.resetAutoCloseTimer, { capture: true });
         this.registerDomEvent(this.innerPanel, 'input', this.resetAutoCloseTimer, { capture: true });
 
-        // Register a single cleanup function for the timer. This function will be
-        // called automatically when the component is unloaded, removing the need
-        // for a manual `onunload` method for this purpose.
         this.register(() => {
             if (this.autoCloseTimer) {
                 window.clearTimeout(this.autoCloseTimer);
@@ -35,7 +30,6 @@ export class SettingsPanelComponent extends BasePanelComponent {
         const isOpen = !!panelState;
         this.toggle(isOpen); 
         
-        // Clear any previously running timer before proceeding.
         if (this.autoCloseTimer) {
             window.clearTimeout(this.autoCloseTimer);
             this.autoCloseTimer = null;
@@ -47,7 +41,6 @@ export class SettingsPanelComponent extends BasePanelComponent {
         
         this.innerPanel.empty(); 
 
-        // Set a new auto-close timer. The cleanup is handled by the registered function.
         this.autoCloseTimer = window.setTimeout(() => {
             const currentState = this.store.getState();
             if (currentState.status === AppStatus.READY && currentState.panel?.type === 'settings') {
@@ -55,7 +48,15 @@ export class SettingsPanelComponent extends BasePanelComponent {
             }
         }, this.AUTO_CLOSE_DELAY_MS);
 
-        // Populate Content
+        // --- Global Settings ---
+        const globalSettingsSection = this.innerPanel.createDiv('v-settings-section');
+        globalSettingsSection.createEl('h4', {
+            text: 'Global Plugin Settings',
+            cls: 'v-settings-section-title'
+        });
+        this.createGlobalSettingsControls(globalSettingsSection, state);
+
+        // --- Per-Note Settings ---
         if (state.status === AppStatus.READY && state.file) {
             const noteSection = this.innerPanel.createDiv('v-settings-section');
             noteSection.createEl('h4', {
@@ -68,33 +69,31 @@ export class SettingsPanelComponent extends BasePanelComponent {
             if (state.noteId && state.history.length > 0) { 
                  this.createSettingsAction(noteActionsContainer, "Delete all versions", "trash-2", () => this.store.dispatch(thunks.requestDeleteAll()), "mod-warning");
             }
-        }
         
-        const pluginSettingsSection = this.innerPanel.createDiv('v-settings-section');
-        const descTitle = state.noteId ? `Note-specific settings` : `Default settings`;
-        pluginSettingsSection.createEl('h4', {
-            text: descTitle,
-            cls: 'v-settings-section-title'
-        });
-        const settingsDesc = pluginSettingsSection.createEl('p', { cls: 'v-settings-info v-meta-label' });
-        if (state.noteId) {
-            settingsDesc.setText('These settings apply only to the current note and override the defaults. Other notes will use the default settings.');
-        } else {
-            settingsDesc.setText('Open a note with version history to configure its specific settings.');
-        }
+            const pluginSettingsSection = this.innerPanel.createDiv('v-settings-section');
+            const descTitle = state.noteId ? `Note-specific settings` : `Default settings`;
+            pluginSettingsSection.createEl('h4', {
+                text: descTitle,
+                cls: 'v-settings-section-title'
+            });
+            const settingsDesc = pluginSettingsSection.createEl('p', { cls: 'v-settings-info v-meta-label' });
+            if (state.noteId) {
+                settingsDesc.setText('These settings apply only to the current note and override the defaults.');
+            } else {
+                settingsDesc.setText('This note is not under version control. These are the default settings that will be applied.');
+            }
 
-        this.createPluginSettingsControls(this.innerPanel, state);
+            this.createPluginSettingsControls(this.innerPanel, state);
+        }
     }
 
     private resetAutoCloseTimer = () => {
-        // Clear the existing timer.
         if (this.autoCloseTimer) {
             window.clearTimeout(this.autoCloseTimer);
         }
         
         const currentState = this.store.getState();
         if (currentState.status === AppStatus.READY && currentState.panel?.type === 'settings') {
-            // Set a new timer.
             this.autoCloseTimer = window.setTimeout(() => {
                 const latestState = this.store.getState();
                 if (latestState.status === AppStatus.READY && latestState.panel?.type === 'settings') {
@@ -153,10 +152,33 @@ export class SettingsPanelComponent extends BasePanelComponent {
         return `${minutes} min ${remainingSeconds} sec`;
     }
 
+    private createGlobalSettingsControls(parent: HTMLElement, state: AppState) {
+        const currentDbPath = state.settings.databasePath;
+        let newDbPath = currentDbPath;
+
+        new Setting(parent)
+            .setName('Database path')
+            .setDesc(`The vault-relative path for the version history database. Current: ${currentDbPath}`)
+            .addText(text => {
+                text.setValue(currentDbPath)
+                    .setPlaceholder('e.g., .versiondb or Archives/Versions')
+                    .onChange(value => {
+                        newDbPath = value;
+                    });
+            })
+            .addButton(button => {
+                button.setButtonText('Apply')
+                    .setTooltip('Rename and move the database folder')
+                    .onClick(() => {
+                        this.store.dispatch(thunks.renameDatabasePath(newDbPath));
+                    });
+            });
+    }
+
     private createPluginSettingsControls(parent: HTMLElement, state: AppState) {
         const { settings } = state; 
 
-        const isNoteReady = state.status === AppStatus.READY && !!state.noteId;
+        const isNoteVersioned = state.status === AppStatus.READY && !!state.noteId;
 
         new Setting(parent)
             .setName('Enable version naming')
@@ -167,7 +189,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                     .onChange((value) => {
                          this.store.dispatch(thunks.updateSettings({ enableVersionNaming: value }));
                     });
-                if (!isNoteReady) toggle.setDisabled(true);
+                if (!isNoteVersioned) toggle.setDisabled(true);
             });
         
         new Setting(parent)
@@ -179,7 +201,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                     .onChange((value) => {
                         this.store.dispatch(thunks.updateSettings({ isListView: value }));
                     });
-                if (!isNoteReady) toggle.setDisabled(true);
+                if (!isNoteVersioned) toggle.setDisabled(true);
             });
         
         new Setting(parent)
@@ -191,7 +213,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                     .onChange((value) => {
                         this.store.dispatch(thunks.updateSettings({ useRelativeTimestamps: value }));
                     });
-                if (!isNoteReady) toggle.setDisabled(true);
+                if (!isNoteVersioned) toggle.setDisabled(true);
             });
         
         new Setting(parent)
@@ -203,7 +225,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                     .onChange((value) => {
                         this.store.dispatch(thunks.updateSettings({ renderMarkdownInPreview: value }));
                     });
-                if (!isNoteReady) toggle.setDisabled(true);
+                if (!isNoteVersioned) toggle.setDisabled(true);
             });
 
         new Setting(parent)
@@ -215,14 +237,14 @@ export class SettingsPanelComponent extends BasePanelComponent {
                     .onChange((value) => {
                          this.store.dispatch(thunks.updateSettings({ autoSaveOnSave: value }));
                     });
-                if (!isNoteReady) toggle.setDisabled(true);
+                if (!isNoteVersioned) toggle.setDisabled(true);
             });
 
         if (settings.autoSaveOnSave) {
             let descEl: HTMLElement;
             new Setting(parent)
                 .setName('Auto-save delay')
-                .setDesc('placeholder') // Will be replaced
+                .setDesc('placeholder')
                 .then(setting => {
                     descEl = setting.descEl;
                     descEl.setText(`Time to wait after last change before auto-saving. Current: ${settings.autoSaveOnSaveInterval} sec.`);
@@ -233,7 +255,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                     }, 500);
 
                     slider
-                        .setLimits(1, 10, 1) // 1 to 10 seconds
+                        .setLimits(1, 10, 1)
                         .setValue(settings.autoSaveOnSaveInterval)
                         .setDynamicTooltip()
                         .onChange((value) => {
@@ -242,7 +264,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                             }
                             debouncedSave(value);
                         });
-                    if (!isNoteReady) slider.setDisabled(true);
+                    if (!isNoteVersioned) slider.setDisabled(true);
                 });
         }
 
@@ -255,14 +277,14 @@ export class SettingsPanelComponent extends BasePanelComponent {
                     .onChange((value) => {
                         this.store.dispatch(thunks.updateSettings({ enableWatchMode: value }));
                     });
-                if (!isNoteReady) toggle.setDisabled(true);
+                if (!isNoteVersioned) toggle.setDisabled(true);
             });
         
         if (settings.enableWatchMode) {
             let descEl: HTMLElement;
             new Setting(parent)
                 .setName('Watch mode interval')
-                .setDesc('placeholder') // Will be replaced
+                .setDesc('placeholder')
                 .then(setting => {
                     descEl = setting.descEl;
                     descEl.setText(`Time to wait before auto-saving. Current: ${this.formatInterval(settings.watchModeInterval)}.`);
@@ -273,7 +295,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                     }, 500);
 
                     slider
-                        .setLimits(5, 300, 5) // 5 seconds to 5 minutes, in 5-second steps
+                        .setLimits(5, 300, 5)
                         .setValue(settings.watchModeInterval)
                         .setDynamicTooltip()
                         .onChange((value) => {
@@ -282,7 +304,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                             }
                             debouncedSave(value);
                         });
-                    if (!isNoteReady) slider.setDisabled(true);
+                    if (!isNoteVersioned) slider.setDisabled(true);
                 });
         }
 
@@ -295,7 +317,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                     .onChange((value) => {
                         this.store.dispatch(thunks.updateSettings({ autoCleanupOldVersions: value }));
                     });
-                if (!isNoteReady) toggle.setDisabled(true);
+                if (!isNoteVersioned) toggle.setDisabled(true);
             });
 
         if (settings.autoCleanupOldVersions) {
@@ -322,7 +344,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                             }
                             debouncedSave(value);
                         });
-                    if (!isNoteReady) slider.setDisabled(true);
+                    if (!isNoteVersioned) slider.setDisabled(true);
                 });
         }
 
@@ -342,7 +364,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                             text.setValue(String(this.store.getState().settings.maxVersionsPerNote));
                         }
                     }, 700));
-                if (!isNoteReady) text.setDisabled(true);
+                if (!isNoteVersioned) text.setDisabled(true);
             });
     }
 }

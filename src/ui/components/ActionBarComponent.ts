@@ -9,7 +9,6 @@ export class ActionBarComponent extends Component {
     private container: HTMLElement;
     protected store: AppStore;
 
-    // Element references
     private defaultActionsEl!: HTMLElement;
     private searchContainerEl!: HTMLElement;
     private searchInput!: HTMLInputElement;
@@ -151,23 +150,24 @@ export class ActionBarComponent extends Component {
         }
         this.container.show();
 
-        const { isSearchActive, searchQuery, isSearchCaseSensitive, isProcessing, diffRequest, settings, watchModeCountdown, history, noteId } = state;
+        const { isSearchActive, searchQuery, isSearchCaseSensitive, isProcessing, diffRequest, settings, watchModeCountdown, history, noteId, isRenaming } = state;
         
+        const isBusy = isProcessing || isRenaming;
+
         this.container.classList.toggle('is-searching', isSearchActive);
         this.searchContainerEl.classList.toggle('is-query-active', searchQuery.trim().length > 0);
 
-        this.saveButton.disabled = isProcessing;
+        this.saveButton.disabled = isBusy;
         
-        // Control visibility of buttons
         this.searchToggleButton.style.display = history.length > 0 ? 'flex' : 'none';
         this.settingsButton.style.display = history.length > 0 ? 'flex' : 'none';
 
-        this.searchToggleButton.disabled = isProcessing;
-        this.settingsButton.disabled = isProcessing;
+        this.searchToggleButton.disabled = isBusy;
+        this.settingsButton.disabled = isBusy;
         this.searchToggleButton.classList.toggle('is-active', isSearchActive);
         this.settingsButton.classList.toggle('is-active', state.panel?.type === 'settings');
 
-        this.renderDiffIndicator(diffRequest);
+        this.renderDiffIndicator(diffRequest, isBusy);
         this.renderWatchModeTimer(settings.enableWatchMode, watchModeCountdown, isProcessing);
 
         if (this.searchInput.value !== searchQuery) {
@@ -181,7 +181,7 @@ export class ActionBarComponent extends Component {
         }
     }
 
-    private renderDiffIndicator(diffRequest: AppState['diffRequest']) {
+    private renderDiffIndicator(diffRequest: AppState['diffRequest'], isBusy: boolean) {
         if (!diffRequest) {
             this.diffIndicatorButton.hide();
             this.diffIndicatorButton.className = "clickable-icon v-diff-indicator";
@@ -202,6 +202,7 @@ export class ActionBarComponent extends Component {
                 this.diffIndicatorButton.className = "clickable-icon v-diff-indicator is-ready";
                 setIcon(this.diffIndicatorButton, "diff");
                 this.diffIndicatorButton.setAttribute("aria-label", "Diff is ready. Click to view.");
+                this.diffIndicatorButton.disabled = isBusy;
                 break;
         }
     }
@@ -217,7 +218,7 @@ export class ActionBarComponent extends Component {
 
     private handleSaveVersionClick() {
         const state = this.store.getState();
-        if (state.status !== AppStatus.READY || state.isProcessing) return;
+        if (state.status !== AppStatus.READY || state.isProcessing || state.isRenaming) return;
         this.store.dispatch(thunks.saveNewVersion());
     }
     
