@@ -1,31 +1,32 @@
-name: Build And Release
+name: Build and Release
 
 on:
   push:
     branches:
-      - main
+      - '**'  # Triggers on a push to ANY branch.
     paths:
       - 'manifest.json'
-      
+
 permissions:
-  contents: write # Needed to create releases and commit files
+  contents: write  # Needed to create releases and commit files
 
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          # We need to fetch all history to be able to push commits
+          # Need full history to create commits/tags
           fetch-depth: 0
-          # This token is used to push commits back to the repo
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20' # Specify your desired Node.js version
+          node-version: '20'
+          check-latest: true
 
       - name: Check for package-lock.json
         id: check_lockfile
@@ -36,33 +37,45 @@ jobs:
             echo "lockfile_exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Install dependencies with npm ci
-        if: steps.check_lockfile.outputs.lockfile_exists == 'true'
-        run: npm ci
-
-      - name: Install dependencies with npm install
-        if: steps.check_lockfile.outputs.lockfile_exists == 'false'
-        run: npm install
+      - name: Install dependencies (npm ci or install)
+        run: |
+          if [ "${{ steps.check_lockfile.outputs.lockfile_exists }}" = "true" ]; then
+            npm ci || npm install
+          else
+            npm install
+          fi
 
       - name: Run Version Sync and Release Script
-        run: node ./version-manager.mjs
+        run: |
+          set +e # Temporarily disable exit on error
+          node ./version-manager.mjs
+          EXIT_CODE=$?
+          set -e # Re-enable exit on error
+          
+          echo "Version manager completed with exit code $EXIT_CODE"
+          # Explicitly fail the step if the script had a non-zero exit code
+          if [ $EXIT_CODE -ne 0 ]; then
+            exit $EXIT_CODE
+          fi
         env:
-          # The GITHUB_TOKEN is automatically provided by GitHub Actions
-          # and is required for the GitHub CLI to interact with the repo
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REF_NAME: ${{ github.ref_name }} # Pass branch name to the script
 
-      - name: Commit and push changes
+      - name: Commit and Push Changes
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Add all potential changes
-          git add versions.json package.json package-lock.json
+          # Stage potential changes, ignoring errors if files don't exist
+          git add versions.json package.json package-lock.json --ignore-errors
           
-          # Commit only if there are staged changes
+          # Check if there are any staged changes
           if ! git diff --staged --quiet; then
-            git commit -m "chore: Sync version files and lockfile"
-            git push
+            echo "Changes detected in version files. Committing and pushing..."
+            git commit -m "chore(release): Sync versions for ${{ github.sha }}"
+            
+            # Push the commit to the branch that triggered the workflow
+            git push origin HEAD:${{ github.ref_name }}
           else
-            echo "No changes to commit."
+            echo "No changes to version files to commit."
           fi
