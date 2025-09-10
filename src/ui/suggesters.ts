@@ -10,15 +10,15 @@ abstract class BaseSuggestModal<T> extends FuzzySuggestModal<T> {
 
     constructor(
         app: App,
-        private onChooseCallback: (result: T) => void,
+        private onChooseCallback: (result: T, evt: MouseEvent | KeyboardEvent) => void,
         private onCancelCallback?: () => void
     ) {
         super(app);
     }
 
-    override onChooseItem(item: T, _evt: MouseEvent | KeyboardEvent): void {
+    override onChooseItem(item: T, evt: MouseEvent | KeyboardEvent): void {
         this.itemChosen = true;
-        this.onChooseCallback(item);
+        this.onChooseCallback(item, evt);
     }
 
     override onClose(): void {
@@ -30,7 +30,7 @@ abstract class BaseSuggestModal<T> extends FuzzySuggestModal<T> {
 }
 
 export class FolderSuggest extends BaseSuggestModal<TFolder> {
-    constructor(app: App, onChoose: (result: TFolder) => void, onCancel?: () => void) {
+    constructor(app: App, onChoose: (result: TFolder, evt: MouseEvent | KeyboardEvent) => void, onCancel?: () => void) {
         super(app, onChoose, onCancel);
         this.setPlaceholder("Select a folder for export or deviation...");
     }
@@ -48,7 +48,7 @@ export class FolderSuggest extends BaseSuggestModal<TFolder> {
 export class VersionSuggest extends BaseSuggestModal<DiffTarget> {
     private targets: DiffTarget[];
 
-    constructor(app: App, targets: DiffTarget[], onChoose: (result: DiffTarget) => void, onCancel?: () => void) {
+    constructor(app: App, targets: DiffTarget[], onChoose: (result: DiffTarget, evt: MouseEvent | KeyboardEvent) => void, onCancel?: () => void) {
         super(app, onChoose, onCancel);
         this.targets = targets;
         this.setPlaceholder("Select a version to compare against...");
