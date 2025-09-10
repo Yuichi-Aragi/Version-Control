@@ -39,7 +39,7 @@ export class UIService extends Component {
     promptForFolder(): Promise<TFolder | null> {
         return new Promise((resolve) => {
             new FolderSuggest(this.app, 
-                (folder) => resolve(folder),
+                (folder, _evt) => resolve(folder),
                 () => resolve(null) // Resolve with null on cancel
             ).open();
         });
@@ -48,12 +48,12 @@ export class UIService extends Component {
     /**
      * Prompts the user to select a version from a list of targets.
      * @param targets The list of versions and/or the current state to choose from.
-     * @returns A promise that resolves with the selected DiffTarget, or null if cancelled.
+     * @returns A promise that resolves with the selected DiffTarget and the triggering event, or null if cancelled.
      */
-    promptForVersion(targets: DiffTarget[]): Promise<DiffTarget | null> {
+    promptForVersion(targets: DiffTarget[]): Promise<{ target: DiffTarget; event: MouseEvent | KeyboardEvent } | null> {
         return new Promise((resolve) => {
             new VersionSuggest(this.app, targets,
-                (version) => resolve(version),
+                (version, evt) => resolve({ target: version, event: evt }),
                 () => resolve(null) // Resolve with null on cancel
             ).open();
         });
