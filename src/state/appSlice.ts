@@ -71,6 +71,9 @@ export const appSlice = createSlice({
         setProcessing(state, action: PayloadAction<boolean>) {
             state.isProcessing = action.payload;
         },
+        setRenaming(state, action: PayloadAction<boolean>) {
+            state.isRenaming = action.payload;
+        },
         openPanel(state, action: PayloadAction<NonNullable<PanelState>>) {
             if (state.status === AppStatus.READY) {
                 state.panel = action.payload;

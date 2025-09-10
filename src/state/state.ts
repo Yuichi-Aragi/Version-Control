@@ -70,6 +70,7 @@ export interface AppState {
     
     // Properties primarily for READY state
     isProcessing: boolean;
+    isRenaming: boolean; // Flag to block operations during DB rename
     panel: PanelState;
     namingVersionId: string | null;
     highlightedVersionId: string | null;
@@ -97,6 +98,7 @@ export const getInitialState = (loadedSettings: VersionControlSettings): AppStat
         noteId: null,
         history: [],
         isProcessing: false,
+        isRenaming: false,
         panel: null,
         namingVersionId: null,
         highlightedVersionId: null,
