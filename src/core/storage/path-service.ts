@@ -1,6 +1,8 @@
 import { normalizePath } from "obsidian";
-import { injectable } from 'inversify';
-import { DB_PATH } from "../../constants";
+import { injectable, inject } from 'inversify';
+import { DEFAULT_DB_PATH } from "../../constants";
+import { TYPES } from "../../types/inversify.types";
+import type VersionControlPlugin from "../../main";
 
 /**
  * A centralized service for generating all database-related file and folder paths.
@@ -8,8 +10,11 @@ import { DB_PATH } from "../../constants";
  */
 @injectable()
 export class PathService {
+    constructor(@inject(TYPES.Plugin) private plugin: VersionControlPlugin) {}
+
     public getDbRoot(): string {
-        return DB_PATH;
+        // Provide a fallback for early initializations before settings are fully loaded.
+        return this.plugin.settings?.databasePath || DEFAULT_DB_PATH;
     }
 
     public getNoteDbPath(noteId: string): string {
