@@ -31,10 +31,8 @@ export const viewVersionInPanel = (version: VersionHistoryEntry): AppThunk => as
         }
         const content = await versionManager.getVersionContent(state.noteId, version.id);
 
-        // Re-validate state after await
         const stateAfterFetch = getState();
         if (isPluginUnloading(container) || stateAfterFetch.status !== AppStatus.READY || stateAfterFetch.noteId !== state.noteId) {
-            // Context changed while fetching content. Abort opening the panel.
             return;
         }
 
@@ -48,7 +46,6 @@ export const viewVersionInPanel = (version: VersionHistoryEntry): AppThunk => as
         uiService.showNotice("VC: Failed to load content for preview. Check the console for details.");
     } finally {
         const finalState = getState();
-        // Ensure processing is turned off only if the panel is open or if it failed to open
         if (finalState.status === AppStatus.READY) {
              dispatch(actions.setProcessing(false));
         }
@@ -71,10 +68,8 @@ export const viewVersionInNewTab = (version: VersionHistoryEntry): AppThunk => a
         }
         const content = await versionManager.getVersionContent(state.noteId, version.id);
 
-        // Re-validate state after await
         const stateAfterFetch = getState();
         if (isPluginUnloading(container) || stateAfterFetch.status !== AppStatus.READY || stateAfterFetch.noteId !== state.noteId || !stateAfterFetch.file) {
-            // Context changed while fetching content. Abort opening the tab.
             return;
         }
 
@@ -82,7 +77,6 @@ export const viewVersionInNewTab = (version: VersionHistoryEntry): AppThunk => a
             uiService.showNotice("VC: Error: Could not load version content for new tab.");
             return;
         }
-        // Use the latest state to populate the view state
         const { file, noteId: currentNoteId } = stateAfterFetch; 
         
         const leaf = app.workspace.getLeaf('tab'); 
@@ -107,11 +101,15 @@ export const viewVersionInNewTab = (version: VersionHistoryEntry): AppThunk => a
 export const createDeviation = (version: VersionHistoryEntry): AppThunk => async (_dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     const uiService = container.get<UIService>(TYPES.UIService);
+    const initialState = getState();
+    if (initialState.isRenaming) {
+        uiService.showNotice("Cannot create deviation while database is being renamed.");
+        return;
+    }
+
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const app = container.get<App>(TYPES.App);
     
-    const initialState = getState();
-
     if (initialState.status !== AppStatus.READY || !initialState.noteId) return;
     
     if (initialState.noteId !== version.noteId) {
@@ -126,14 +124,12 @@ export const createDeviation = (version: VersionHistoryEntry): AppThunk => async
             return;
         }
 
-        // Re-validate context after await
         const latestState = getState();
         if (isPluginUnloading(container) || latestState.status !== AppStatus.READY || latestState.noteId !== initialState.noteId) {
             uiService.showNotice("VC: Deviation cancelled because the note context changed during folder selection.");
             return;
         }
         
-        // Proceed with the original noteId, which we've confirmed is still valid for the current context.
         const newFile = await versionManager.createDeviation(initialState.noteId, version.id, selectedFolder);
         if (newFile) {
             uiService.showNotice(`Created new note "${newFile.basename}" from version ${version.id.substring(0,6)}...`, 5000);

@@ -21,12 +21,17 @@ import type VersionControlPlugin from '../../main';
 export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     const { isAuto = false } = options;
-    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const uiService = container.get<UIService>(TYPES.UIService);
+    const initialState = getState();
+    if (initialState.isRenaming) {
+        if (!isAuto) uiService.showNotice("Cannot save version while database is being renamed.");
+        return;
+    }
+
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const app = container.get<App>(TYPES.App);
     const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
 
-    const initialState = getState();
     if (initialState.status !== AppStatus.READY) {
         if (!isAuto) {
             console.warn("Version Control: Manual save attempt while not in Ready state. Aborting.", initialState.status);
@@ -52,13 +57,11 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => 
 
         const result = await versionManager.saveNewVersionForFile(liveFile);
 
-        // Re-validate state after await
         const stateAfterSave = getState();
         if (isPluginUnloading(container) || stateAfterSave.status !== AppStatus.READY || stateAfterSave.file?.path !== initialFileFromState.path) {
             if (result.status === 'saved') {
                 uiService.showNotice(`Version ${result.displayName} saved for "${liveFile.basename}" in the background.`, 4000);
             }
-            // Abort UI update for the now-incorrect context.
             return;
         }
         
@@ -66,10 +69,9 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => 
             if (!isAuto) {
                 uiService.showNotice("Content is identical to the latest version. No new version was saved.", 4000);
             }
-            return; // Return early, finally block will still execute
+            return;
         }
         
-        // It was saved, and we are still on the same note.
         const { newVersionEntry, displayName, newNoteId } = result;
         if (newVersionEntry) {
             if (initialState.noteId !== newNoteId) {
@@ -91,7 +93,7 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => 
         dispatch(initializeView());
     } finally {
         if (!isPluginUnloading(container)) {
-            backgroundTaskManager.syncWatchMode(); // Reset the timer after any save attempt.
+            backgroundTaskManager.syncWatchMode();
             const finalState = getState();
             if (finalState.status === AppStatus.READY) {
                 dispatch(actions.setProcessing(false));
@@ -102,9 +104,14 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => 
 
 export const updateVersionDetails = (versionId: string, name: string): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
-    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
+    if (state.isRenaming) {
+        uiService.showNotice("Cannot edit version while database is being renamed.");
+        return;
+    }
+
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
 
     if (state.status !== AppStatus.READY) {
         return;
@@ -115,7 +122,6 @@ export const updateVersionDetails = (versionId: string, name: string): AppThunk 
         return;
     }
 
-    // Optimistic UI update
     const version_name = name.trim();
     dispatch(actions.updateVersionDetailsInState({ versionId, name: version_name }));
 
@@ -124,7 +130,6 @@ export const updateVersionDetails = (versionId: string, name: string): AppThunk 
     } catch (error) {
         console.error(`VC: Failed to save name update for version ${versionId}. Reverting UI.`, error);
         uiService.showNotice("VC: Error, could not save version details. Reverting changes.", 5000);
-        // On failure, reload history to revert the optimistic update
         if (!isPluginUnloading(container)) {
             dispatch(loadHistoryForNoteId(file, noteId));
         }
@@ -161,12 +166,17 @@ export const requestRestore = (version: VersionHistoryEntry): AppThunk => (dispa
 
 export const restoreVersion = (versionId: string): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
+    const uiService = container.get<UIService>(TYPES.UIService);
+    const initialState = getState();
+    if (initialState.isRenaming) {
+        uiService.showNotice("Cannot restore version while database is being renamed.");
+        return;
+    }
+
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);
-    const uiService = container.get<UIService>(TYPES.UIService);
     const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
     
-    const initialState = getState();
     if (initialState.status !== AppStatus.READY) return;
 
     const initialFileFromState = initialState.file;
@@ -189,11 +199,9 @@ export const restoreVersion = (versionId: string): AppThunk => async (dispatch, 
 
         await versionManager.saveNewVersionForFile(liveFile, `Backup before restoring V${versionId.substring(0,6)}...`, { force: true });
 
-        // Re-validate state after the backup save operation.
         const stateAfterBackup = getState();
         if (isPluginUnloading(container) || stateAfterBackup.status !== AppStatus.READY || stateAfterBackup.noteId !== initialNoteIdFromState) {
             uiService.showNotice(`Restore cancelled because the active note changed during backup.`, 5000);
-            // Re-initialize to the new context to avoid inconsistent state.
             if (!isPluginUnloading(container)) {
                 dispatch(initializeView());
             }
@@ -228,7 +236,6 @@ export const requestDelete = (version: VersionHistoryEntry): AppThunk => (dispat
         const { file, history } = state;
         if (!file) return;
 
-        // Explicit null-safe check for history array
         const firstVersion = history.length > 0 ? history[0] : null;
         const isLastVersion = history.length === 1 && firstVersion && firstVersion.id === version.id;
         
@@ -249,12 +256,17 @@ export const requestDelete = (version: VersionHistoryEntry): AppThunk => (dispat
 
 export const deleteVersion = (versionId: string): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
+    const uiService = container.get<UIService>(TYPES.UIService);
+    const initialState = getState();
+    if (initialState.isRenaming) {
+        uiService.showNotice("Cannot delete version while database is being renamed.");
+        return;
+    }
+
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);
-    const uiService = container.get<UIService>(TYPES.UIService);
     const app = container.get<App>(TYPES.App);
 
-    const initialState = getState();
     if (initialState.status !== AppStatus.READY) return;
 
     const initialFileFromState = initialState.file;
@@ -275,20 +287,16 @@ export const deleteVersion = (versionId: string): AppThunk => async (dispatch, g
             }
         }
 
-        // FIX: Explicit null-safe check for history array
         const firstVersion = initialHistory.length > 0 ? initialHistory[0] : null;
         const wasLastVersion = initialHistory.length === 1 && firstVersion && firstVersion.id === versionId;
 
         const success = await versionManager.deleteVersion(initialNoteIdFromState, versionId);
 
-        // Re-validate state after the delete operation.
         const stateAfterDelete = getState();
         if (isPluginUnloading(container) || stateAfterDelete.status !== AppStatus.READY || stateAfterDelete.noteId !== initialNoteIdFromState) {
             if (success) {
                 uiService.showNotice(`Version deleted for "${initialFileFromState.basename}" in the background.`, 4000);
             }
-            // The context has changed, so we don't need to update the UI for the old note.
-            // The new note's UI is already correct. Just abort.
             return;
         }
 
@@ -320,7 +328,6 @@ export const requestDeleteAll = (): AppThunk => (dispatch, getState, container) 
         const { file } = state;
         if (!file) return;
 
-        // Create explicit variable to satisfy TypeScript
         const basename = file.basename;
         dispatch(actions.openPanel({
             type: 'confirmation',
@@ -333,11 +340,16 @@ export const requestDeleteAll = (): AppThunk => (dispatch, getState, container) 
 
 export const deleteAllVersions = (): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
-    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const uiService = container.get<UIService>(TYPES.UIService);
+    const initialState = getState();
+    if (initialState.isRenaming) {
+        uiService.showNotice("Cannot delete history while database is being renamed.");
+        return;
+    }
+
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const app = container.get<App>(TYPES.App);
 
-    const initialState = getState();
     if (initialState.status !== AppStatus.READY) return;
 
     const initialFileFromState = initialState.file;
@@ -350,14 +362,10 @@ export const deleteAllVersions = (): AppThunk => async (dispatch, getState, cont
     try {
         const success = await versionManager.deleteAllVersions(initialNoteIdFromState);
 
-        // Re-validate state after the delete operation.
-        // Check if the view is still on the same file. After this operation, the noteId will be gone,
-        // so checking the file path is the only reliable way.
         if (isPluginUnloading(container) || getState().file?.path !== initialFileFromState.path) {
             if (success) {
                 uiService.showNotice(`All versions for "${initialFileFromState.basename}" have been deleted in the background.`, 5000);
             }
-            // Abort UI update for the wrong note.
             return;
         }
 
@@ -382,18 +390,18 @@ export const deleteAllVersions = (): AppThunk => async (dispatch, getState, cont
  */
 export const performAutoSave = (file: TFile): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
+    const state = getState();
+    if (state.isRenaming) {
+        return; // Silently ignore auto-saves during rename
+    }
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
 
-    // The saveNewVersionForFile is already robust, queued, and handles duplicate content checks.
     const result = await versionManager.saveNewVersionForFile(file, 'Auto-save', { force: false });
   
-    // If the save was successful and this is the active note in the VC panel, update the UI.
     if (result.status === 'saved' && result.newVersionEntry) {
-        const state = getState();
-        // Check if the UI needs updating. It only should if the user is looking at the panel for this file.
-        if (state.status === AppStatus.READY && state.file?.path === file.path) {
-            // If the note didn't have an ID in the state before (first version), update it.
-            if (state.noteId !== result.newNoteId) {
+        const currentState = getState();
+        if (currentState.status === AppStatus.READY && currentState.file?.path === file.path) {
+            if (currentState.noteId !== result.newNoteId) {
                 dispatch(actions.updateNoteIdInState({ noteId: result.newNoteId }));
             }
             dispatch(actions.addVersionSuccess({ newVersion: result.newVersionEntry }));
@@ -411,12 +419,9 @@ export const handleVaultSave = (file: TFile): AppThunk => async (dispatch, _getS
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
     const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
   
-    // Find noteId from frontmatter first, then manifest.
     const noteId = await noteManager.getNoteId(file) ?? await manifestManager.getNoteIdByPath(file.path);
-    // If the note is not versioned at all, there's nothing to do.
     if (!noteId) return;
   
-    // Determine the effective settings for this specific note, falling back to defaults.
     let effectiveSettings = { ...DEFAULT_SETTINGS };
     try {
         const noteManifest = await manifestManager.loadNoteManifest(noteId);
@@ -424,13 +429,11 @@ export const handleVaultSave = (file: TFile): AppThunk => async (dispatch, _getS
             effectiveSettings = { ...effectiveSettings, ...noteManifest.settings };
         }
     } catch (e) {
-        // Manifest might not exist yet if this is the first interaction after getting a vc-id.
-        // This is a normal condition; we'll simply use the default settings.
+        // Manifest might not exist yet. Use default settings.
     }
   
     const debouncerInfo = plugin.autoSaveDebouncers.get(file.path);
 
-    // If auto-save is disabled for this note, ensure any lingering debouncer is cancelled and removed.
     if (!effectiveSettings.autoSaveOnSave) {
         if (debouncerInfo) {
             debouncerInfo.debouncer.cancel();
@@ -439,20 +442,15 @@ export const handleVaultSave = (file: TFile): AppThunk => async (dispatch, _getS
         return;
     }
     
-    // Auto-save is enabled. Get or create a debouncer with the correct interval.
     const intervalMs = (effectiveSettings.autoSaveOnSaveInterval || 2) * 1000;
 
-    // If a correct debouncer already exists, just trigger it.
     if (debouncerInfo && debouncerInfo.interval === intervalMs) {
         debouncerInfo.debouncer(file);
     } else {
-        // Otherwise, the debouncer is missing or its interval is stale. Re-create it.
-        // Cancel the old one if it exists to prevent it from firing.
         debouncerInfo?.debouncer.cancel();
 
         const newDebouncerFunc = debounce(
             (f: TFile) => {
-                // The debounced function dispatches the thunk that performs the actual save.
                 dispatch(performAutoSave(f));
             },
             intervalMs
@@ -460,7 +458,6 @@ export const handleVaultSave = (file: TFile): AppThunk => async (dispatch, _getS
 
         plugin.autoSaveDebouncers.set(file.path, { debouncer: newDebouncerFunc, interval: intervalMs });
         
-        // Trigger the newly created debouncer.
         newDebouncerFunc(file);
     }
 };

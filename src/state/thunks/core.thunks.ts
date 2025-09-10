@@ -19,19 +19,13 @@ import type VersionControlPlugin from '../../main';
  * Thunks related to the core application lifecycle, such as view initialization and history loading.
  */
 
-/**
- * Calculates the effective settings for a given note (or global if no note) and applies them to the state.
- * This thunk ONLY loads settings; it does not trigger side effects like syncing background tasks.
- * @param noteId The ID of the note, or null to apply global/default settings.
- */
 const loadEffectiveSettingsForNote = (noteId: string | null): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
 
-    // 1. Start with the hardcoded defaults.
-    let effectiveSettings: VersionControlSettings = { ...DEFAULT_SETTINGS };
+    let effectiveSettings: VersionControlSettings = { ...plugin.settings };
 
-    // 2. If a note is active, layer its per-note settings on top.
     if (noteId) {
         try {
             const noteManifest = await manifestManager.loadNoteManifest(noteId);
@@ -43,7 +37,6 @@ const loadEffectiveSettingsForNote = (noteId: string | null): AppThunk => async 
         }
     }
 
-    // 3. Only dispatch if settings have actually changed to avoid unnecessary re-renders.
     if (JSON.stringify(getState().settings) !== JSON.stringify(effectiveSettings)) {
         dispatch(actions.updateSettings(effectiveSettings));
     }
@@ -57,13 +50,9 @@ export const initializeView = (leaf?: WorkspaceLeaf | null): AppThunk => async (
 
     try {
         let targetLeaf: WorkspaceLeaf | null;
-        // If a leaf is explicitly provided (e.g., from an event), use it.
-        // This is the source of truth when handling leaf-change events.
         if (leaf !== undefined) {
             targetLeaf = leaf;
         } else {
-            // Otherwise, determine the active leaf using the recommended, safer API.
-            // This is for calls that need to initialize based on the current app state.
             const activeMarkdownView = app.workspace.getActiveViewOfType(MarkdownView);
             targetLeaf = activeMarkdownView ? activeMarkdownView.leaf : null;
         }
@@ -72,20 +61,15 @@ export const initializeView = (leaf?: WorkspaceLeaf | null): AppThunk => async (
         
         dispatch(actions.initializeView(activeNoteInfo));
 
-        // If the note was identified by the manifest, it means it's missing the frontmatter key.
-        // We should write it back to the file to self-heal.
         if (activeNoteInfo.source === 'manifest' && activeNoteInfo.file && activeNoteInfo.noteId) {
             dispatch(reconcileNoteId(activeNoteInfo.file, activeNoteInfo.noteId));
         }
         
-        // Load the correct settings for the current context (note or no note).
         dispatch(loadEffectiveSettingsForNote(activeNoteInfo.noteId));
 
-        // If a file is active, proceed to load its history. This will also trigger the watch mode sync.
         if (activeNoteInfo.file) {
             dispatch(loadHistory(activeNoteInfo.file));
         } else {
-            // If no file is active, we still need to sync the watch mode to ensure it's off.
             const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
             backgroundTaskManager.syncWatchMode();
         }
@@ -132,8 +116,6 @@ export const loadHistory = (file: TFile): AppThunk => async (dispatch, _getState
         const history = noteId ? await versionManager.getVersionHistory(noteId) : [];
         dispatch(actions.historyLoadedSuccess({ file, noteId, history }));
 
-        // After history is loaded and state is READY, sync the watch mode interval.
-        // This is the correct place to call it.
         backgroundTaskManager.syncWatchMode();
 
     } catch (error) {
@@ -156,7 +138,6 @@ export const loadHistoryForNoteId = (file: TFile, noteId: string): AppThunk => a
         const history = await versionManager.getVersionHistory(noteId);
         dispatch(actions.historyLoadedSuccess({ file, noteId, history }));
 
-        // Also call it here for consistency after state becomes READY.
         backgroundTaskManager.syncWatchMode();
     } catch (error) {
         console.error(`Version Control: Failed to load version history for note ID "${noteId}" ("${file.path}").`, error);
@@ -212,7 +193,6 @@ export const handleFileRename = (file: TFile, oldPath: string): AppThunk => asyn
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
     
-    // Clean up any debouncer associated with the old file path to prevent leaks.
     const debouncerInfo = plugin.autoSaveDebouncers.get(oldPath);
     if (debouncerInfo) {
         debouncerInfo.debouncer.cancel();
@@ -236,7 +216,6 @@ export const handleFileDelete = (file: TFile): AppThunk => async (dispatch, getS
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
 
-    // Clean up any debouncer associated with the deleted file path to prevent leaks.
     const debouncerInfo = plugin.autoSaveDebouncers.get(file.path);
     if (debouncerInfo) {
         debouncerInfo.debouncer.cancel();
@@ -254,10 +233,16 @@ export const handleFileDelete = (file: TFile): AppThunk => async (dispatch, getS
     }
 };
 
-export const cleanupOrphanedVersions = (): AppThunk => async (_dispatch, _getState, container) => {
+export const cleanupOrphanedVersions = (): AppThunk => async (_dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
-    const cleanupManager = container.get<CleanupManager>(TYPES.CleanupManager);
+    const state = getState();
     const uiService = container.get<UIService>(TYPES.UIService);
+    if (state.isRenaming) {
+        uiService.showNotice("Cannot clean up orphans while database is being renamed.");
+        return;
+    }
+
+    const cleanupManager = container.get<CleanupManager>(TYPES.CleanupManager);
 
     try {
         const result = await cleanupManager.cleanupOrphanedVersions();

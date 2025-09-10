@@ -43,10 +43,11 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
     };
     const targets: DiffTarget[] = [currentStateTarget, ...otherVersions];
 
-    const selectedTarget = await uiService.promptForVersion(targets);
-    if (!selectedTarget) {
+    const result = await uiService.promptForVersion(targets);
+    if (!result) {
         return; // User cancelled
     }
+    const { target: selectedTarget, event } = result;
 
     // Re-validate state after user interaction
     const stateAfterPrompt = getState();
@@ -67,7 +68,13 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
             callback: () => dispatch(generateAndShowDiff(version1, selectedTarget, 'tab'))
         }
     ];
-    uiService.showActionMenu(menuOptions);
+    
+    // FIX: Pass the mouse event to `showActionMenu`. This allows the menu to be
+    // positioned at the cursor and, crucially, allows Obsidian's menu handler
+    // to consume the event, preventing it from propagating and immediately
+    // closing the menu it just opened.
+    const mouseEvent = event instanceof MouseEvent ? event : undefined;
+    uiService.showActionMenu(menuOptions, mouseEvent);
 };
 
 export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: DiffTarget, mode: 'panel' | 'tab'): AppThunk => async (dispatch, getState, container) => {
