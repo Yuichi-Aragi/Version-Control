@@ -3,10 +3,11 @@ import type { VersionControlSettings } from "./types";
 export const VIEW_TYPE_VERSION_CONTROL = "version-control-view";
 export const VIEW_TYPE_VERSION_PREVIEW = "version-preview-view";
 export const VIEW_TYPE_VERSION_DIFF = "version-diff-view";
-export const DB_PATH = ".versiondb";
+export const DEFAULT_DB_PATH = ".versiondb";
 export const NOTE_FRONTMATTER_KEY = "vc-id";
 
 export const DEFAULT_SETTINGS: VersionControlSettings = {
+  databasePath: DEFAULT_DB_PATH,
   maxVersionsPerNote: 50,
   autoCleanupOldVersions: false,
   autoCleanupDays: 60,

@@ -2,6 +2,7 @@ import type { TFile } from "obsidian";
 import type { Change } from "diff";
 
 export interface VersionControlSettings {
+  databasePath: string;
   maxVersionsPerNote: number;
   autoCleanupOldVersions: boolean;
   autoCleanupDays: number;
@@ -44,7 +45,7 @@ export interface NoteManifest {
   createdAt: string;
   lastModified: string;
   // Per-note settings can override any global setting.
-  settings?: Partial<VersionControlSettings>;
+  settings?: Partial<Omit<VersionControlSettings, 'databasePath' | 'centralManifest'>>;
 }
 
 export interface VersionData {

@@ -25,6 +25,12 @@ export interface DebouncerInfo {
     interval: number; // in milliseconds
 }
 
+// A type representing the data structure saved to data.json
+interface SavedData {
+    databasePath?: string;
+    centralManifest?: CentralManifest;
+}
+
 export default class VersionControlPlugin extends Plugin {
     private container!: Container;
     private store!: AppStore;
@@ -38,8 +44,8 @@ export default class VersionControlPlugin extends Plugin {
 	override async onload() {
         this.isUnloading = false; // Reset the guard flag on every load
 		try {
-			// Load settings. The central manifest is loaded from data.json,
-            // and other settings are taken from defaults.
+			// Load settings. This now handles migrating from the old manifest-only
+            // format to the new settings object format.
 			await this.loadSettings();
 
             // configureServices will use the plugin instance, which now holds the loaded settings.
@@ -58,8 +64,8 @@ export default class VersionControlPlugin extends Plugin {
             this.addChild(diffManager);
             this.addChild(this.backgroundTaskManager);
 
-			// This now initializes the .versiondb folder structure and loads the
-            // central manifest from the plugin settings into the repository's cache.
+			// This now initializes the database folder structure (at the configured path)
+            // and loads the central manifest from the plugin settings into the repository's cache.
 			await manifestManager.initializeDatabase();
 
 			registerViews(this, this.store);
@@ -138,38 +144,37 @@ export default class VersionControlPlugin extends Plugin {
 	}
 
     async loadSettings() {
-        const data = await this.loadData();
+        const data: SavedData | CentralManifest = await this.loadData() || {};
 
-        // Check if the loaded data is the old settings format or the new manifest-only format.
-        // A simple check is to see if a non-manifest setting like `maxVersionsPerNote` exists at the top level.
-        const isOldFormat = data && data.hasOwnProperty('maxVersionsPerNote');
-        
-        let manifest: CentralManifest | null;
-        if (isOldFormat) {
-            // It's the old format, extract the manifest from it.
-            manifest = data.centralManifest || null;
-        } else {
-            // It's the new format (or null), so the data is the manifest itself.
-            manifest = data as CentralManifest | null;
-        }
+        // This logic handles migrating from the previous manifest-only format in data.json
+        // to the new format which is a settings object containing the manifest.
+        const isNewFormat = data.hasOwnProperty('centralManifest');
 
-        // Construct the full settings object for runtime use.
+        const manifest = isNewFormat ? (data as SavedData).centralManifest : (data as CentralManifest);
+        const dbPath = isNewFormat ? (data as SavedData).databasePath : undefined;
+
         this.settings = {
             ...DEFAULT_SETTINGS,
-            // Deep merge the loaded manifest with the default to ensure all properties are present.
+            // Load dbPath if it exists, otherwise the default is used.
+            ...(dbPath && { databasePath: dbPath }),
+            // Deep merge the loaded manifest to ensure all properties are present.
             centralManifest: {
                 ...DEFAULT_SETTINGS.centralManifest,
                 ...(manifest || {}),
             },
         };
 
-        // Save back in the new, manifest-only format. This completes the migration on first load.
+        // Save back immediately to ensure the data on disk is in the latest format.
         await this.saveSettings();
     }
 
     async saveSettings() {
-        // Only save the central manifest to data.json. All other settings are ephemeral
-        // or stored in per-note manifests.
-        await this.saveData(this.settings.centralManifest);
+        // Only save global settings and the central manifest to data.json.
+        // Per-note settings are stored in their respective manifests.
+        const dataToSave: SavedData = {
+            databasePath: this.settings.databasePath,
+            centralManifest: this.settings.centralManifest,
+        };
+        await this.saveData(dataToSave);
     }
 }
