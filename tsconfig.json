@@ -1,5 +1,5 @@
 {
-  "compilerOptions": {    
+  "compilerOptions": {
     "strict": true,
     "noImplicitAny": true,
     "strictNullChecks": true,
@@ -12,38 +12,47 @@
     "noPropertyAccessFromIndexSignature": true,
     "exactOptionalPropertyTypes": true,
     "noImplicitOverride": true,
-    
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noEmitOnError": false,
+
     "module": "ESNext",
     "moduleResolution": "bundler",
     "verbatimModuleSyntax": true,
     "resolveJsonModule": true,
-    
+
+    "target": "ES2022",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "jsx": "react-jsx",
+
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "useDefineForClassFields": true,
+    "preserveConstEnums": true,
+
     "noEmit": false,
     "declaration": false,
     "sourceMap": false,
     "removeComments": true,
     "importHelpers": true,
-    "noEmitOnError": true,
-    "preserveConstEnums": true,
 
     "allowJs": false,
     "checkJs": false,
 
     "isolatedModules": true,
-    "allowSyntheticDefaultImports": false,
-    "esModuleInterop": false,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
 
-    "target": "ES2022",
-    "lib": ["DOM", "DOM.Iterable", "ES2022"],
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
-    "useDefineForClassFields": true,
+    "moduleDetection": "force",
 
     "skipLibCheck": true,
 
     "baseUrl": ".",
-    "incremental": true
+    "incremental": true,
+    "tsBuildInfoFile": "./.tsbuildinfo"
   },
   "include": ["**/*.ts", "**/*.tsx"],
   "exclude": ["node_modules", "dist", "build", "**/*.js", "**/*.jsx"]
