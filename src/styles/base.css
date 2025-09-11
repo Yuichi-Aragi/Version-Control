@@ -80,6 +80,7 @@
 .v-version-content-preview .table-wrapper,
 .v-preview-panel-content,
 .v-diff-panel-content,
+.v-action-panel-list,
 .v-inline-panel {
     /* For Firefox */
     scrollbar-width: none;
@@ -98,6 +99,7 @@
 .v-version-content-preview .table-wrapper::-webkit-scrollbar,
 .v-preview-panel-content::-webkit-scrollbar,
 .v-diff-panel-content::-webkit-scrollbar,
+.v-action-panel-list::-webkit-scrollbar,
 .v-inline-panel::-webkit-scrollbar {
     /* For WebKit browsers (Chrome, Safari, Electron) */
     display: none;
