@@ -20,6 +20,16 @@ export enum AppStatus {
     ERROR = 'ERROR',
 }
 
+/**
+ * @enum UIInteractionStatus
+ * Defines the state of a multi-step UI workflow to prevent race conditions.
+ */
+export enum UIInteractionStatus {
+    IDLE = 'IDLE',
+    AWAITING_VERSION_CHOICE = 'AWAITING_VERSION_CHOICE',
+    AWAITING_DIFF_ACTION = 'AWAITING_DIFF_ACTION',
+}
+
 // --- Panel States (Nested within AppState) ---
 
 export interface ConfirmationPanel {
@@ -58,6 +68,12 @@ export interface SortOrder {
     direction: SortDirection;
 }
 
+export interface UIInteractionState {
+    status: UIInteractionStatus;
+    /** A unique ID for the current interaction to prevent stale callbacks. */
+    interactionId: string | null;
+}
+
 export interface AppState {
     status: AppStatus;
     settings: VersionControlSettings;
@@ -86,6 +102,9 @@ export interface AppState {
 
     // Watch Mode properties
     watchModeCountdown: number | null;
+
+    // Multi-step UI workflow state
+    uiInteraction: UIInteractionState;
 }
 
 export const getInitialState = (loadedSettings: VersionControlSettings): AppState => {
@@ -108,5 +127,9 @@ export const getInitialState = (loadedSettings: VersionControlSettings): AppStat
         sortOrder: defaultSortOrder,
         diffRequest: null,
         watchModeCountdown: null,
+        uiInteraction: {
+            status: UIInteractionStatus.IDLE,
+            interactionId: null,
+        },
     };
 };
