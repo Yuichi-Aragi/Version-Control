@@ -49,6 +49,14 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
     }
     const { target: selectedTarget, event } = result;
 
+    // Immediately consume the event from the suggester modal to prevent it from
+    // propagating and closing the context menu we are about to open. This is
+    // a critical step for ensuring predictable UI behavior on desktop platforms.
+    if (event instanceof MouseEvent) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
     // Re-validate state after user interaction
     const stateAfterPrompt = getState();
     if (stateAfterPrompt.status !== AppStatus.READY || stateAfterPrompt.noteId !== state.noteId) {
@@ -69,10 +77,10 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
         }
     ];
     
-    // FIX: Pass the mouse event to `showActionMenu`. This allows the menu to be
-    // positioned at the cursor and, crucially, allows Obsidian's menu handler
-    // to consume the event, preventing it from propagating and immediately
-    // closing the menu it just opened.
+    // Pass the original mouse event to position the menu correctly.
+    // Even though we've stopped its propagation, the event object still
+    // contains the necessary coordinate data for positioning. Obsidian's
+    // menu handler is robust enough to handle an already-stopped event.
     const mouseEvent = event instanceof MouseEvent ? event : undefined;
     uiService.showActionMenu(menuOptions, mouseEvent);
 };
