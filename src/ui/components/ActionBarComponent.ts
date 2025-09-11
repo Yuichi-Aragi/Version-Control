@@ -139,6 +139,7 @@ export class ActionBarComponent extends Component {
         setIcon(this.filterButton, 'filter');
         this.registerDomEvent(this.filterButton, 'mousedown', (event: MouseEvent) => {
             event.preventDefault();
+            event.stopPropagation(); // Prevent event from bubbling and interfering with the menu
             this.store.dispatch(thunks.showSortMenu(event));
         });
     }
