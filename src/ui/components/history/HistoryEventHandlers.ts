@@ -28,7 +28,7 @@ export function handleEntryContextMenu(version: VersionHistoryEntry, event: Mous
     }
     event.preventDefault();
     event.stopPropagation();
-    store.dispatch(thunks.showVersionContextMenu(version, event));
+    store.dispatch(thunks.showVersionContextMenu(version));
 }
 
 /**
@@ -41,18 +41,7 @@ export function handleEntryKeyDown(version: VersionHistoryEntry, event: Keyboard
     if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
         event.stopPropagation();
-        // On keyboard activation, open the full context menu for accessibility.
-        let mouseEvent: MouseEvent;
-        if (event.target instanceof HTMLElement) { 
-            const rect = event.target.getBoundingClientRect();
-            mouseEvent = new MouseEvent("contextmenu", {
-                bubbles: true, cancelable: true,
-                clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2,
-            });
-        } else {
-            // Fallback if target is not an element
-            mouseEvent = new MouseEvent("contextmenu");
-        }
-        store.dispatch(thunks.showVersionContextMenu(version, mouseEvent));
+        // On keyboard activation, open the action panel for accessibility.
+        store.dispatch(thunks.showVersionContextMenu(version));
     }
 }
