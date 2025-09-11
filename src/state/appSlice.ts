@@ -3,7 +3,7 @@ import type { PayloadAction } from '@reduxjs/toolkit';
 import { TFile } from 'obsidian';
 import type { Change } from 'diff';
 import { find } from 'lodash-es';
-import { AppStatus, getInitialState } from './state';
+import { AppStatus, getInitialState, UIInteractionStatus } from './state';
 import type { AppState, PanelState, SortOrder } from './state';
 import type { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, ActiveNoteInfo } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
@@ -193,6 +193,25 @@ export const appSlice = createSlice({
         setWatchModeCountdown(state, action: PayloadAction<number | null>) {
             if (state.status === AppStatus.READY) {
                 state.watchModeCountdown = action.payload;
+            }
+        },
+
+        // --- UI Interaction State Machine Actions ---
+        startUIInteraction(state, action: PayloadAction<{ status: UIInteractionStatus; interactionId: string }>) {
+            state.uiInteraction.status = action.payload.status;
+            state.uiInteraction.interactionId = action.payload.interactionId;
+        },
+        setUIInteractionStatus(state, action: PayloadAction<{ status: UIInteractionStatus; interactionId: string }>) {
+            // Only update if the interaction ID matches, preventing stale updates.
+            if (state.uiInteraction.interactionId === action.payload.interactionId) {
+                state.uiInteraction.status = action.payload.status;
+            }
+        },
+        endUIInteraction(state, action: PayloadAction<{ interactionId: string }>) {
+            // Only end the interaction if the ID matches.
+            if (state.uiInteraction.interactionId === action.payload.interactionId) {
+                state.uiInteraction.status = UIInteractionStatus.IDLE;
+                state.uiInteraction.interactionId = null;
             }
         },
     },
