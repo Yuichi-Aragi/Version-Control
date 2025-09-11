@@ -2,6 +2,7 @@ import { ItemView, WorkspaceLeaf, App } from "obsidian";
 import { VIEW_TYPE_VERSION_CONTROL } from "../constants";
 import type { AppStore } from "../state/store";
 import { AppStatus, type AppState } from "../state/state";
+import { actions } from "../state/appSlice";
 
 import { PlaceholderComponent } from "./components/PlaceholderComponent";
 import { ActionBarComponent } from "./components/ActionBarComponent";
@@ -74,10 +75,16 @@ export class VersionControlView extends ItemView {
         if (this.unsubscribeFromStore) {
             this.unsubscribeFromStore();
         }
-        // Components are now children of this view, and they will be unloaded automatically
-        // by the base Component's `unload` method. Their own `onunload` methods
-        // will handle removing their DOM elements. We should not call `empty()` here
-        // as it can cause errors if child components try to access their DOM during unload.
+
+        // Dispatch actions to clean up UI-specific state that should not persist
+        // when the view is closed. This prevents stale panels, search states,
+        // or diff indicators from appearing if the view is reopened for the same note.
+        this.store.dispatch(actions.closePanel());
+        this.store.dispatch(actions.clearDiffRequest());
+        this.store.dispatch(actions.toggleSearch(false));
+
+        // Child components are unloaded automatically by the base Component's `unload` method.
+        // Their own `onunload` methods handle removing their DOM elements.
     }
 
     private initComponents() {
