@@ -216,7 +216,8 @@ export class HistoryEntryRenderer {
         setIcon(viewBtn, "eye");
         if (!isPanelOpen) {
             viewBtn.onclick = (e: MouseEvent) => {
-                e.stopPropagation(); 
+                e.preventDefault(); // Prevent any default button action
+                e.stopPropagation(); // Stop the click from propagating to the entry itself
                 this.store.dispatch(thunks.viewVersionInPanel(version));
             };
         }
@@ -229,7 +230,8 @@ export class HistoryEntryRenderer {
             setIcon(btn, actionConfig.icon);
             if (!isPanelOpen) {
                 btn.onclick = (e: MouseEvent) => {
-                    e.stopPropagation();
+                    e.preventDefault(); // Prevent any default button action
+                    e.stopPropagation(); // Stop the click from propagating to the entry itself
                     actionConfig.actionHandler(version, this.store);
                 };
             }
