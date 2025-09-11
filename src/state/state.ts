@@ -20,16 +20,6 @@ export enum AppStatus {
     ERROR = 'ERROR',
 }
 
-/**
- * @enum UIInteractionStatus
- * Defines the state of a multi-step UI workflow to prevent race conditions.
- */
-export enum UIInteractionStatus {
-    IDLE = 'IDLE',
-    AWAITING_VERSION_CHOICE = 'AWAITING_VERSION_CHOICE',
-    AWAITING_DIFF_ACTION = 'AWAITING_DIFF_ACTION',
-}
-
 // --- Panel States (Nested within AppState) ---
 
 export interface ConfirmationPanel {
@@ -56,7 +46,28 @@ export interface SettingsPanel {
     type: 'settings';
 }
 
-export type PanelState = ConfirmationPanel | PreviewPanel | DiffPanel | SettingsPanel | null;
+/** A generic item for the ActionPanel. */
+export interface ActionItem<T> {
+    id: string;
+    data: T; // The actual data associated with the item
+    text: string;
+    subtext?: string;
+    icon?: string;
+    /** Whether the item represents the currently active/selected state. */
+    isSelected?: boolean;
+}
+
+/** A generic panel for presenting a list of choices to the user. */
+export interface ActionPanel<T> {
+    type: 'action';
+    title: string;
+    items: ActionItem<T>[];
+    // FIX: This is a thunk creator that receives the chosen item's data payload and returns a thunk.
+    onChooseAction: (data: T) => AppThunk;
+    showFilter?: boolean; // Whether to show a filter/search input.
+}
+
+export type PanelState = ConfirmationPanel | PreviewPanel | DiffPanel | SettingsPanel | ActionPanel<any> | null;
 
 // --- Core Application State ---
 
@@ -66,12 +77,6 @@ export type SortDirection = 'asc' | 'desc';
 export interface SortOrder {
     property: SortProperty;
     direction: SortDirection;
-}
-
-export interface UIInteractionState {
-    status: UIInteractionStatus;
-    /** A unique ID for the current interaction to prevent stale callbacks. */
-    interactionId: string | null;
 }
 
 export interface AppState {
@@ -102,9 +107,6 @@ export interface AppState {
 
     // Watch Mode properties
     watchModeCountdown: number | null;
-
-    // Multi-step UI workflow state
-    uiInteraction: UIInteractionState;
 }
 
 export const getInitialState = (loadedSettings: VersionControlSettings): AppState => {
@@ -127,9 +129,5 @@ export const getInitialState = (loadedSettings: VersionControlSettings): AppStat
         sortOrder: defaultSortOrder,
         diffRequest: null,
         watchModeCountdown: null,
-        uiInteraction: {
-            status: UIInteractionStatus.IDLE,
-            interactionId: null,
-        },
     };
 };
