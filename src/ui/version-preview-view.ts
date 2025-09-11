@@ -66,7 +66,7 @@ export class VersionPreviewView extends ItemView {
                 this.currentDisplayState.content = newState.content;
                 // FIX: Coalesce a potentially undefined `name` to an empty string
                 // to prevent type errors and ensure consistent behavior.
-                this.currentDisplayState.version.name = newState.version.name || '';
+                this.currentDisplayState.version.name = newState.version.name ?? '';
             }
 
             if (this.tabContentEl) { 

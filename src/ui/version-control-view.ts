@@ -11,6 +11,7 @@ import { PreviewPanelComponent } from "./components/PreviewPanelComponent";
 import { DiffPanelComponent } from "./components/DiffPanelComponent";
 import { ConfirmationPanelComponent } from "./components/ConfirmationPanelComponent";
 import { ErrorDisplayComponent } from "./components/ErrorDisplayComponent";
+import { ActionPanelComponent } from "./components/ActionPanelComponent";
 
 export class VersionControlView extends ItemView {
     store: AppStore;
@@ -27,9 +28,11 @@ export class VersionControlView extends ItemView {
     private diffPanelComponent!: DiffPanelComponent;
     private confirmationPanelComponent!: ConfirmationPanelComponent;
     private errorDisplayComponent!: ErrorDisplayComponent;
+    private actionPanelComponent!: ActionPanelComponent;
 
     private mainContainer!: HTMLElement;
     private readyStateContainer!: HTMLElement;
+    private topContainer!: HTMLElement;
 
     constructor(leaf: WorkspaceLeaf, store: AppStore, app: App) {
         super(leaf);
@@ -50,6 +53,10 @@ export class VersionControlView extends ItemView {
         this.containerEl.addClass("version-control-view");
         this.contentEl.addClass("version-control-content");
         
+        // This container holds the action bar and settings panel, which are always at the top.
+        this.topContainer = this.contentEl.createDiv('v-top-container');
+        
+        // This container holds the main content that appears below the action bar.
         this.mainContainer = this.contentEl.createDiv("v-main");
 
         this.initComponents();
@@ -74,22 +81,23 @@ export class VersionControlView extends ItemView {
     }
 
     private initComponents() {
-        // Action bar is a direct child of mainContainer, initialized first.
-        this.actionBarComponent = this.addChild(new ActionBarComponent(this.mainContainer, this.store));
+        // Action bar and settings panel are in the top container.
+        this.actionBarComponent = this.addChild(new ActionBarComponent(this.topContainer, this.store));
+        this.settingsPanelComponent = this.addChild(new SettingsPanelComponent(this.topContainer, this.store));
         
+        // Placeholders and ready state are in the main container.
         this.placeholderComponent = this.addChild(new PlaceholderComponent(this.mainContainer));
-        this.errorDisplayComponent = this.addChild(new ErrorDisplayComponent(this.mainContainer, this.store, this.app));
+        this.errorDisplayComponent = this.addChild(new ErrorDisplayComponent(this.mainContainer, this.store));
         
-        // readyStateContainer now holds only the history list.
         this.readyStateContainer = this.mainContainer.createDiv('v-ready-state-container');
         
         this.historyListComponent = this.addChild(new HistoryListComponent(this.readyStateContainer, this.store));
         
-        // All panels are now children of mainContainer to overlay the ready state.
-        this.settingsPanelComponent = this.addChild(new SettingsPanelComponent(this.mainContainer, this.store));
-        this.previewPanelComponent = this.addChild(new PreviewPanelComponent(this.mainContainer, this.store, this.app));
-        this.diffPanelComponent = this.addChild(new DiffPanelComponent(this.mainContainer, this.store));
-        this.confirmationPanelComponent = this.addChild(new ConfirmationPanelComponent(this.mainContainer, this.store));
+        // Overlay panels are direct children of the content element to cover everything.
+        this.previewPanelComponent = this.addChild(new PreviewPanelComponent(this.contentEl, this.store, this.app));
+        this.diffPanelComponent = this.addChild(new DiffPanelComponent(this.contentEl, this.store));
+        this.confirmationPanelComponent = this.addChild(new ConfirmationPanelComponent(this.contentEl, this.store));
+        this.actionPanelComponent = this.addChild(new ActionPanelComponent(this.contentEl, this.store));
     }
 
     private render(state: AppState) {
@@ -99,11 +107,15 @@ export class VersionControlView extends ItemView {
         this.actionBarComponent.getContainer().hide();
         this.readyStateContainer.hide();
 
-        // An overlay that covers the action bar is considered a "full" overlay.
-        // The settings panel is a partial overlay and should not trigger this.
-        const isFullOverlayPanelVisible = state.panel && (state.panel.type === 'preview' || state.panel.type === 'diff' || state.panel.type === 'confirmation');
-        const isAppBusy = isFullOverlayPanelVisible || (state.status === AppStatus.READY && state.isProcessing);
-        this.contentEl.classList.toggle('is-overlay-active', isAppBusy);
+        // An overlay panel is any panel that is not null. This simplifies logic and
+        // ensures consistent behavior for all panel types.
+        const isOverlayPanelVisible = state.panel !== null;
+        
+        // The main content area is considered busy if an overlay is active OR if the app is processing.
+        // This class is used to disable pointer events on the action bar and history list, preventing click-through.
+        const isContentBusy = isOverlayPanelVisible || (state.status === AppStatus.READY && (state.isProcessing || state.isRenaming));
+        this.contentEl.classList.toggle('is-overlay-active', isContentBusy);
+        this.contentEl.classList.toggle('is-processing', state.isProcessing || state.isRenaming);
 
         switch (state.status) {
             case AppStatus.INITIALIZING:
@@ -122,7 +134,8 @@ export class VersionControlView extends ItemView {
                 break;
 
             case AppStatus.LOADING:
-                // In loading state, we show the container for the skeleton list
+                this.actionBarComponent.getContainer().show();
+                this.actionBarComponent.render(state);
                 this.readyStateContainer.show();
                 this.historyListComponent.renderAsLoading(state.settings); // Pass settings for accurate skeleton
                 // Ensure all overlay panels are hidden
@@ -130,22 +143,20 @@ export class VersionControlView extends ItemView {
                 this.previewPanelComponent.render(null, state);
                 this.diffPanelComponent.render(null);
                 this.confirmationPanelComponent.render(null);
+                this.actionPanelComponent.render(null);
                 break;
 
             case AppStatus.READY:
-                // Action bar is now always visible in READY state.
-                // Its interactivity is controlled by the `is-overlay-active` class on `contentEl`.
                 this.actionBarComponent.getContainer().show();
                 this.actionBarComponent.render(state);
 
-                if (state.history.length === 0) {
+                if (state.history.length === 0 && !state.noteId) {
                     // Active note, but no versions. Show a specific placeholder.
                     this.placeholderComponent.render("No versions saved yet.", "inbox");
                     this.placeholderComponent.getContainer().show();
                 } else {
                     // Active note with versions. Show the history list.
                     this.readyStateContainer.show();
-                    this.historyListComponent.getContainer().show();
                     this.historyListComponent.render(state);
                 }
                 
@@ -154,6 +165,7 @@ export class VersionControlView extends ItemView {
                 this.previewPanelComponent.render(state.panel?.type === 'preview' ? state.panel : null, state);
                 this.diffPanelComponent.render(state.panel?.type === 'diff' ? state.panel : null);
                 this.confirmationPanelComponent.render(state.panel?.type === 'confirmation' ? state.panel : null);
+                this.actionPanelComponent.render(state.panel?.type === 'action' ? state.panel : null);
                 break;
             
             default:
