@@ -2,7 +2,7 @@ import { App } from 'obsidian';
 import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
 import type { VersionHistoryEntry, DiffTarget } from '../../types';
-import { AppStatus } from '../state';
+import { AppStatus, UIInteractionStatus } from '../state';
 import { VIEW_TYPE_VERSION_DIFF } from '../../constants';
 import { UIService } from '../../services/ui-service';
 import { DiffManager } from '../../services/diff-manager';
@@ -18,71 +18,80 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
     const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
 
+    // 1. Acquire UI Lock: Check if another interaction is already in progress.
+    if (state.uiInteraction.status !== UIInteractionStatus.IDLE) {
+        uiService.showNotice("Another UI action is already in progress.", 3000);
+        return;
+    }
     if (state.status !== AppStatus.READY || !state.noteId || !state.file) {
         uiService.showNotice("Cannot start diff: view context has changed.", 3000);
         return;
     }
-    if (state.diffRequest?.status === 'generating') {
-        const v1Label = state.diffRequest.version1.name || `V${state.diffRequest.version1.versionNumber}`;
-        const v2Label = state.diffRequest.version2.name;
-        uiService.showNotice(`A diff between ${v1Label} and ${v2Label} is already being generated.`, 4000);
-        return;
-    }
 
-    const otherVersions = state.history.filter(v => v.id !== version1.id);
-    const currentStateTarget: DiffTarget = {
-        id: 'current',
-        name: 'Current note state',
-        timestamp: new Date().toISOString(),
-        notePath: state.file.path,
-        // FIX: Add missing properties to satisfy the DiffTarget type, which expects
-        // a structure similar to VersionHistoryEntry for all its variants.
-        noteId: state.noteId,
-        versionNumber: 0, // Placeholder for the current state, which has no version number.
-        size: state.file.stat.size,
-    };
-    const targets: DiffTarget[] = [currentStateTarget, ...otherVersions];
+    const interactionId = crypto.randomUUID();
+    dispatch(actions.startUIInteraction({ status: UIInteractionStatus.AWAITING_VERSION_CHOICE, interactionId }));
 
-    const result = await uiService.promptForVersion(targets);
-    if (!result) {
-        return; // User cancelled
-    }
-    const { target: selectedTarget, event } = result;
+    try {
+        const otherVersions = state.history.filter(v => v.id !== version1.id);
+        const currentStateTarget: DiffTarget = {
+            id: 'current',
+            name: 'Current note state',
+            timestamp: new Date().toISOString(),
+            notePath: state.file.path,
+            noteId: state.noteId,
+            versionNumber: 0,
+            size: state.file.stat.size,
+        };
+        const targets: DiffTarget[] = [currentStateTarget, ...otherVersions];
 
-    // Immediately consume the event from the suggester modal to prevent it from
-    // propagating and closing the context menu we are about to open. This is
-    // a critical step for ensuring predictable UI behavior on desktop platforms.
-    if (event instanceof MouseEvent) {
-        event.preventDefault();
-        event.stopPropagation();
-    }
+        // 2. Show the first prompt (suggester modal).
+        const result = await uiService.promptForVersion(targets);
 
-    // Re-validate state after user interaction
-    const stateAfterPrompt = getState();
-    if (stateAfterPrompt.status !== AppStatus.READY || stateAfterPrompt.noteId !== state.noteId) {
-        uiService.showNotice("Cannot start diff: view context has changed.", 3000);
-        return;
-    }
-
-    const menuOptions = [
-        {
-            title: "Show diff in panel",
-            icon: "sidebar-right",
-            callback: () => dispatch(generateAndShowDiff(version1, selectedTarget, 'panel'))
-        },
-        {
-            title: "Show diff in new tab",
-            icon: "file-diff",
-            callback: () => dispatch(generateAndShowDiff(version1, selectedTarget, 'tab'))
+        // 3. Validate state after prompt. If user cancelled, result is null.
+        if (!result || getState().uiInteraction.interactionId !== interactionId) {
+            // If cancelled or a new interaction has started, we just exit.
+            // The finally block will clean up the state.
+            return;
         }
-    ];
-    
-    // Pass the original mouse event to position the menu correctly.
-    // Even though we've stopped its propagation, the event object still
-    // contains the necessary coordinate data for positioning. Obsidian's
-    // menu handler is robust enough to handle an already-stopped event.
-    const mouseEvent = event instanceof MouseEvent ? event : undefined;
-    uiService.showActionMenu(menuOptions, mouseEvent);
+        const { target: selectedTarget, event } = result;
+
+        // Consume the event to prevent it from closing the next UI element.
+        if (event instanceof MouseEvent) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+
+        // 4. Transition the state machine to the next step.
+        dispatch(actions.setUIInteractionStatus({ status: UIInteractionStatus.AWAITING_DIFF_ACTION, interactionId }));
+
+        const menuOptions = [
+            {
+                title: "Show diff in panel",
+                icon: "sidebar-right",
+                callback: () => dispatch(generateAndShowDiff(version1, selectedTarget, 'panel'))
+            },
+            {
+                title: "Show diff in new tab",
+                icon: "file-diff",
+                callback: () => dispatch(generateAndShowDiff(version1, selectedTarget, 'tab'))
+            }
+        ];
+        
+        const mouseEvent = event instanceof MouseEvent ? event : undefined;
+        // 5. Show the second prompt (context menu).
+        uiService.showActionMenu(menuOptions, mouseEvent);
+
+    } catch (error) {
+        console.error("Version Control: Error during diff request workflow.", error);
+        uiService.showNotice("An error occurred while preparing the diff.", 5000);
+    } finally {
+        // 6. Release the UI Lock, but defer it slightly.
+        // This ensures the lock is held until after the context menu has a chance to fully open,
+        // preventing any immediate, conflicting UI actions.
+        setTimeout(() => {
+            dispatch(actions.endUIInteraction({ interactionId }));
+        }, 100);
+    }
 };
 
 export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: DiffTarget, mode: 'panel' | 'tab'): AppThunk => async (dispatch, getState, container) => {
@@ -100,7 +109,6 @@ export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: Dif
         try {
             const diffChanges = await diffManager.generateDiff(noteId, version1, version2);
 
-            // Re-validate state after the potentially long diff generation
             const stateAfterGen = getState();
             if (isPluginUnloading(container) || stateAfterGen.status !== AppStatus.READY || stateAfterGen.noteId !== noteId || !stateAfterGen.file) {
                 uiService.showNotice("View context changed while generating diff. Tab opening cancelled.", 4000);
@@ -115,8 +123,8 @@ export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: Dif
                     version1,
                     version2,
                     diffChanges,
-                    noteName: stateAfterGen.file.basename, // Use fresh data
-                    notePath: stateAfterGen.file.path,     // Use fresh data
+                    noteName: stateAfterGen.file.basename,
+                    notePath: stateAfterGen.file.path,
                 }
             });
             app.workspace.revealLeaf(leaf);
@@ -172,7 +180,6 @@ export const viewReadyDiff = (): AppThunk => (dispatch, getState, container) => 
 
     const { version1, version2, diffChanges } = diffRequest;
 
-    // Directly open the panel, as this was the implied action for the indicator.
     dispatch(actions.openPanel({ type: 'diff', version1, version2, diffChanges }));
     dispatch(actions.clearDiffRequest());
 };
