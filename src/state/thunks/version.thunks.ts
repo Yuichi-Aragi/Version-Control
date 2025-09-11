@@ -144,6 +144,9 @@ export const requestEditVersion = (version: VersionHistoryEntry): AppThunk => (d
     if (isPluginUnloading(container)) return;
     const state = getState();
     if (state.status !== AppStatus.READY) return;
+
+    // This action does not open a new panel, so we must explicitly close the current one first.
+    dispatch(actions.closePanel());
     dispatch(actions.startVersionEditing({ versionId: version.id }));
 };
 
@@ -348,7 +351,6 @@ export const deleteAllVersions = (): AppThunk => async (dispatch, getState, cont
     }
 
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
-    const app = container.get<App>(TYPES.App);
 
     if (initialState.status !== AppStatus.READY) return;
 

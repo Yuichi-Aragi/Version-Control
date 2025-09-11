@@ -1,9 +1,9 @@
-import { App, normalizePath } from 'obsidian';
+import { App, normalizePath, TFolder } from 'obsidian';
 import { produce } from 'immer';
 import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
 import type { VersionControlSettings, VersionHistoryEntry, VersionData } from '../../types';
-import { AppStatus } from '../state';
+import { AppStatus, type ActionItem } from '../state';
 import { customSanitizeFileName } from '../../utils/file';
 import { UIService } from '../../services/ui-service';
 import { ManifestManager } from '../../core/manifest-manager';
@@ -170,7 +170,9 @@ export const renameDatabasePath = (newPathRaw: string): AppThunk => async (dispa
             }
         }
     } finally {
-        dispatch(actions.setRenaming(false));
+        if (!isPluginUnloading(container)) {
+            dispatch(actions.setRenaming(false));
+        }
     }
 };
 
@@ -190,13 +192,24 @@ export const requestExportAllVersions = (): AppThunk => (dispatch, getState, con
     const noteId = state.noteId;
 
     const formats: Array<'md' | 'json' | 'ndjson' | 'txt'> = ['md', 'json', 'ndjson', 'txt'];
-    const menuOptions = formats.map(format => ({
-        title: `Export all versions as ${format.toUpperCase()}`,
+    const items: ActionItem<'md' | 'json' | 'ndjson' | 'txt'>[] = formats.map(format => ({
+        id: format,
+        data: format,
+        text: `Export all versions as ${format.toUpperCase()}`,
         icon: { md: "file-text", json: "braces", ndjson: "list-ordered", txt: "file-code" }[format],
-        callback: () => dispatch(exportAllVersions(noteId, format))
     }));
 
-    uiService.showActionMenu(menuOptions);
+    const onChooseAction = (format: 'md' | 'json' | 'ndjson' | 'txt'): AppThunk => (dispatch) => {
+        dispatch(exportAllVersions(noteId, format));
+    };
+
+    dispatch(actions.openPanel({
+        type: 'action',
+        title: 'Choose export format',
+        items,
+        onChooseAction,
+        showFilter: false,
+    }));
 };
 
 export const exportAllVersions = (noteId: string, format: 'md' | 'json' | 'ndjson' | 'txt'): AppThunk => async (dispatch, getState, container) => {
@@ -209,6 +222,7 @@ export const exportAllVersions = (noteId: string, format: 'md' | 'json' | 'ndjso
     }
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
     const exportManager = container.get<ExportManager>(TYPES.ExportManager);
+    const app = container.get<App>(TYPES.App);
 
     if (initialState.status !== AppStatus.READY || initialState.noteId !== noteId) {
         uiService.showNotice("VC: Export cancelled because the view context changed.", 3000);
@@ -235,23 +249,34 @@ export const exportAllVersions = (noteId: string, format: 'md' | 'json' | 'ndjso
             throw new Error(`Failed to format data for export in ${format} format.`);
         }
 
-        const selectedFolder = await uiService.promptForFolder();
-        if (!selectedFolder) {
-            uiService.showNotice("Export cancelled.", 2000);
-            return;
-        }
+        const folders = app.vault.getAllFolders();
+        const folderItems: ActionItem<TFolder>[] = folders.map(folder => ({
+            id: folder.path,
+            data: folder,
+            text: folder.isRoot() ? "/" : folder.path,
+        }));
 
-        const latestState = getState();
-        if (isPluginUnloading(container) || latestState.status !== AppStatus.READY || latestState.noteId !== initialState.noteId) {
-            uiService.showNotice("VC: Export cancelled because the note context changed during folder selection.");
-            return;
-        }
+        const onChooseFolder = (selectedFolder: TFolder): AppThunk => async (dispatch, getState) => {
+            dispatch(actions.closePanel()); // Close the folder selection panel immediately.
 
-        const sanitizedNoteName = customSanitizeFileName(currentNoteName);
-        const exportFileName = `Version History - ${sanitizedNoteName}.${format}`;
-        const exportFilePath = await exportManager.writeFile(selectedFolder, exportFileName, exportContent);
-        
-        uiService.showNotice(`Successfully exported to ${exportFilePath}`, 7000);
+            const latestState = getState();
+            if (isPluginUnloading(container) || latestState.status !== AppStatus.READY || latestState.noteId !== initialState.noteId) {
+                uiService.showNotice("VC: Export cancelled because the note context changed during folder selection.");
+                return;
+            }
+            const sanitizedNoteName = customSanitizeFileName(currentNoteName);
+            const exportFileName = `Version History - ${sanitizedNoteName}.${format}`;
+            const exportFilePath = await exportManager.writeFile(selectedFolder, exportFileName, exportContent);
+            uiService.showNotice(`Successfully exported to ${exportFilePath}`, 7000);
+        };
+
+        dispatch(actions.openPanel({
+            type: 'action',
+            title: 'Export to folder...',
+            items: folderItems,
+            onChooseAction: onChooseFolder,
+            showFilter: true,
+        }));
 
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Unknown error";
@@ -280,13 +305,24 @@ export const requestExportSingleVersion = (version: VersionHistoryEntry): AppThu
     }
 
     const formats: Array<'md' | 'json' | 'ndjson' | 'txt'> = ['md', 'json', 'ndjson', 'txt'];
-    const menuOptions = formats.map(format => ({
-        title: `Export version as ${format.toUpperCase()}`,
+    const items: ActionItem<'md' | 'json' | 'ndjson' | 'txt'>[] = formats.map(format => ({
+        id: format,
+        data: format,
+        text: `Export version as ${format.toUpperCase()}`,
         icon: { md: "file-text", json: "braces", ndjson: "list-ordered", txt: "file-code" }[format],
-        callback: () => dispatch(exportSingleVersion(version, format))
     }));
 
-    uiService.showActionMenu(menuOptions);
+    const onChooseAction = (format: 'md' | 'json' | 'ndjson' | 'txt'): AppThunk => (dispatch) => {
+        dispatch(exportSingleVersion(version, format));
+    };
+
+    dispatch(actions.openPanel({
+        type: 'action',
+        title: `Export V${version.versionNumber}`,
+        items,
+        onChooseAction,
+        showFilter: false,
+    }));
 };
 
 export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: 'md' | 'json' | 'ndjson' | 'txt'): AppThunk => async (dispatch, getState, container) => {
@@ -300,6 +336,7 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: '
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const exportManager = container.get<ExportManager>(TYPES.ExportManager);
+    const app = container.get<App>(TYPES.App);
 
     if (initialState.status !== AppStatus.READY || initialState.noteId !== versionEntry.noteId) {
         uiService.showNotice("VC: Export cancelled because the view context changed.", 3000);
@@ -335,24 +372,37 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: '
             throw new Error(`Failed to format data for export in ${format} format.`);
         }
 
-        const selectedFolder = await uiService.promptForFolder();
-        if (!selectedFolder) {
-            uiService.showNotice("Export cancelled.", 2000);
-            return;
-        }
-        
-        const latestState = getState();
-        if (isPluginUnloading(container) || latestState.status !== AppStatus.READY || latestState.noteId !== initialState.noteId) {
-            uiService.showNotice("VC: Export cancelled because the note context changed during folder selection.");
-            return;
-        }
-        
-        const sanitizedNoteName = customSanitizeFileName(currentNoteName);
-        const versionIdSuffix = versionData.name ? customSanitizeFileName(versionData.name) : `V${versionData.versionNumber}`;
-        const exportFileName = `Version - ${sanitizedNoteName} - ${versionIdSuffix}.${format}`;
-        const exportFilePath = await exportManager.writeFile(selectedFolder, exportFileName, exportContent);
-        
-        uiService.showNotice(`Successfully exported to ${exportFilePath}`, 7000);
+        const folders = app.vault.getAllFolders();
+        const folderItems: ActionItem<TFolder>[] = folders.map(folder => ({
+            id: folder.path,
+            data: folder,
+            text: folder.isRoot() ? "/" : folder.path,
+        }));
+
+        const onChooseFolder = (selectedFolder: TFolder): AppThunk => async (dispatch, getState) => {
+            dispatch(actions.closePanel()); // Close the folder selection panel immediately.
+
+            const latestState = getState();
+            if (isPluginUnloading(container) || latestState.status !== AppStatus.READY || latestState.noteId !== initialState.noteId) {
+                uiService.showNotice("VC: Export cancelled because the note context changed during folder selection.");
+                return;
+            }
+            
+            const sanitizedNoteName = customSanitizeFileName(currentNoteName);
+            const versionIdSuffix = versionData.name ? customSanitizeFileName(versionData.name) : `V${versionData.versionNumber}`;
+            const exportFileName = `Version - ${sanitizedNoteName} - ${versionIdSuffix}.${format}`;
+            const exportFilePath = await exportManager.writeFile(selectedFolder, exportFileName, exportContent);
+            
+            uiService.showNotice(`Successfully exported to ${exportFilePath}`, 7000);
+        };
+
+        dispatch(actions.openPanel({
+            type: 'action',
+            title: 'Export to folder...',
+            items: folderItems,
+            onChooseAction: onChooseFolder,
+            showFilter: true,
+        }));
 
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Unknown error";
