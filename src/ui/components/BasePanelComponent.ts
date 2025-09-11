@@ -1,5 +1,6 @@
 import { Component } from "obsidian";
 import type { AppStore } from "../../state/store";
+import { actions } from "../../state/appSlice";
 
 /**
  * An abstract base class for UI panel components that typically overlay or integrate
@@ -15,6 +16,15 @@ export abstract class BasePanelComponent extends Component {
         this.container = parent.createDiv({ cls: cssClasses });
         this.store = store;
         this.container.hide(); // Initially hidden
+
+        // Add a click handler to the background overlay to close modal-like panels.
+        this.registerDomEvent(this.container, 'click', (event) => {
+            // This logic closes the panel if the user clicks on the semi-transparent
+            // background (the container itself) but not on any of its content.
+            if (event.target === this.container && this.container.classList.contains('is-modal-like')) {
+                this.store.dispatch(actions.closePanel());
+            }
+        });
     }
 
     /**

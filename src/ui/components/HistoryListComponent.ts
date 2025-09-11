@@ -101,16 +101,17 @@ export class HistoryListComponent extends Component {
         if (!this.listViewport) return;
         this.listViewport.empty(); // Only clear the list area
 
-        if (processedHistory.length === 0) {
+        if (processedHistory.length === 0 && state.searchQuery) {
             renderEmptyState(this.listViewport, "search-x", "No matching versions found.", `Try a different search query or change sort options.`);
-            return;
+        } else if (processedHistory.length === 0 && !state.noteId) {
+             renderEmptyState(this.listViewport, "inbox", "No versions saved yet.", "Click the 'Save new version' button to start tracking history for this note.");
+        } else if (processedHistory.length > 0) {
+            const itemHeight = state.settings.isListView ? LIST_ITEM_HEIGHT : CARD_ITEM_HEIGHT;
+            const itemGap = state.settings.isListView ? 0 : CARD_ITEM_GAP;
+            this.virtualRenderer = this.addChild(
+                new VirtualHistoryListRenderer(this.listViewport, processedHistory, itemHeight, itemGap, this.entryRenderer, state)
+            );
         }
-
-        const itemHeight = state.settings.isListView ? LIST_ITEM_HEIGHT : CARD_ITEM_HEIGHT;
-        const itemGap = state.settings.isListView ? 0 : CARD_ITEM_GAP;
-        this.virtualRenderer = this.addChild(
-            new VirtualHistoryListRenderer(this.listViewport, processedHistory, itemHeight, itemGap, this.entryRenderer, state)
-        );
     }
 
     private buildSkeletonDOM(): void {

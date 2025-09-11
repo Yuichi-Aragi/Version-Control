@@ -1,4 +1,4 @@
-import { setIcon, App, Component } from "obsidian";
+import { setIcon, Component } from "obsidian";
 import type { AppStore } from "../../state/store";
 import type { AppError } from "../../types";
 import { thunks } from "../../state/thunks/index";
@@ -6,13 +6,11 @@ import { thunks } from "../../state/thunks/index";
 export class ErrorDisplayComponent extends Component {
     private container: HTMLElement;
     private store: AppStore;
-    private app: App;
 
-    constructor(parent: HTMLElement, store: AppStore, app: App) {
+    constructor(parent: HTMLElement, store: AppStore) {
         super();
         this.container = parent.createDiv({ cls: "v-placeholder v-error-display" }); 
         this.store = store;
-        this.app = app;
         this.container.hide();
     }
 
@@ -39,10 +37,6 @@ export class ErrorDisplayComponent extends Component {
         const retryBtn = this.container.createEl("button", { text: "Retry initialization", cls: "mod-cta" });
         retryBtn.setAttribute("aria-label", "Retry initializing the version control view");
         retryBtn.addEventListener("click", () => {
-            // FIX: Replaced the deprecated `app.workspace.activeLeaf` with a call
-            // to `initializeView()` without arguments. The thunk is designed to
-            // safely find the active markdown view using the recommended API
-            // (`getActiveViewOfType`) when no leaf is provided.
             this.store.dispatch(thunks.initializeView());
         });
     }

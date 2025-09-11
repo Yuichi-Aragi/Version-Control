@@ -63,7 +63,8 @@ export class ActionBarComponent extends Component {
         
         this.settingsButton = rightGroup.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Toggle settings" } });
         setIcon(this.settingsButton, "settings-2");
-        this.registerDomEvent(this.settingsButton, "click", () => {
+        this.registerDomEvent(this.settingsButton, "click", (event: MouseEvent) => {
+            event.stopPropagation(); // Prevent click from bubbling, e.g., to a document-level listener
             const currentState = this.store.getState();
             if (currentState.status !== AppStatus.READY) return;
 
@@ -140,7 +141,7 @@ export class ActionBarComponent extends Component {
         this.registerDomEvent(this.filterButton, 'mousedown', (event: MouseEvent) => {
             event.preventDefault();
             event.stopPropagation(); // Prevent event from bubbling and interfering with the menu
-            this.store.dispatch(thunks.showSortMenu(event));
+            this.store.dispatch(thunks.showSortMenu());
         });
     }
 
@@ -151,7 +152,7 @@ export class ActionBarComponent extends Component {
         }
         this.container.show();
 
-        const { isSearchActive, searchQuery, isSearchCaseSensitive, isProcessing, diffRequest, settings, watchModeCountdown, history, noteId, isRenaming } = state;
+        const { isSearchActive, searchQuery, isSearchCaseSensitive, isProcessing, diffRequest, settings, watchModeCountdown, history, isRenaming } = state;
         
         const isBusy = isProcessing || isRenaming;
 

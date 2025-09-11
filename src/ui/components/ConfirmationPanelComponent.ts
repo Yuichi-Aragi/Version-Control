@@ -10,6 +10,7 @@ export class ConfirmationPanelComponent extends BasePanelComponent {
     constructor(parent: HTMLElement, store: AppStore) {
         super(parent, store, ["v-panel-container"]); 
         this.innerPanel = this.container.createDiv({ cls: "v-inline-panel v-confirmation-panel" });
+        this.container.classList.add('is-modal-like');
     }
 
     render(panelState: ConfirmationPanelState | null) {
@@ -32,7 +33,7 @@ export class ConfirmationPanelComponent extends BasePanelComponent {
 
         const confirmBtn = buttonsContainer.createEl("button", { text: "Confirm", cls: "mod-warning" });
         confirmBtn.setAttribute("aria-label", `Confirm: ${panelState.title}`);
-        confirmBtn.addEventListener("click", () => {
+        this.registerDomEvent(confirmBtn, "click", () => {
             const currentState = this.store.getState();
             if (currentState.status === AppStatus.READY && !currentState.isProcessing) {
                 this.store.dispatch(panelState.onConfirmAction);
@@ -44,11 +45,11 @@ export class ConfirmationPanelComponent extends BasePanelComponent {
         
         const cancelBtn = buttonsContainer.createEl("button", { text: "Cancel" });
         cancelBtn.setAttribute("aria-label", "Cancel action");
-        cancelBtn.addEventListener("click", () => {
+        this.registerDomEvent(cancelBtn, "click", () => {
             this.store.dispatch(actions.closePanel());
         });
 
         // Focus the confirm button for better accessibility.
-        confirmBtn.focus();
+        setTimeout(() => confirmBtn.focus(), 50);
     }
 }
