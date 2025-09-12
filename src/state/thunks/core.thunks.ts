@@ -152,6 +152,13 @@ export const loadHistoryForNoteId = (file: TFile, noteId: string): AppThunk => a
 
 export const handleMetadataChange = (file: TFile, cache: CachedMetadata): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
+    
+    // Guard against processing files that are part of an in-progress deviation creation.
+    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
+    if (noteManager.isPendingDeviation(file.path)) {
+        return;
+    }
+
     if (file.extension !== 'md') return;
 
     const state = getState();
