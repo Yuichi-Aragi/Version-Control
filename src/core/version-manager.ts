@@ -1,4 +1,4 @@
-import { App, TFile, MarkdownView, TFolder } from 'obsidian';
+import { App, TFile, MarkdownView, TFolder, FrontMatterCache } from 'obsidian';
 import { map, orderBy } from 'lodash-es';
 import { injectable, inject } from 'inversify';
 import { ManifestManager } from './manifest-manager';
@@ -58,10 +58,21 @@ export class VersionManager {
       noteManifest = await this.manifestManager.createNoteEntry(noteId, file.path);
     }
 
-    // 3. Get content to save, avoiding cache for the live file for reliability.
+    // 3. Get content to save, prioritizing the active editor, then a direct disk read.
     const activeMarkdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-    const contentToSave =
-      activeMarkdownView?.file?.path === file.path ? activeMarkdownView.editor.getValue() : await this.app.vault.read(file);
+    let contentToSave: string;
+
+    if (activeMarkdownView?.file?.path === file.path) {
+        // The most up-to-date content is in the active editor, including unsaved changes.
+        contentToSave = activeMarkdownView.editor.getValue();
+    } else {
+        // If the file is not in the active editor, read directly from disk via the adapter
+        // to bypass Obsidian's cache and get the definitive file state.
+        if (!(await this.app.vault.adapter.exists(file.path))) {
+            throw new Error(`File to be saved does not exist at path: ${file.path}`);
+        }
+        contentToSave = await this.app.vault.adapter.read(file.path);
+    }
 
     // 4. Check for duplicate content, unless forced
     if (!force) {
@@ -202,25 +213,29 @@ export class VersionManager {
     if (!noteId || !versionId) {
       throw new Error('Invalid parameters for creating deviation.');
     }
+    
+    const versionContent = await this.getVersionContent(noteId, versionId);
+    if (versionContent === null) {
+      throw new Error('Could not load version content for deviation.');
+    }
+
+    const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
+    const originalFile = noteManifest ? this.app.vault.getAbstractFileByPath(noteManifest.notePath) : null;
+    const originalTFile = originalFile instanceof TFile ? originalFile : null;
+    const baseName = originalTFile?.basename || 'Untitled Version';
+
+    let parentPath = targetFolder?.isRoot() ? '' : targetFolder?.path ?? originalTFile?.parent?.path ?? '';
+    if (parentPath === '/') {
+      parentPath = '';
+    }
+
+    const newFileNameBase = `${baseName} (from V${versionId.substring(0, 6)}...)`;
+    const newFilePath = await generateUniqueFilePath(this.app, newFileNameBase, parentPath);
+
+    // Add the path to the exclusion list BEFORE creating the file to prevent race conditions.
+    this.noteManager.addPendingDeviation(newFilePath);
+
     try {
-      const versionContent = await this.getVersionContent(noteId, versionId);
-      if (versionContent === null) {
-        throw new Error('Could not load version content for deviation.');
-      }
-
-      const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
-      const originalFile = noteManifest ? this.app.vault.getAbstractFileByPath(noteManifest.notePath) : null;
-      const originalTFile = originalFile instanceof TFile ? originalFile : null;
-      const baseName = originalTFile?.basename || 'Untitled Version';
-
-      let parentPath = targetFolder?.isRoot() ? '' : targetFolder?.path ?? originalTFile?.parent?.path ?? '';
-      if (parentPath === '/') {
-        parentPath = '';
-      }
-
-      const newFileNameBase = `${baseName} (from V${versionId.substring(0, 6)}...)`;
-      const newFilePath = await generateUniqueFilePath(this.app, newFileNameBase, parentPath);
-
       // Create the new file with the original content (including vc-id)
       const newFile = await this.app.vault.create(newFilePath, versionContent);
       if (!newFile) {
@@ -229,12 +244,10 @@ export class VersionManager {
 
       // Now, process the frontmatter of the newly created, permanent file to remove the vc-id
       try {
-        await this.app.fileManager.processFrontMatter(newFile, (fm) => {
+        await this.app.fileManager.processFrontMatter(newFile, (fm: FrontMatterCache) => {
           delete fm[NOTE_FRONTMATTER_KEY];
         });
       } catch (fmError) {
-        // If we can't remove the vc-id, the new file is a clone, which is bad.
-        // We should trash it to avoid confusion.
         console.error(`VC: Failed to remove vc-id from new deviation note "${newFilePath}". Trashing the file to prevent issues.`, fmError);
         await this.app.vault.trash(newFile, true).catch((delErr) => {
           console.error(`VC: CRITICAL: Failed to trash corrupted deviation file "${newFilePath}". Please delete it manually.`, delErr);
@@ -246,6 +259,9 @@ export class VersionManager {
     } catch (error) {
       console.error(`VC: Failed to create deviation for note ${noteId}, version ${versionId}.`, error);
       throw error;
+    } finally {
+      // CRITICAL: Ensure the path is removed from the exclusion list, even if an error occurred.
+      this.noteManager.removePendingDeviation(newFilePath);
     }
   }
 

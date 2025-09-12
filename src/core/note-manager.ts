@@ -9,6 +9,10 @@ import { TYPES } from "../types/inversify.types";
 
 @injectable()
 export class NoteManager {
+    // A temporary exclusion list to prevent event handlers from processing files
+    // that are in the middle of a special creation process (e.g., deviations).
+    private pendingDeviations = new Set<string>();
+
     constructor(
         @inject(TYPES.App) private app: App, 
         @inject(TYPES.ManifestManager) private manifestManager: ManifestManager
@@ -129,5 +133,19 @@ export class NoteManager {
 
     public invalidateCentralManifestCache(): void {
         this.manifestManager.invalidateCentralManifestCache();
+    }
+
+    // --- Deviation Exclusion List Methods ---
+
+    public addPendingDeviation(path: string): void {
+        this.pendingDeviations.add(path);
+    }
+
+    public removePendingDeviation(path: string): void {
+        this.pendingDeviations.delete(path);
+    }
+
+    public isPendingDeviation(path: string): boolean {
+        return this.pendingDeviations.has(path);
     }
 }
