@@ -1,4 +1,4 @@
-import { App, TFile, Component } from 'obsidian';
+import { App, TFile, Component, MarkdownView } from 'obsidian';
 import type { Change } from 'diff';
 import { sortBy } from 'lodash-es';
 import { injectable, inject } from 'inversify';
@@ -187,7 +187,18 @@ export class DiffManager extends Component {
                 if (version2.id === 'current') {
                     const file = this.app.vault.getAbstractFileByPath(version2.notePath);
                     if (file instanceof TFile) {
-                        content2 = await this.app.vault.read(file);
+                        // To get the most accurate "current" state, we prioritize the active editor's
+                        // content. If the note isn't active, we read directly from disk via the
+                        // adapter to bypass any potentially stale cache.
+                        const activeMarkdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
+                        if (activeMarkdownView?.file?.path === file.path) {
+                            content2 = activeMarkdownView.editor.getValue();
+                        } else {
+                            if (!(await this.app.vault.adapter.exists(file.path))) {
+                                throw new Error(`Could not find the current note file at path "${file.path}" to generate diff.`);
+                            }
+                            content2 = await this.app.vault.adapter.read(file.path);
+                        }
                     } else {
                         throw new Error(`Could not find the current note file at path "${version2.notePath}" to generate diff.`);
                     }
