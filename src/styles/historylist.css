@@ -42,9 +42,10 @@
     min-height: 0;
     padding-top: var(--size-4-2);
     position: relative; /* Required for virtual list absolute positioning */
-    /* FIX: Add horizontal padding to the scroll viewport */
-    padding-left: var(--size-4-2);
-    padding-right: var(--size-4-2);
+    /* FIX: Remove horizontal padding. Padding is now handled by individual entries,
+       which aligns their content with the header above. */
+    padding-left: 0;
+    padding-right: 0;
 }
 
 
@@ -66,12 +67,11 @@
     background-color: var(--background-secondary);
     border: 1px solid var(--background-modifier-border);
     
-    /* For Virtualization */
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    will-change: top, height;
+    /*
+     * FIX: Removed absolute positioning properties.
+     * The virtualization library (React Virtuoso) provides its own wrapper element
+     * for positioning, and these properties were causing all items to stack on top of each other.
+     */
     box-sizing: border-box;
 
     /* FIX: Add transform and transition for smooth hover/active effects */
@@ -182,17 +182,18 @@
     align-items: center;
     justify-content: center;
 }
-/* FIX: Remove transform from button hover to prevent overflow */
 .v-action-btn:hover {
-    background-color: var(--background-modifier-hover);
+    /* FIX: Set background to transparent to remove the square hover effect. */
+    background-color: transparent;
     color: var(--text-normal);
 }
 .v-action-btn:active {
     transform: translateY(1px); /* Add a subtle press-in effect */
 }
 .v-action-btn.danger:hover {
-    background-color: var(--background-modifier-error);
-    color: var(--text-on-accent);
+    /* FIX: Set background to transparent and change icon color to red for feedback. */
+    background-color: transparent;
+    color: var(--text-error);
 }
 
 /* List View Mode */

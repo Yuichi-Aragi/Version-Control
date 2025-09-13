@@ -68,39 +68,60 @@
     to { opacity: 1; transform: translateY(0); }
 }
 
-/* Scrollbars - Hide all scrollbars while maintaining functionality */
-.v-history-list,
-.v-version-content-preview,
-.v-diff-content-wrapper,
-.v-settings-panel-content-wrapper,
-.version-preview-view .v-tab-view-content,
-.version-diff-view .v-tab-view-content,
-.v-error-display .v-error-details,
-.v-version-content-preview pre,
-.v-version-content-preview .table-wrapper,
-.v-preview-panel-content,
-.v-diff-panel-content,
-.v-action-panel-list,
-.v-inline-panel {
-    /* For Firefox */
+/*
+ * SCROLLBAR HIDING RULES (HIGH SPECIFICITY)
+ *
+ * This section uses highly specific selectors to hide scrollbars across all plugin UI components.
+ * The `body` prefix and repeated view class (e.g., `.version-control-view.version-control-view`)
+ * are used to create a specificity high enough to override any Obsidian theme styles without
+ * resorting to `!important`.
+ *
+ * TARGETS:
+ * - The main virtualized history list (via a stable `data-virtuoso-scroller` attribute).
+ * - All panel content areas within the main view.
+ * - All content areas in the dedicated tab views.
+ * - Nested scrollable elements like code blocks and tables.
+ */
+
+/* For Firefox */
+body .version-control-view.version-control-view .v-history-list > div[data-virtuoso-scroller="true"],
+body .version-control-view.version-control-view .v-settings-panel-content-wrapper,
+body .version-control-view.version-control-view .v-error-display .v-error-details,
+body .version-control-view.version-control-view .v-preview-panel-content,
+body .version-control-view.version-control-view .v-diff-panel-content,
+body .version-control-view.version-control-view .v-action-panel-list,
+body .version-control-view.version-control-view .v-inline-panel,
+body .version-control-view.version-control-view .v-version-content-preview,
+body .version-control-view.version-control-view .v-diff-content-wrapper,
+body .version-control-view.version-control-view .v-version-content-preview pre,
+body .version-control-view.version-control-view .v-version-content-preview .table-wrapper,
+body .version-preview-view.version-preview-view .v-tab-view-content,
+body .version-preview-view.version-preview-view .v-version-content-preview,
+body .version-preview-view.version-preview-view .v-version-content-preview pre,
+body .version-preview-view.version-preview-view .v-version-content-preview .table-wrapper,
+body .version-diff-view.version-diff-view .v-tab-view-content,
+body .version-diff-view.version-diff-view .v-diff-content-wrapper {
     scrollbar-width: none;
-    /* For IE and Edge */
     -ms-overflow-style: none;
 }
 
-.v-history-list::-webkit-scrollbar,
-.v-version-content-preview::-webkit-scrollbar,
-.v-diff-content-wrapper::-webkit-scrollbar,
-.v-settings-panel-content-wrapper::-webkit-scrollbar,
-.version-preview-view .v-tab-view-content::-webkit-scrollbar,
-.version-diff-view .v-tab-view-content::-webkit-scrollbar,
-.v-error-display .v-error-details::-webkit-scrollbar,
-.v-version-content-preview pre::-webkit-scrollbar,
-.v-version-content-preview .table-wrapper::-webkit-scrollbar,
-.v-preview-panel-content::-webkit-scrollbar,
-.v-diff-panel-content::-webkit-scrollbar,
-.v-action-panel-list::-webkit-scrollbar,
-.v-inline-panel::-webkit-scrollbar {
-    /* For WebKit browsers (Chrome, Safari, Electron) */
+/* For WebKit browsers (Chrome, Safari, Electron) */
+body .version-control-view.version-control-view .v-history-list > div[data-virtuoso-scroller="true"]::-webkit-scrollbar,
+body .version-control-view.version-control-view .v-settings-panel-content-wrapper::-webkit-scrollbar,
+body .version-control-view.version-control-view .v-error-display .v-error-details::-webkit-scrollbar,
+body .version-control-view.version-control-view .v-preview-panel-content::-webkit-scrollbar,
+body .version-control-view.version-control-view .v-diff-panel-content::-webkit-scrollbar,
+body .version-control-view.version-control-view .v-action-panel-list::-webkit-scrollbar,
+body .version-control-view.version-control-view .v-inline-panel::-webkit-scrollbar,
+body .version-control-view.version-control-view .v-version-content-preview::-webkit-scrollbar,
+body .version-control-view.version-control-view .v-diff-content-wrapper::-webkit-scrollbar,
+body .version-control-view.version-control-view .v-version-content-preview pre::-webkit-scrollbar,
+body .version-control-view.version-control-view .v-version-content-preview .table-wrapper::-webkit-scrollbar,
+body .version-preview-view.version-preview-view .v-tab-view-content::-webkit-scrollbar,
+body .version-preview-view.version-preview-view .v-version-content-preview::-webkit-scrollbar,
+body .version-preview-view.version-preview-view .v-version-content-preview pre::-webkit-scrollbar,
+body .version-preview-view.version-preview-view .v-version-content-preview .table-wrapper::-webkit-scrollbar,
+body .version-diff-view.version-diff-view .v-tab-view-content::-webkit-scrollbar,
+body .version-diff-view.version-diff-view .v-diff-content-wrapper::-webkit-scrollbar {
     display: none;
 }
