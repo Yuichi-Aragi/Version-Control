@@ -1,7 +1,7 @@
 import { TFile, App, debounce } from 'obsidian';
 import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
-import type { VersionHistoryEntry } from '../../types';
+import type { VersionControlSettings, VersionHistoryEntry } from '../../types';
 import { AppStatus } from '../state';
 import { NOTE_FRONTMATTER_KEY, DEFAULT_SETTINGS } from '../../constants';
 import { loadHistoryForNoteId, initializeView } from './core.thunks';
@@ -55,7 +55,7 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => 
             return;
         }
 
-        const result = await versionManager.saveNewVersionForFile(liveFile);
+        const result = await versionManager.saveNewVersionForFile(liveFile, { isAuto, settings: initialState.settings });
 
         const stateAfterSave = getState();
         if (isPluginUnloading(container) || stateAfterSave.status !== AppStatus.READY || stateAfterSave.file?.path !== initialFileFromState.path) {
@@ -65,8 +65,8 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => 
             return;
         }
         
-        if (result.status === 'duplicate') {
-            if (!isAuto) {
+        if (result.status === 'duplicate' || result.status === 'skipped_min_lines') {
+            if (!isAuto && result.status === 'duplicate') {
                 uiService.showNotice("Content is identical to the latest version. No new version was saved.", 4000);
             }
             return;
@@ -179,6 +179,8 @@ export const restoreVersion = (versionId: string): AppThunk => async (dispatch, 
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);
     const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
+    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
     
     if (initialState.status !== AppStatus.READY) return;
 
@@ -200,7 +202,20 @@ export const restoreVersion = (versionId: string): AppThunk => async (dispatch, 
             throw new Error(`Restore failed. Note's version control ID has changed or was removed. Expected "${initialNoteIdFromState}", found "${currentNoteIdOnDisk}".`);
         }
 
-        await versionManager.saveNewVersionForFile(liveFile, `Backup before restoring V${versionId.substring(0,6)}...`, { force: true });
+        let effectiveSettings: VersionControlSettings = { ...plugin.settings };
+        try {
+            const noteManifest = await manifestManager.loadNoteManifest(initialNoteIdFromState);
+            if (noteManifest?.settings) {
+                effectiveSettings = { ...effectiveSettings, ...noteManifest.settings };
+            }
+        } catch (e) { /* use defaults */ }
+
+        await versionManager.saveNewVersionForFile(liveFile, { 
+            name: `Backup before restoring V${versionId.substring(0,6)}...`, 
+            force: true, 
+            isAuto: false, 
+            settings: effectiveSettings 
+        });
 
         const stateAfterBackup = getState();
         if (isPluginUnloading(container) || stateAfterBackup.status !== AppStatus.READY || stateAfterBackup.noteId !== initialNoteIdFromState) {
@@ -397,8 +412,27 @@ export const performAutoSave = (file: TFile): AppThunk => async (dispatch, getSt
         return; // Silently ignore auto-saves during rename
     }
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
+    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
+    
+    const noteId = await noteManager.getNoteId(file) ?? await manifestManager.getNoteIdByPath(file.path);
+    if (!noteId) return;
 
-    const result = await versionManager.saveNewVersionForFile(file, 'Auto-save', { force: false });
+    let effectiveSettings: VersionControlSettings = { ...plugin.settings };
+    try {
+        const noteManifest = await manifestManager.loadNoteManifest(noteId);
+        if (noteManifest?.settings) {
+            effectiveSettings = { ...effectiveSettings, ...noteManifest.settings };
+        }
+    } catch (e) { /* use defaults */ }
+
+    const result = await versionManager.saveNewVersionForFile(file, {
+        name: 'Auto-save', 
+        force: false, 
+        isAuto: true, 
+        settings: effectiveSettings
+    });
   
     if (result.status === 'saved' && result.newVersionEntry) {
         const currentState = getState();
@@ -424,7 +458,7 @@ export const handleVaultSave = (file: TFile): AppThunk => async (dispatch, _getS
     const noteId = await noteManager.getNoteId(file) ?? await manifestManager.getNoteIdByPath(file.path);
     if (!noteId) return;
   
-    let effectiveSettings = { ...DEFAULT_SETTINGS };
+    let effectiveSettings: VersionControlSettings = { ...DEFAULT_SETTINGS, ...plugin.settings };
     try {
         const noteManifest = await manifestManager.loadNoteManifest(noteId);
         if (noteManifest?.settings) {
