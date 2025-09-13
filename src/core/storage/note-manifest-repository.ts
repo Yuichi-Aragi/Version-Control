@@ -52,18 +52,17 @@ export class NoteManifestRepository {
 
     public async update(
         noteId: string,
-        updateFn: (draft: Draft<NoteManifest>) => void
+        updateFn: (draft: Draft<NoteManifest>) => void,
+        options: { bypassQueue?: boolean } = {}
     ): Promise<NoteManifest> {
-        // FIX: Apply the robust read-modify-write pattern using a queue and a synchronous immer recipe.
-        // This resolves all type inference issues with `produce`.
-        return this.queueService.enqueue(noteId, async () => {
-            // 1. Read the most current state directly from disk inside the queued task.
+        const task = async () => {
+            // 1. Read the most current state directly from disk.
             const currentManifest = await this.readManifest(noteId);
             if (!currentManifest) {
                 throw new Error(`Cannot update manifest for non-existent note ID: ${noteId}`);
             }
 
-            // 2. Apply the synchronous transformation function. `produce` now correctly returns `NoteManifest`.
+            // 2. Apply the synchronous transformation function.
             const updatedManifest = produce(currentManifest, updateFn);
 
             // 3. Write the new state back to disk.
@@ -72,7 +71,12 @@ export class NoteManifestRepository {
             // 4. Update the in-memory cache only after the write is successful.
             this.cache.set(noteId, updatedManifest);
             return updatedManifest;
-        });
+        };
+        
+        if (options.bypassQueue) {
+            return task();
+        }
+        return this.queueService.enqueue(noteId, task);
     }
 
     public invalidateCache(noteId: string): void {

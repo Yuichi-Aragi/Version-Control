@@ -77,9 +77,10 @@ export class VersionContentRepository {
 
   public async delete(
     noteId: string,
-    versionId: string
+    versionId: string,
+    options: { bypassQueue?: boolean } = {}
   ): Promise<void> {
-    return this.queueService.enqueue(noteId, async () => {
+    const task = async () => {
         const versionFilePath = this.pathService.getNoteVersionPath(
           noteId,
           versionId
@@ -95,7 +96,12 @@ export class VersionContentRepository {
                 `VC: Version file to delete was already missing: ${versionFilePath}`
             );
         }
-    });
+    };
+
+    if (options.bypassQueue) {
+        return task();
+    }
+    return this.queueService.enqueue(noteId, task);
   }
 
   public async getLatestVersionContent(
