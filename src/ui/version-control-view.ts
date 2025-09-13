@@ -157,15 +157,11 @@ export class VersionControlView extends ItemView {
                 this.actionBarComponent.getContainer().show();
                 this.actionBarComponent.render(state);
 
-                if (state.history.length === 0 && !state.noteId) {
-                    // Active note, but no versions. Show a specific placeholder.
-                    this.placeholderComponent.render("No versions saved yet.", "inbox");
-                    this.placeholderComponent.getContainer().show();
-                } else {
-                    // Active note with versions. Show the history list.
-                    this.readyStateContainer.show();
-                    this.historyListComponent.render(state);
-                }
+                // The HistoryListComponent is the primary content view in the READY state.
+                // It will internally render the list, an empty state for a new note,
+                // or a "no results" message when filtering.
+                this.readyStateContainer.show();
+                this.historyListComponent.render(state);
                 
                 // Render all overlay panels. They will manage their own visibility.
                 this.settingsPanelComponent.render(state.panel?.type === 'settings' ? state.panel : null, state);
