@@ -19,6 +19,8 @@ import type { NoteManifestRepository } from './core/storage/note-manifest-reposi
 import type { QueueService } from './services/queue-service';
 import { DEFAULT_SETTINGS } from './constants';
 import type { CentralManifest, VersionControlSettings } from './types';
+import type { PluginEvents } from './core/plugin-events';
+import { AppStatus } from './state/state';
 
 export interface DebouncerInfo {
     debouncer: Debouncer<[TFile], void>;
@@ -57,6 +59,7 @@ export default class VersionControlPlugin extends Plugin {
             const manifestManager = this.container.get<ManifestManager>(TYPES.ManifestManager);
             const diffManager = this.container.get<DiffManager>(TYPES.DiffManager);
             this.backgroundTaskManager = this.container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
+            const eventBus = this.container.get<PluginEvents>(TYPES.EventBus);
 
             this.cleanupManager.initialize();
             this.addChild(this.cleanupManager);
@@ -72,6 +75,17 @@ export default class VersionControlPlugin extends Plugin {
 			addRibbonIcon(this, this.store);
 			registerCommands(this, this.store);
 			registerSystemEventListeners(this, this.store);
+
+            // Add a listener to refresh the UI after background cleanups.
+            const handleVersionDeleted = (noteId: string) => {
+                if (this.isUnloading) return;
+                const state = this.store.getState();
+                if (state.status === AppStatus.READY && state.noteId === noteId && state.file) {
+                    this.store.dispatch(thunks.loadHistory(state.file));
+                }
+            };
+            eventBus.on('version-deleted', handleVersionDeleted);
+            this.register(() => eventBus.off('version-deleted', handleVersionDeleted));
 
             // Use the dedicated `onLayoutReady` helper. It fires once and requires no cleanup.
             this.app.workspace.onLayoutReady(() => {

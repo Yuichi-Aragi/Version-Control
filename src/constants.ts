@@ -20,6 +20,8 @@ export const DEFAULT_SETTINGS: VersionControlSettings = {
   watchModeInterval: 60, // 60 seconds
   autoSaveOnSave: false,
   autoSaveOnSaveInterval: 2, // 2 seconds
+  enableMinLinesChangedCheck: false,
+  minLinesChanged: 5,
   centralManifest: {
     version: "1.0.0",
     notes: {},

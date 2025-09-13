@@ -15,6 +15,8 @@ export interface VersionControlSettings {
   watchModeInterval: number; // in seconds
   autoSaveOnSave: boolean;
   autoSaveOnSaveInterval: number; // in seconds
+  enableMinLinesChangedCheck: boolean;
+  minLinesChanged: number;
   centralManifest: CentralManifest;
 }
 
