@@ -3,7 +3,7 @@
 	"name": "Version Control",
 	"version": "1.9.11",
 	"minAppVersion": "1.7.0",
-	"description": "Lets you create finite number of versions of any note only, when you want it.",
+	"description": "Allows you to create a finite number of versions for any note, exactly when you need to.",
 	"author": "Yuichi-Aragi",
 	"isDesktopOnly": false
 }
