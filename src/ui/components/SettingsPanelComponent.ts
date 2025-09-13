@@ -5,6 +5,7 @@ import type { AppState } from "../../state/state";
 import { actions } from "../../state/appSlice";
 import { thunks } from "../../state/thunks/index";
 import { BasePanelComponent } from "./BasePanelComponent";
+import type { VersionControlSettings } from "../../types";
 
 export class SettingsPanelComponent extends BasePanelComponent {
     private innerPanel: HTMLElement;
@@ -175,6 +176,48 @@ export class SettingsPanelComponent extends BasePanelComponent {
             });
     }
 
+    private createMinLinesChangedControls(parent: HTMLElement, settings: VersionControlSettings, isNoteVersioned: boolean) {
+        new Setting(parent)
+            .setName('Only save if lines changed')
+            .setDesc('If enabled, auto-save will only trigger if a minimum number of lines have changed.')
+            .addToggle(toggle => {
+                toggle
+                    .setValue(settings.enableMinLinesChangedCheck)
+                    .onChange((value) => {
+                        this.store.dispatch(thunks.updateSettings({ enableMinLinesChangedCheck: value }));
+                    });
+                if (!isNoteVersioned) toggle.setDisabled(true);
+            });
+
+        if (settings.enableMinLinesChangedCheck) {
+            let descEl: HTMLElement;
+            new Setting(parent)
+                .setName('Minimum lines changed')
+                .setDesc('placeholder')
+                .then(setting => {
+                    descEl = setting.descEl;
+                    descEl.setText(`The total number of added/removed lines required to trigger an auto-save. Current: ${settings.minLinesChanged}.`);
+                })
+                .addSlider(slider => {
+                    const debouncedSave = debounce((value: number) => {
+                        this.store.dispatch(thunks.updateSettings({ minLinesChanged: value }));
+                    }, 500);
+
+                    slider
+                        .setLimits(1, 50, 1)
+                        .setValue(settings.minLinesChanged)
+                        .setDynamicTooltip()
+                        .onChange((value) => {
+                            if (descEl) {
+                                descEl.setText(`The total number of added/removed lines required to trigger an auto-save. Current: ${value}.`);
+                            }
+                            debouncedSave(value);
+                        });
+                    if (!isNoteVersioned) slider.setDisabled(true);
+                });
+        }
+    }
+
     private createPluginSettingsControls(parent: HTMLElement, state: AppState) {
         const { settings } = state; 
 
@@ -266,6 +309,8 @@ export class SettingsPanelComponent extends BasePanelComponent {
                         });
                     if (!isNoteVersioned) slider.setDisabled(true);
                 });
+            
+            this.createMinLinesChangedControls(parent, settings, isNoteVersioned);
         }
 
         new Setting(parent)
@@ -306,6 +351,8 @@ export class SettingsPanelComponent extends BasePanelComponent {
                         });
                     if (!isNoteVersioned) slider.setDisabled(true);
                 });
+
+            this.createMinLinesChangedControls(parent, settings, isNoteVersioned);
         }
 
         new Setting(parent)
