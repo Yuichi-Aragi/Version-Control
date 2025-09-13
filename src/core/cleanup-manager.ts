@@ -1,15 +1,16 @@
-import { App, moment, Component, TFolder, TFile } from 'obsidian';
+import { App, moment, Component, TFolder, TFile, debounce, type Debouncer } from 'obsidian';
 import { orderBy } from 'lodash-es';
 import { injectable, inject } from 'inversify';
 import { ManifestManager } from './manifest-manager';
 import { PluginEvents } from './plugin-events';
 import { PathService } from './storage/path-service';
 import { TYPES } from '../types/inversify.types';
-import type { AppStore } from '../state/store';
 import { QueueService } from '../services/queue-service';
 import { VersionContentRepository } from './storage/version-content-repository';
+import type VersionControlPlugin from '../main';
 
 const ORPHAN_CLEANUP_QUEUE_KEY = 'system:orphan-cleanup';
+const CLEANUP_DEBOUNCE_INTERVAL_MS = 5000;
 
 /**
  * Manages all cleanup operations, such as removing old versions based on
@@ -20,15 +21,16 @@ const ORPHAN_CLEANUP_QUEUE_KEY = 'system:orphan-cleanup';
 @injectable()
 export class CleanupManager extends Component {
   private cleanupPromises = new Map<string, Promise<void>>();
+  private debouncedCleanups = new Map<string, Debouncer<[], void>>();
 
   constructor(
     @inject(TYPES.App) private readonly app: App,
     @inject(TYPES.ManifestManager) private readonly manifestManager: ManifestManager,
-    @inject(TYPES.Store) private readonly store: AppStore,
     @inject(TYPES.EventBus) private readonly eventBus: PluginEvents,
     @inject(TYPES.PathService) private readonly pathService: PathService,
     @inject(TYPES.QueueService) private readonly queueService: QueueService,
-    @inject(TYPES.VersionContentRepo) private readonly versionContentRepo: VersionContentRepository
+    @inject(TYPES.VersionContentRepo) private readonly versionContentRepo: VersionContentRepository,
+    @inject(TYPES.Plugin) private readonly plugin: VersionControlPlugin
   ) {
     super();
   }
@@ -36,10 +38,43 @@ export class CleanupManager extends Component {
   public initialize(): void {
     this.eventBus.on('version-saved', this.handleVersionSaved);
     this.register(() => this.eventBus.off('version-saved', this.handleVersionSaved));
+
+    this.eventBus.on('history-deleted', this.handleHistoryDeleted);
+    this.register(() => this.eventBus.off('history-deleted', this.handleHistoryDeleted));
+
+    // On unload, cancel any pending debounced calls to prevent them from firing after cleanup.
+    this.register(() => {
+        this.debouncedCleanups.forEach(d => d.cancel());
+        this.debouncedCleanups.clear();
+    });
   }
 
   private handleVersionSaved = (noteId: string): void => {
-    this.scheduleCleanup(noteId);
+    let debouncer = this.debouncedCleanups.get(noteId);
+    if (!debouncer) {
+        // Create a new trailing-edge debouncer for this note.
+        // It will only call `scheduleCleanup` after the save events have stopped
+        // for the specified interval.
+        debouncer = debounce(() => {
+            this.scheduleCleanup(noteId);
+        }, CLEANUP_DEBOUNCE_INTERVAL_MS, false); // `false` for trailing-edge execution
+        this.debouncedCleanups.set(noteId, debouncer);
+    }
+    // Trigger the debouncer on every save.
+    debouncer();
+  };
+
+  /**
+   * When a note's history is deleted, we must clean up its associated debouncer
+   * to prevent memory leaks.
+   * @param noteId The ID of the note whose history was deleted.
+   */
+  private handleHistoryDeleted = (noteId: string): void => {
+    const debouncer = this.debouncedCleanups.get(noteId);
+    if (debouncer) {
+        debouncer.cancel();
+        this.debouncedCleanups.delete(noteId);
+    }
   };
 
   public scheduleCleanup(noteId: string): void {
@@ -65,56 +100,79 @@ export class CleanupManager extends Component {
   }
 
   private async performPerNoteCleanup(noteId: string): Promise<void> {
-    const s = this.store.getState().settings;
-    const { maxVersionsPerNote, autoCleanupOldVersions, autoCleanupDays } = s;
-
-    if (maxVersionsPerNote <= 0 && (!autoCleanupOldVersions || autoCleanupDays <= 0)) {
-      return;
-    }
-
+    // 1. Load the manifest for the specific note being cleaned up. This makes the
+    // operation self-contained and independent of the UI state.
     const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
-    if (!noteManifest?.versions || Object.keys(noteManifest.versions).length <= 1) {
+    if (!noteManifest?.versions) {
+      return; // No manifest or no versions, nothing to clean.
+    }
+
+    // 2. Determine the effective settings for THIS note by merging global settings
+    // with any per-note overrides from its manifest.
+    const globalSettings = this.plugin.settings;
+    const effectiveSettings = { ...globalSettings, ...(noteManifest.settings || {}) };
+
+    const { maxVersionsPerNote, autoCleanupOldVersions, autoCleanupDays } = effectiveSettings;
+
+    const isMaxVersionsCleanupEnabled = maxVersionsPerNote > 0;
+    const isAgeCleanupEnabled = autoCleanupOldVersions && autoCleanupDays > 0;
+
+    // 3. Entry Guard: Return if no cleanup rules are active for this specific note.
+    if (!isMaxVersionsCleanupEnabled && !isAgeCleanupEnabled) {
       return;
     }
 
-    const versions = orderBy(Object.entries(noteManifest.versions), ([, v]) => new Date(v.timestamp).getTime(), ['desc']);
+    // Sort by version number descending (newest first). This is the canonical order.
+    const versions = orderBy(Object.entries(noteManifest.versions), ([, v]) => v.versionNumber, ['desc']);
 
+    // Don't clean up if there's only one version.
     if (versions.length <= 1) {
       return;
     }
 
-    const keep = new Set<string>();
-    const del = new Set<string>();
-    const cutoff = moment().subtract(autoCleanupDays, 'days');
+    const versionsToDelete = new Set<string>();
+    const cutoffDate = moment().subtract(autoCleanupDays, 'days');
 
-    for (const [id, v] of versions) {
-      const byCount = maxVersionsPerNote <= 0 || keep.size < maxVersionsPerNote;
-      const byAge = !autoCleanupOldVersions || autoCleanupDays <= 0 || moment(v.timestamp).isSameOrAfter(cutoff);
-      (byCount && byAge ? keep : del).add(id);
+    // 4. Identify versions to delete based on the note's effective settings.
+    versions.forEach(([id, versionData], index) => {
+      // Rule 1: Max version count exceeded.
+      if (isMaxVersionsCleanupEnabled && index >= maxVersionsPerNote) {
+        versionsToDelete.add(id);
+      }
+
+      // Rule 2: Version is too old.
+      if (isAgeCleanupEnabled && moment(versionData.timestamp).isBefore(cutoffDate)) {
+        versionsToDelete.add(id);
+      }
+    });
+
+    // 5. Safeguard: Never delete the last remaining version.
+    if (versionsToDelete.size === versions.length) {
+      const newestVersionId = versions[0]?.[0];
+      if (newestVersionId) {
+          versionsToDelete.delete(newestVersionId);
+      }
     }
 
-    if (keep.size === 0 && versions.length > 0) {
-      const newestVersionId = versions[0]![0];
-      del.delete(newestVersionId);
-    }
-
-    if (del.size === 0) {
+    if (versionsToDelete.size === 0) {
       return;
     }
 
-    // Update manifest
-    // FIX: Corrected immer usage. The recipe should mutate the draft and return void, not the draft itself.
+    // 6. Execute Deletion. These operations MUST bypass the queue to prevent a deadlock,
+    // as this entire function is already running inside the queue's serialization context.
     await this.manifestManager.updateNoteManifest(noteId, (m) => {
-      for (const id of del) {
-        delete m.versions[id];
+      for (const id of versionsToDelete) {
+        if (m.versions[id]) {
+            delete m.versions[id];
+        }
       }
       m.lastModified = new Date().toISOString();
-    });
+    }, { bypassQueue: true });
 
-    // Delete files using the now-queued repository method.
-    const deletions = [...del].map((id) =>
+    // Delete the corresponding version content files.
+    const deletions = [...versionsToDelete].map((id) =>
       this.versionContentRepo
-        .delete(noteId, id)
+        .delete(noteId, id, { bypassQueue: true })
         .catch((e) => console.error(`VC: Failed to delete version file for id ${id}`, e))
     );
 

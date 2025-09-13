@@ -1,9 +1,10 @@
-import { App, TFile, MarkdownView, TFolder, FrontMatterCache } from 'obsidian';
+import { App, TFile, MarkdownView, TFolder, type FrontMatterCache } from 'obsidian';
 import { map, orderBy } from 'lodash-es';
 import { injectable, inject } from 'inversify';
+import { diffLines } from 'diff';
 import { ManifestManager } from './manifest-manager';
 import { NoteManager } from './note-manager';
-import type { VersionHistoryEntry } from '../types';
+import type { VersionControlSettings, VersionHistoryEntry } from '../types';
 import { generateUniqueFilePath } from '../utils/file';
 import { NOTE_FRONTMATTER_KEY } from '../constants';
 import { PluginEvents } from './plugin-events';
@@ -30,16 +31,19 @@ export class VersionManager {
    * Saves a new version of a given file. This method encapsulates the entire
    * process, including getting or creating a note ID and its database entry.
    * @param file The TFile to save a version of.
-   * @param name An optional string containing the name for the new version.
-   * @param options.force If true, saves the version even if content is identical to the last one.
-   * @returns An object indicating if the version was saved or was a duplicate.
+   * @param options Options for saving, including forcing a save, marking as auto-save, and providing settings.
+   * @returns An object indicating if the version was saved, was a duplicate, or was skipped due to minimal changes.
    */
   public async saveNewVersionForFile(
     file: TFile,
-    name?: string,
-    options: { force?: boolean } = {}
-  ): Promise<{ status: 'saved' | 'duplicate'; newVersionEntry: VersionHistoryEntry | null; displayName: string; newNoteId: string }> {
-    const { force = false } = options;
+    options: {
+      name?: string;
+      force?: boolean;
+      isAuto?: boolean;
+      settings: VersionControlSettings;
+    }
+  ): Promise<{ status: 'saved' | 'duplicate' | 'skipped_min_lines'; newVersionEntry: VersionHistoryEntry | null; displayName: string; newNoteId: string }> {
+    const { force = false, isAuto = false, settings, name } = options;
     if (!file) {
       throw new Error('Invalid file provided to saveNewVersionForFile.');
     }
@@ -74,9 +78,27 @@ export class VersionManager {
         contentToSave = await this.app.vault.adapter.read(file.path);
     }
 
-    // 4. Check for duplicate content, unless forced
+    // 4. Get latest content for comparison checks.
+    const latestContent = await this.versionContentRepo.getLatestVersionContent(noteId, noteManifest);
+
+    // 5. Check for minimum lines changed on auto-save, if enabled.
+    if (isAuto && settings.enableMinLinesChangedCheck && latestContent !== null) {
+        const changes = diffLines(latestContent, contentToSave);
+        let changedLines = 0;
+        for (const part of changes) {
+            if (part.added || part.removed) {
+                // The 'count' property is guaranteed to exist on added/removed parts.
+                changedLines += part.count!;
+            }
+        }
+
+        if (changedLines < settings.minLinesChanged) {
+            return { status: 'skipped_min_lines', newVersionEntry: null, displayName: '', newNoteId: noteId };
+        }
+    }
+
+    // 6. Check for duplicate content, unless forced.
     if (!force) {
-      const latestContent = await this.versionContentRepo.getLatestVersionContent(noteId, noteManifest);
       if (latestContent !== null && latestContent === contentToSave) {
         return { status: 'duplicate', newVersionEntry: null, displayName: '', newNoteId: noteId };
       }
@@ -85,12 +107,12 @@ export class VersionManager {
     const versionId = generateUniqueId();
 
     try {
-      // 5. Write version content file (queued by noteId inside the repository).
+      // 7. Write version content file (queued by noteId inside the repository).
       const { size } = await this.versionContentRepo.write(noteId, versionId, contentToSave);
       const version_name = (name || '').trim();
       const timestamp = new Date().toISOString();
 
-      // 6. Update the note's manifest (also queued by noteId).
+      // 8. Update the note's manifest (also queued by noteId).
       const updatedManifest = await this.manifestManager.updateNoteManifest(noteId, (manifest) => {
         const versionNumber = (manifest.totalVersions || 0) + 1;
         manifest.versions[versionId] = {

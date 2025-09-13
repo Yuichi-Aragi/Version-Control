@@ -1,5 +1,4 @@
-import { App, TFile, WorkspaceLeaf, MarkdownView } from "obsidian";
-import type { FrontMatterCache } from "obsidian";
+import { App, TFile, WorkspaceLeaf, MarkdownView, type FrontMatterCache } from "obsidian";
 import { injectable, inject } from 'inversify';
 import { ManifestManager } from "./manifest-manager";
 import { NOTE_FRONTMATTER_KEY } from "../constants";
