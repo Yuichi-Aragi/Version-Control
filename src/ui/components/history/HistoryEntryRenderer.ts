@@ -183,6 +183,9 @@ export class HistoryEntryRenderer {
         };
 
         input.onkeydown = (e: KeyboardEvent) => {
+            // Stop propagation to prevent the parent entry's keydown handler
+            // from firing, which would incorrectly open the action menu on 'Enter' or 'Space'.
+            e.stopPropagation();
             if (e.key === 'Enter') {
                 e.preventDefault();
                 input.blur(); // Triggers the onblur handler to save
