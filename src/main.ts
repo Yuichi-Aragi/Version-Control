@@ -28,10 +28,9 @@ export interface DebouncerInfo {
 }
 
 // A type representing the data structure saved to data.json
-interface SavedData {
-    databasePath?: string;
-    centralManifest?: CentralManifest;
-}
+// It's the full settings object, but everything is optional for migration purposes.
+type SavedData = Partial<VersionControlSettings>;
+
 
 export default class VersionControlPlugin extends Plugin {
     private container!: Container;
@@ -94,8 +93,6 @@ export default class VersionControlPlugin extends Plugin {
                 this.store.dispatch(thunks.initializeView());
             });
 			
-			this.addStatusBarItem().setText('Version control ready');
-
 		} catch (error) {
 			console.error("Version Control: CRITICAL: Plugin failed to load.", error);
             const message = get(error, 'message', "Unknown error during loading");
@@ -158,23 +155,28 @@ export default class VersionControlPlugin extends Plugin {
 	}
 
     async loadSettings() {
-        const data: SavedData | CentralManifest = await this.loadData() || {};
+        const loadedData: SavedData | CentralManifest = await this.loadData() || {};
 
-        // This logic handles migrating from the previous manifest-only format in data.json
-        // to the new format which is a settings object containing the manifest.
-        const isNewFormat = data.hasOwnProperty('centralManifest');
+        let settingsData: SavedData;
 
-        const manifest = isNewFormat ? (data as SavedData).centralManifest : (data as CentralManifest);
-        const dbPath = isNewFormat ? (data as SavedData).databasePath : undefined;
+        // Check if loadedData is the old manifest-only format.
+        // A manifest has `notes` and `version`, but not `databasePath` or other settings keys.
+        if ('notes' in loadedData && !('databasePath' in loadedData) && !('maxVersionsPerNote' in loadedData)) {
+             // Old format: it's just a CentralManifest.
+             settingsData = { centralManifest: loadedData as CentralManifest };
+        } else {
+             // New format or empty: it's a settings object.
+             settingsData = loadedData as SavedData;
+        }
 
+        // Merge defaults with loaded data. This handles migrations and new settings gracefully.
         this.settings = {
             ...DEFAULT_SETTINGS,
-            // Load dbPath if it exists, otherwise the default is used.
-            ...(dbPath && { databasePath: dbPath }),
-            // Deep merge the loaded manifest to ensure all properties are present.
+            ...settingsData,
+            // Deep merge the central manifest to ensure its internal structure is complete.
             centralManifest: {
                 ...DEFAULT_SETTINGS.centralManifest,
-                ...(manifest || {}),
+                ...(settingsData.centralManifest || {}),
             },
         };
 
@@ -183,12 +185,7 @@ export default class VersionControlPlugin extends Plugin {
     }
 
     async saveSettings() {
-        // Only save global settings and the central manifest to data.json.
-        // Per-note settings are stored in their respective manifests.
-        const dataToSave: SavedData = {
-            databasePath: this.settings.databasePath,
-            centralManifest: this.settings.centralManifest,
-        };
-        await this.saveData(dataToSave);
+        // This method saves the global settings object.
+        await this.saveData(this.settings);
     }
 }

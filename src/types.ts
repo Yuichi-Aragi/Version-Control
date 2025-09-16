@@ -18,6 +18,7 @@ export interface VersionControlSettings {
   enableMinLinesChangedCheck: boolean;
   minLinesChanged: number;
   centralManifest: CentralManifest;
+  isGlobal?: boolean; // True if these settings are the global default. In UI state, true if a note is following global settings.
 }
 
 export interface CentralManifest {
@@ -47,7 +48,7 @@ export interface NoteManifest {
   createdAt: string;
   lastModified: string;
   // Per-note settings can override any global setting.
-  settings?: Partial<Omit<VersionControlSettings, 'databasePath' | 'centralManifest'>>;
+  settings?: Partial<Omit<VersionControlSettings, 'databasePath' | 'centralManifest'>> & { isGlobal?: boolean };
 }
 
 export interface VersionData {
