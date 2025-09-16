@@ -77,9 +77,27 @@ export class SettingsPanelComponent extends BasePanelComponent {
                 text: descTitle,
                 cls: 'v-settings-section-title'
             });
+
+            if (state.noteId) {
+                new Setting(pluginSettingsSection)
+                    .setName('Follow global settings')
+                    .setDesc('When on, this note uses the global plugin settings. When off, it has its own independent settings.')
+                    .addToggle(toggle => {
+                        toggle
+                            .setValue(state.settings.isGlobal ?? true)
+                            .onChange(value => {
+                                this.store.dispatch(thunks.toggleGlobalSettings(value));
+                            });
+                    });
+            }
+
             const settingsDesc = pluginSettingsSection.createEl('p', { cls: 'v-settings-info v-meta-label' });
             if (state.noteId) {
-                settingsDesc.setText('These settings apply only to the current note and override the defaults.');
+                if (state.settings.isGlobal) {
+                    settingsDesc.setText('This note follows the global settings. Changes made here will affect all other notes that follow global settings.');
+                } else {
+                    settingsDesc.setText('This note has its own settings that override the global defaults. Changes made here only affect this note.');
+                }
             } else {
                 settingsDesc.setText('This note is not under version control. These are the default settings that will be applied.');
             }
@@ -176,7 +194,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
             });
     }
 
-    private createMinLinesChangedControls(parent: HTMLElement, settings: VersionControlSettings, isNoteVersioned: boolean) {
+    private createMinLinesChangedControls(parent: HTMLElement, settings: VersionControlSettings, areControlsDisabled: boolean) {
         new Setting(parent)
             .setName('Only save if lines changed')
             .setDesc('If enabled, auto-save will only trigger if a minimum number of lines have changed.')
@@ -186,7 +204,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                     .onChange((value) => {
                         this.store.dispatch(thunks.updateSettings({ enableMinLinesChangedCheck: value }));
                     });
-                if (!isNoteVersioned) toggle.setDisabled(true);
+                if (areControlsDisabled) toggle.setDisabled(true);
             });
 
         if (settings.enableMinLinesChangedCheck) {
@@ -213,7 +231,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                             }
                             debouncedSave(value);
                         });
-                    if (!isNoteVersioned) slider.setDisabled(true);
+                    if (areControlsDisabled) slider.setDisabled(true);
                 });
         }
     }
@@ -221,7 +239,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
     private createPluginSettingsControls(parent: HTMLElement, state: AppState) {
         const { settings } = state; 
 
-        const isNoteVersioned = state.status === AppStatus.READY && !!state.noteId;
+        const areControlsDisabled = state.status !== AppStatus.READY || !state.noteId;
 
         new Setting(parent)
             .setName('Enable version naming')
@@ -232,7 +250,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                     .onChange((value) => {
                          this.store.dispatch(thunks.updateSettings({ enableVersionNaming: value }));
                     });
-                if (!isNoteVersioned) toggle.setDisabled(true);
+                if (areControlsDisabled) toggle.setDisabled(true);
             });
         
         new Setting(parent)
@@ -244,7 +262,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                     .onChange((value) => {
                         this.store.dispatch(thunks.updateSettings({ isListView: value }));
                     });
-                if (!isNoteVersioned) toggle.setDisabled(true);
+                if (areControlsDisabled) toggle.setDisabled(true);
             });
         
         new Setting(parent)
@@ -256,7 +274,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                     .onChange((value) => {
                         this.store.dispatch(thunks.updateSettings({ useRelativeTimestamps: value }));
                     });
-                if (!isNoteVersioned) toggle.setDisabled(true);
+                if (areControlsDisabled) toggle.setDisabled(true);
             });
         
         new Setting(parent)
@@ -268,7 +286,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                     .onChange((value) => {
                         this.store.dispatch(thunks.updateSettings({ renderMarkdownInPreview: value }));
                     });
-                if (!isNoteVersioned) toggle.setDisabled(true);
+                if (areControlsDisabled) toggle.setDisabled(true);
             });
 
         new Setting(parent)
@@ -280,7 +298,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                     .onChange((value) => {
                          this.store.dispatch(thunks.updateSettings({ autoSaveOnSave: value }));
                     });
-                if (!isNoteVersioned) toggle.setDisabled(true);
+                if (areControlsDisabled) toggle.setDisabled(true);
             });
 
         if (settings.autoSaveOnSave) {
@@ -307,10 +325,10 @@ export class SettingsPanelComponent extends BasePanelComponent {
                             }
                             debouncedSave(value);
                         });
-                    if (!isNoteVersioned) slider.setDisabled(true);
+                    if (areControlsDisabled) slider.setDisabled(true);
                 });
             
-            this.createMinLinesChangedControls(parent, settings, isNoteVersioned);
+            this.createMinLinesChangedControls(parent, settings, areControlsDisabled);
         }
 
         new Setting(parent)
@@ -322,7 +340,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                     .onChange((value) => {
                         this.store.dispatch(thunks.updateSettings({ enableWatchMode: value }));
                     });
-                if (!isNoteVersioned) toggle.setDisabled(true);
+                if (areControlsDisabled) toggle.setDisabled(true);
             });
         
         if (settings.enableWatchMode) {
@@ -349,10 +367,10 @@ export class SettingsPanelComponent extends BasePanelComponent {
                             }
                             debouncedSave(value);
                         });
-                    if (!isNoteVersioned) slider.setDisabled(true);
+                    if (areControlsDisabled) slider.setDisabled(true);
                 });
 
-            this.createMinLinesChangedControls(parent, settings, isNoteVersioned);
+            this.createMinLinesChangedControls(parent, settings, areControlsDisabled);
         }
 
         new Setting(parent)
@@ -364,7 +382,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                     .onChange((value) => {
                         this.store.dispatch(thunks.updateSettings({ autoCleanupOldVersions: value }));
                     });
-                if (!isNoteVersioned) toggle.setDisabled(true);
+                if (areControlsDisabled) toggle.setDisabled(true);
             });
 
         if (settings.autoCleanupOldVersions) {
@@ -391,7 +409,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                             }
                             debouncedSave(value);
                         });
-                    if (!isNoteVersioned) slider.setDisabled(true);
+                    if (areControlsDisabled) slider.setDisabled(true);
                 });
         }
 
@@ -411,7 +429,7 @@ export class SettingsPanelComponent extends BasePanelComponent {
                             text.setValue(String(this.store.getState().settings.maxVersionsPerNote));
                         }
                     }, 700));
-                if (!isNoteVersioned) text.setDisabled(true);
+                if (areControlsDisabled) text.setDisabled(true);
             });
     }
 }
