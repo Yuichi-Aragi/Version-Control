@@ -4,7 +4,7 @@ import { actions } from '../appSlice';
 import type { VersionControlSettings, VersionHistoryEntry } from '../../types';
 import { AppStatus } from '../state';
 import { NOTE_FRONTMATTER_KEY, DEFAULT_SETTINGS } from '../../constants';
-import { loadHistoryForNoteId, initializeView } from './core.thunks';
+import { loadHistoryForNoteId, initializeView, loadEffectiveSettingsForNote } from './core.thunks';
 import { VersionManager } from '../../core/version-manager';
 import { NoteManager } from '../../core/note-manager';
 import { UIService } from '../../services/ui-service';
@@ -202,13 +202,16 @@ export const restoreVersion = (versionId: string): AppThunk => async (dispatch, 
             throw new Error(`Restore failed. Note's version control ID has changed or was removed. Expected "${initialNoteIdFromState}", found "${currentNoteIdOnDisk}".`);
         }
 
-        let effectiveSettings: VersionControlSettings = { ...plugin.settings };
+        const globalSettings = plugin.settings;
+        let effectiveSettings: VersionControlSettings = { ...globalSettings };
         try {
             const noteManifest = await manifestManager.loadNoteManifest(initialNoteIdFromState);
-            if (noteManifest?.settings) {
-                effectiveSettings = { ...effectiveSettings, ...noteManifest.settings };
+            const perNoteSettings = noteManifest?.settings;
+            const isUnderGlobalInfluence = perNoteSettings?.isGlobal === true || perNoteSettings === undefined;
+            if (!isUnderGlobalInfluence) {
+                effectiveSettings = { ...globalSettings, ...perNoteSettings };
             }
-        } catch (e) { /* use defaults */ }
+        } catch (e) { /* use global on error */ }
 
         await versionManager.saveNewVersionForFile(liveFile, { 
             name: `Backup before restoring V${versionId.substring(0,6)}...`, 
@@ -419,13 +422,16 @@ export const performAutoSave = (file: TFile): AppThunk => async (dispatch, getSt
     const noteId = await noteManager.getNoteId(file) ?? await manifestManager.getNoteIdByPath(file.path);
     if (!noteId) return;
 
-    let effectiveSettings: VersionControlSettings = { ...plugin.settings };
+    const globalSettings = plugin.settings;
+    let effectiveSettings: VersionControlSettings = { ...globalSettings };
     try {
         const noteManifest = await manifestManager.loadNoteManifest(noteId);
-        if (noteManifest?.settings) {
-            effectiveSettings = { ...effectiveSettings, ...noteManifest.settings };
+        const perNoteSettings = noteManifest?.settings;
+        const isUnderGlobalInfluence = perNoteSettings?.isGlobal === true || perNoteSettings === undefined;
+        if (!isUnderGlobalInfluence) {
+            effectiveSettings = { ...globalSettings, ...perNoteSettings };
         }
-    } catch (e) { /* use defaults */ }
+    } catch (e) { /* use global on error */ }
 
     const result = await versionManager.saveNewVersionForFile(file, {
         name: 'Auto-save', 
@@ -458,14 +464,17 @@ export const handleVaultSave = (file: TFile): AppThunk => async (dispatch, _getS
     const noteId = await noteManager.getNoteId(file) ?? await manifestManager.getNoteIdByPath(file.path);
     if (!noteId) return;
   
-    let effectiveSettings: VersionControlSettings = { ...DEFAULT_SETTINGS, ...plugin.settings };
+    const globalSettings = plugin.settings;
+    let effectiveSettings: VersionControlSettings = { ...globalSettings };
     try {
         const noteManifest = await manifestManager.loadNoteManifest(noteId);
-        if (noteManifest?.settings) {
-            effectiveSettings = { ...effectiveSettings, ...noteManifest.settings };
+        const perNoteSettings = noteManifest?.settings;
+        const isUnderGlobalInfluence = perNoteSettings?.isGlobal === true || perNoteSettings === undefined;
+        if (!isUnderGlobalInfluence) {
+            effectiveSettings = { ...globalSettings, ...perNoteSettings };
         }
     } catch (e) {
-        // Manifest might not exist yet. Use default settings.
+        // Manifest might not exist yet. Use global settings.
     }
   
     const debouncerInfo = plugin.autoSaveDebouncers.get(file.path);

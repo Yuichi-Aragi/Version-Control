@@ -14,17 +14,63 @@ import { TYPES } from '../../types/inversify.types';
 import { DEFAULT_SETTINGS } from '../../constants';
 import { isPluginUnloading } from './ThunkUtils';
 import type VersionControlPlugin from '../../main';
-import { initializeView } from './core.thunks';
+import { initializeView, loadEffectiveSettingsForNote } from './core.thunks';
 
 /**
  * Thunks for updating settings and handling export functionality.
  */
 
-export const updateSettings = (settingsUpdate: Partial<Omit<VersionControlSettings, 'databasePath' | 'centralManifest'>>): AppThunk => async (dispatch, getState, container) => {
+export const toggleGlobalSettings = (applyGlobally: boolean): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     const state = getState();
     const uiService = container.get<UIService>(TYPES.UIService);
-    if (state.isRenaming) {
+    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
+
+    if (state.status !== AppStatus.READY || !state.noteId) {
+        uiService.showNotice("A versioned note must be active to change this setting.", 4000);
+        return;
+    }
+    const { noteId } = state;
+
+    try {
+        if (applyGlobally) {
+            // User is turning ON global settings for this note.
+            // This means we clear its specific settings and set isGlobal: true.
+            await manifestManager.updateNoteManifest(noteId, (manifest) => {
+                // We keep the settings object just for the isGlobal flag.
+                // Any other per-note settings are effectively discarded.
+                manifest.settings = { isGlobal: true };
+            });
+            // Now, reload the effective settings for the UI to update.
+            dispatch(loadEffectiveSettingsForNote(noteId));
+            uiService.showNotice("Note now follows global settings.", 3000);
+        } else {
+            // User is turning OFF global settings.
+            // The note becomes independent, inheriting the current global settings as its own.
+            const currentGlobalSettings = plugin.settings;
+            await manifestManager.updateNoteManifest(noteId, (manifest) => {
+                // We take all global settings (except db path etc.) and make them this note's settings.
+                const { databasePath, centralManifest, ...localSettings } = currentGlobalSettings;
+                manifest.settings = { ...localSettings, isGlobal: false };
+            });
+            // Reload effective settings to update the UI.
+            dispatch(loadEffectiveSettingsForNote(noteId));
+            uiService.showNotice("Note now has its own independent settings.", 3000);
+        }
+    } catch (error) {
+        console.error(`VC: Failed to toggle global settings for note ${noteId}.`, error);
+        uiService.showNotice("Failed to update settings. Please try again.", 5000);
+        // On failure, reload the original state to keep UI consistent.
+        dispatch(loadEffectiveSettingsForNote(noteId));
+    }
+};
+
+export const updateSettings = (settingsUpdate: Partial<Omit<VersionControlSettings, 'databasePath' | 'centralManifest'>>): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
+    const stateBeforeUpdate = getState();
+    const uiService = container.get<UIService>(TYPES.UIService);
+    if (stateBeforeUpdate.isRenaming) {
         uiService.showNotice("Cannot change settings while database is being renamed.");
         return;
     }
@@ -33,63 +79,52 @@ export const updateSettings = (settingsUpdate: Partial<Omit<VersionControlSettin
     const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
     const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
 
-    const stateBeforeUpdate = getState();
-    
-    const originalSettings = (Object.keys(settingsUpdate) as Array<keyof typeof settingsUpdate>)
-        .reduce((acc, key) => ({
-            ...acc,
-            [key]: stateBeforeUpdate.settings[key]
-        }), {} as Partial<VersionControlSettings>);
-
-    if (stateBeforeUpdate.status !== AppStatus.READY || !stateBeforeUpdate.noteId || !stateBeforeUpdate.file) {
-        uiService.showNotice("A note with version history must be active to change its settings.", 5000);
-        return;
-    }
     const { noteId, file } = stateBeforeUpdate;
+    const isUnderGlobalInfluence = stateBeforeUpdate.settings.isGlobal;
 
-    if (settingsUpdate.hasOwnProperty('autoSaveOnSaveInterval') || settingsUpdate.hasOwnProperty('autoSaveOnSave')) {
+    // --- UI Update (Optimistic) ---
+    if (file && (settingsUpdate.hasOwnProperty('autoSaveOnSaveInterval') || settingsUpdate.hasOwnProperty('autoSaveOnSave'))) {
         const debouncerInfo = plugin.autoSaveDebouncers.get(file.path);
-        if (debouncerInfo) {
-            debouncerInfo.debouncer.cancel();
-            plugin.autoSaveDebouncers.delete(file.path);
-        }
+        debouncerInfo?.debouncer.cancel();
+        plugin.autoSaveDebouncers.delete(file.path);
     }
-
     dispatch(actions.updateSettings(settingsUpdate));
     backgroundTaskManager.syncWatchMode();
 
+    // --- Persistence Logic ---
     try {
-        await manifestManager.updateNoteManifest(noteId, (manifest) => {
-            const currentNoteSettings = manifest.settings || {};
-            const newNoteSettings = { ...currentNoteSettings, ...settingsUpdate };
+        if (isUnderGlobalInfluence) {
+            // Update the GLOBAL settings.
+            const newGlobalSettings = { ...plugin.settings, ...settingsUpdate };
+            plugin.settings = newGlobalSettings;
+            await plugin.saveSettings();
 
-            for (const key of Object.keys(newNoteSettings) as Array<keyof typeof newNoteSettings>) {
-                if (newNoteSettings[key] === DEFAULT_SETTINGS[key]) {
-                    delete newNoteSettings[key];
-                }
+            // Also update the current note's manifest to ensure `isGlobal: true` is persisted,
+            // especially if it was a brand new note that didn't have a settings object yet.
+            if (noteId) {
+                await manifestManager.updateNoteManifest(noteId, (manifest) => {
+                    if (!manifest.settings) manifest.settings = {};
+                    manifest.settings.isGlobal = true;
+                });
             }
-
-            if (Object.keys(newNoteSettings).length > 0) {
-                manifest.settings = newNoteSettings;
-            } else {
-                delete manifest.settings;
+        } else {
+            // Update PER-NOTE settings.
+            if (!noteId) {
+                throw new Error("Cannot save per-note settings without an active note ID.");
             }
-        });
-
-        const stateAfterUpdate = getState();
-        if (isPluginUnloading(container) || stateAfterUpdate.noteId !== noteId) {
-            return;
+            await manifestManager.updateNoteManifest(noteId, (manifest) => {
+                if (!manifest.settings) manifest.settings = {};
+                // Ensure it's marked as local
+                manifest.settings.isGlobal = false;
+                // Apply the update
+                Object.assign(manifest.settings, settingsUpdate);
+            });
         }
-
     } catch (error) {
-        console.error(`VC: Failed to update per-note settings for note ${noteId}. Reverting.`, error);
-        uiService.showNotice("Failed to save note-specific settings. Reverting.", 5000);
-        
-        const stateOnFailure = getState();
-        if (stateOnFailure.noteId === noteId) {
-            dispatch(actions.updateSettings(originalSettings));
-            backgroundTaskManager.syncWatchMode();
-        }
+        console.error(`VC: Failed to update settings. Reverting UI.`, error);
+        uiService.showNotice("Failed to save settings. Reverting.", 5000);
+        // Revert the optimistic UI update by reloading the last known good state.
+        dispatch(loadEffectiveSettingsForNote(noteId));
     }
 };
 
@@ -106,7 +141,7 @@ export const renameDatabasePath = (newPathRaw: string): AppThunk => async (dispa
         return;
     }
 
-    const oldPath = state.settings.databasePath;
+    const oldPath = plugin.settings.databasePath;
     const newPath = normalizePath(newPathRaw.trim());
 
     if (!newPath) {
@@ -129,7 +164,7 @@ export const renameDatabasePath = (newPathRaw: string): AppThunk => async (dispa
     try {
         await app.vault.adapter.rename(oldPath, newPath);
 
-        const oldManifest = state.settings.centralManifest;
+        const oldManifest = plugin.settings.centralManifest;
         const newManifest = produce(oldManifest, draft => {
             for (const noteId in draft.notes) {
                 const noteEntry = draft.notes[noteId];
@@ -139,14 +174,11 @@ export const renameDatabasePath = (newPathRaw: string): AppThunk => async (dispa
             }
         });
 
-        // FIX: Update the plugin's settings object directly. This is the source of truth for saving.
         plugin.settings.databasePath = newPath;
         plugin.settings.centralManifest = newManifest;
         
-        // Now save the updated settings from the plugin instance.
         await plugin.saveSettings();
 
-        // Also update the Redux state for the UI to react immediately.
         dispatch(actions.updateSettings({ databasePath: newPath, centralManifest: newManifest }));
 
         manifestManager.invalidateCentralManifestCache();

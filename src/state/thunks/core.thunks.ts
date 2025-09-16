@@ -19,24 +19,43 @@ import type VersionControlPlugin from '../../main';
  * Thunks related to the core application lifecycle, such as view initialization and history loading.
  */
 
-const loadEffectiveSettingsForNote = (noteId: string | null): AppThunk => async (dispatch, getState, container) => {
+export const loadEffectiveSettingsForNote = (noteId: string | null): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
     const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
 
-    let effectiveSettings: VersionControlSettings = { ...plugin.settings };
+    const globalSettings = plugin.settings;
+    let effectiveSettings: VersionControlSettings = { ...globalSettings };
 
     if (noteId) {
         try {
             const noteManifest = await manifestManager.loadNoteManifest(noteId);
-            if (noteManifest?.settings) {
-                effectiveSettings = { ...effectiveSettings, ...noteManifest.settings };
+            const perNoteSettings = noteManifest?.settings;
+
+            // A note is under global influence if its isGlobal flag is explicitly true,
+            // or if it has no settings defined at all (the default for new notes).
+            const isUnderGlobalInfluence = perNoteSettings?.isGlobal === true || perNoteSettings === undefined;
+
+            if (isUnderGlobalInfluence) {
+                // Use global settings, but ensure the `isGlobal` flag is set for the UI toggle.
+                effectiveSettings = { ...globalSettings, isGlobal: true };
+            } else {
+                // It has its own settings. Merge them over the global defaults.
+                // The `isGlobal` flag will be false or undefined, which is correct for the UI.
+                effectiveSettings = { ...globalSettings, ...perNoteSettings, isGlobal: false };
             }
         } catch (error) {
-            console.error(`VC: Could not load per-note settings for note ${noteId}.`, error);
+            console.error(`VC: Could not load per-note settings for note ${noteId}. Using global settings.`, error);
+            // Fallback to global settings on error
+            effectiveSettings = { ...globalSettings, isGlobal: true };
         }
+    } else {
+        // No active note, so the "effective" settings are just the global ones.
+        // Set isGlobal to true so the toggle in the placeholder view shows the correct default state.
+        effectiveSettings = { ...globalSettings, isGlobal: true };
     }
 
+    // Only dispatch if the settings have actually changed to avoid needless re-renders.
     if (JSON.stringify(getState().settings) !== JSON.stringify(effectiveSettings)) {
         dispatch(actions.updateSettings(effectiveSettings));
     }
