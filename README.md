@@ -82,3 +82,8 @@ In simple terms, think of it this way:
 4.  **Interact with History:** As you create more versions, they will appear in the list.
     *   In **Card View**, use the buttons on each version to `View`, `Restore`, or `Delete`.
     *   In **Compact View**, right-click on any version to see all available actions in a context menu.
+
+### Supports
+
+* **Mobile**
+* **Desktop**
