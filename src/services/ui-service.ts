@@ -11,8 +11,8 @@ import { TYPES } from '../types/inversify.types';
 @injectable()
 export class UIService extends Component {
     constructor(
-        @inject(TYPES.App) private app: App, 
-        @inject(TYPES.Store) private store: AppStore
+        @inject(TYPES.App) _app: App, 
+        @inject(TYPES.Store) _store: AppStore
     ) {
         super();
     }
