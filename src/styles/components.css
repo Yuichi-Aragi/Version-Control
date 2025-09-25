@@ -12,6 +12,13 @@
     animation: v-fade-in 0.5s ease;
 }
 
+/* FIX: Use a more specific selector to ensure hidden placeholders are removed from the layout.
+   This rule's higher specificity (0,2,0) overrides the `display: flex` from the base 
+   `.v-placeholder` style (0,1,0) when the `.is-hidden` class is present. */
+.v-placeholder.is-hidden {
+    display: none;
+}
+
 .v-placeholder-icon {
     font-size: 2.5em;
     opacity: 0.5;

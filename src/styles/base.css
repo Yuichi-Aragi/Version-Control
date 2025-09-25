@@ -1,3 +1,13 @@
+/* Global utility class to hide elements without using inline styles */
+.is-hidden {
+    display: none;
+}
+
+/* Global class for react-virtuoso containers to ensure they fill their parent */
+.v-virtuoso-container {
+    height: 100%;
+}
+
 /* General View Styles */
 .version-control-view {
     padding: 0;
@@ -55,6 +65,14 @@
     height: 100%;
     position: relative;
     overflow: hidden;
+}
+
+/* FIX: Add a more specific selector to ensure this container is hidden correctly.
+   This rule's higher specificity (0,2,0) overrides the `display: flex` from the base
+   `.v-ready-state-container` style (0,1,0) when the `.is-hidden` class is present,
+   preventing layout conflicts with the placeholder component. */
+.v-ready-state-container.is-hidden {
+    display: none;
 }
 
 /* Animations */

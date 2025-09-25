@@ -36,8 +36,7 @@
 .v-panel-container.is-modal-like {
     /* Semi-transparent backdrop */
     background-color: rgba(var(--background-primary-rgb), 0.7);
-    /* Center the inline panel */
-    display: flex;
+    /* Center the inline panel. Display is handled by .is-active to prevent blocking. */
     justify-content: center;
     align-items: center;
     padding: var(--size-4-4);
@@ -220,20 +219,31 @@
     background-color: var(--background-secondary);
     padding: var(--size-4-4);
     border-radius: var(--radius-m);
+    /* Default to auto scrolling for rendered Markdown. */
     overflow-y: auto;
-    /* CRITICAL FIX: Prevent this container from scrolling horizontally,
-       forcing its children (like table-wrapper) to handle their own overflow. */
+    /* Prevent this container from scrolling horizontally, forcing children to handle it. */
     overflow-x: hidden;
     flex-grow: 1;
     line-height: 1.5;
     animation: v-fade-in 0.3s ease;
 }
 .v-version-content-preview.is-plaintext {
+    /* For virtualized plaintext, hide the container's scrollbar. */
+    overflow-y: hidden;
+    white-space: normal; /* Let virtualized lines wrap themselves */
+    font-family: inherit; /* Font is set on the line itself */
+    padding: var(--size-4-3);
+}
+
+/* NEW: Styles for virtualized plaintext lines */
+.v-plaintext-line {
     white-space: pre-wrap;
     font-family: var(--font-monospace);
     font-size: var(--font-ui-smaller);
-    padding: var(--size-4-3);
+    line-height: 1.5;
+    min-height: 1.5em; /* For empty lines */
 }
+
 
 /* Make code blocks scroll horizontally instead of wrapping */
 .v-version-content-preview pre {

@@ -89,3 +89,22 @@
 .v-settings-info p:last-child {
     margin-bottom: 0;
 }
+
+/* NEW: Styles for the path filter textarea */
+.v-settings-textarea {
+    width: 100%;
+    resize: vertical;
+    font-family: var(--font-monospace);
+    font-size: var(--font-ui-small);
+    line-height: 1.5;
+    margin-top: var(--size-2-2);
+    padding: var(--size-2-2);
+    border-radius: var(--radius-s);
+    border: 1px solid var(--background-modifier-border);
+    background-color: var(--background-primary);
+}
+.v-settings-textarea:focus {
+    border-color: var(--interactive-accent);
+    box-shadow: none;
+    outline: none;
+}

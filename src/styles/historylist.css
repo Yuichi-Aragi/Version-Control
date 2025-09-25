@@ -4,8 +4,8 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    /* FIX: Horizontal padding removed to fix alignment with action bar */
-    padding: var(--size-4-2) 0;
+    /* FIX: Remove top padding to reduce gap with action bar. */
+    padding: 0 0 var(--size-4-2);
 }
 
 /* NEW: Disable interactions when a panel is active */
@@ -46,6 +46,11 @@
        which aligns their content with the header above. */
     padding-left: 0;
     padding-right: 0;
+}
+
+/* NEW: Wrapper for card-view items to provide consistent spacing */
+.v-history-item-card-wrapper {
+    padding-bottom: 8px; /* CARD_ITEM_GAP */
 }
 
 

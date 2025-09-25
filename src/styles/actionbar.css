@@ -192,6 +192,12 @@
     transition: transform 0.3s ease-in-out, filter 0.3s ease-in-out;
 }
 
+/* FIX: Add a more specific selector to ensure this component is hidden correctly,
+   overriding the `display: flex` rule above and preventing style conflicts. */
+.v-diff-indicator.is-hidden {
+    display: none;
+}
+
 .v-diff-indicator.is-generating .svg-icon {
     color: var(--color-purple);
     animation: v-glow-pulse 1.5s infinite ease-in-out, spin 2s linear infinite;
