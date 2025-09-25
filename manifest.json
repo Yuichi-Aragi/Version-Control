@@ -1,7 +1,7 @@
 {
 	"id": "version-control",
 	"name": "Version Control",
-	"version": "1.9.12",
+	"version": "1.9.13",
 	"minAppVersion": "1.7.0",
 	"description": "Allows you to create a finite number of versions for any note, exactly when you need to.",
 	"author": "Yuichi-Aragi",
