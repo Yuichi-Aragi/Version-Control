@@ -1,4 +1,4 @@
-import { App, Vault, TFolder, TFile } from "obsidian";
+import { App, Vault, TFolder } from "obsidian";
 import { injectable, inject } from 'inversify';
 import type { Draft } from 'immer';
 import type { NoteManifest } from "../types";
