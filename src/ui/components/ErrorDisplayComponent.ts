@@ -11,17 +11,16 @@ export class ErrorDisplayComponent extends Component {
         super();
         this.container = parent.createDiv({ cls: "v-placeholder v-error-display" }); 
         this.store = store;
-        this.container.hide();
+        // Visibility is controlled by VersionControlView via the .is-hidden class
     }
 
     render(error: AppError | null) {
         if (!error) {
-            this.container.hide();
+            // The parent view will hide this component if there is no error.
             return;
         }
 
         this.container.empty();
-        this.container.show();
 
         const iconDiv = this.container.createDiv({ cls: "v-placeholder-icon" });
         setIcon(iconDiv, "alert-triangle");

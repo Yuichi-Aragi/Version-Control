@@ -9,7 +9,7 @@ export class PlaceholderComponent extends Component {
     constructor(parent: HTMLElement) {
         super();
         this.container = parent.createDiv({ cls: "v-placeholder" });
-        this.container.hide();
+        // Visibility is now controlled by VersionControlView, which adds/removes .is-hidden
     }
 
     render(title?: string, iconName?: string) {
@@ -18,7 +18,6 @@ export class PlaceholderComponent extends Component {
 
         // Only re-render if content actually changes to prevent unnecessary DOM manipulation
         if (this.currentTitle === newTitle && this.currentIcon === newIcon && this.container.hasChildNodes()) {
-            // this.container.show(); // Visibility is controlled by VersionControlView
             return;
         }
         
@@ -40,7 +39,6 @@ export class PlaceholderComponent extends Component {
                 cls: "v-placeholder-subtitle v-meta-label"
             });
         }
-        // this.container.show(); // Visibility is controlled by VersionControlView
     }
 
     public getContainer(): HTMLElement {

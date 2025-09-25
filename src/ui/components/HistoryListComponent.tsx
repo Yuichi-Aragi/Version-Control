@@ -116,14 +116,15 @@ export class HistoryListComponent extends Component {
             this.reactRoot = createRoot(this.listViewport);
         }
         
-        this.container.hide();
+        // The parent component (VersionControlView) is now solely responsible for visibility.
     }
 
     render(state: AppState): void {
         this.lastState = state;
 
         if (state.status !== AppStatus.READY) {
-            this.container.hide();
+            // The parent view is responsible for hiding this component.
+            // We just need to stop internal processes.
             this.stopTimestampUpdates();
             return;
         }
@@ -141,7 +142,6 @@ export class HistoryListComponent extends Component {
 
         const processedHistory = getFilteredAndSortedHistory(state);
         this.updateCountDisplay(processedHistory.length, state.history.length);
-        this.container.show();
         this.startTimestampUpdates();
     }
 
@@ -161,8 +161,6 @@ export class HistoryListComponent extends Component {
                 </React.StrictMode>
             );
         }
-        
-        this.container.show();
     }
 
     private buildSkeletonDOM(): void {

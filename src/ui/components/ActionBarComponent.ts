@@ -30,7 +30,7 @@ export class ActionBarComponent extends Component {
         this.buildDefaultActions();
         this.buildSearchBar();
         
-        this.container.hide();
+        // Visibility is controlled by VersionControlView via the .is-hidden class
     }
 
     private buildDefaultActions() {
@@ -43,14 +43,20 @@ export class ActionBarComponent extends Component {
         this.registerDomEvent(this.saveButton, "click", () => this.handleSaveVersionClick());
 
         this.watchModeTimerEl = leftGroup.createDiv('v-watch-mode-timer');
-        this.watchModeTimerEl.hide();
+        this.watchModeTimerEl.classList.add('is-hidden');
 
         const rightGroup = this.defaultActionsEl.createDiv('v-top-actions-right-group');
 
         this.diffIndicatorButton = rightGroup.createEl("button", { cls: "clickable-icon v-diff-indicator", attr: { "aria-label": "View ready diff" } });
-        this.diffIndicatorButton.hide();
+        this.diffIndicatorButton.classList.add('is-hidden');
         this.registerDomEvent(this.diffIndicatorButton, "click", () => {
-            this.store.dispatch(thunks.viewReadyDiff());
+            // FIX: The user's action of clicking the indicator fulfills the "ready diff" state.
+            // We dispatch the action to view the diff and then immediately clear the
+            // request state. This "consumes" the indicator and hides it immediately.
+            if (this.store.getState().diffRequest?.status === 'ready') {
+                this.store.dispatch(thunks.viewReadyDiff());
+                this.store.dispatch(actions.clearDiffRequest());
+            }
         });
 
         this.searchToggleButton = rightGroup.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Search history" } });
@@ -147,10 +153,9 @@ export class ActionBarComponent extends Component {
 
     render(state: AppState) {
         if (state.status !== AppStatus.READY) {
-            this.container.hide();
+            // The parent view will hide this component if the status is not ready.
             return;
         }
-        this.container.show();
 
         const { isSearchActive, searchQuery, isSearchCaseSensitive, isProcessing, diffRequest, settings, watchModeCountdown, history, isRenaming } = state;
         
@@ -161,8 +166,8 @@ export class ActionBarComponent extends Component {
 
         this.saveButton.disabled = isBusy;
         
-        this.searchToggleButton.style.display = history.length > 0 ? 'flex' : 'none';
-        this.settingsButton.style.display = history.length > 0 ? 'flex' : 'none';
+        this.searchToggleButton.classList.toggle('is-hidden', history.length === 0);
+        this.settingsButton.classList.toggle('is-hidden', history.length === 0);
 
         this.searchToggleButton.disabled = isBusy;
         this.settingsButton.disabled = isBusy;
@@ -176,7 +181,7 @@ export class ActionBarComponent extends Component {
             this.searchInput.value = searchQuery;
         }
         this.caseButton.classList.toggle('is-active', isSearchCaseSensitive);
-        this.clearButton.style.display = searchQuery ? 'flex' : 'none';
+        this.clearButton.classList.toggle('is-hidden', !searchQuery);
 
         if (isSearchActive && document.activeElement !== this.searchInput) {
             setTimeout(() => this.searchInput.focus(), 100);
@@ -184,24 +189,28 @@ export class ActionBarComponent extends Component {
     }
 
     private renderDiffIndicator(diffRequest: AppState['diffRequest'], isBusy: boolean) {
+        // FIX: This function was rewritten to use classList methods instead of direct
+        // className assignment. This prevents the accidental removal of other classes
+        // like `is-hidden` and resolves the rendering bug.
         if (!diffRequest) {
-            this.diffIndicatorButton.hide();
-            this.diffIndicatorButton.className = "clickable-icon v-diff-indicator";
+            this.diffIndicatorButton.classList.add('is-hidden');
+            this.diffIndicatorButton.classList.remove('is-generating', 'is-ready');
             return;
         }
 
-        this.diffIndicatorButton.show();
+        this.diffIndicatorButton.classList.remove('is-hidden');
         this.diffIndicatorButton.disabled = false;
+
+        this.diffIndicatorButton.classList.toggle('is-generating', diffRequest.status === 'generating');
+        this.diffIndicatorButton.classList.toggle('is-ready', diffRequest.status === 'ready');
 
         switch (diffRequest.status) {
             case 'generating':
-                this.diffIndicatorButton.className = "clickable-icon v-diff-indicator is-generating";
                 setIcon(this.diffIndicatorButton, "loader");
                 this.diffIndicatorButton.setAttribute("aria-label", "Diff is being generated...");
                 this.diffIndicatorButton.disabled = true;
                 break;
             case 'ready':
-                this.diffIndicatorButton.className = "clickable-icon v-diff-indicator is-ready";
                 setIcon(this.diffIndicatorButton, "diff");
                 this.diffIndicatorButton.setAttribute("aria-label", "Diff is ready. Click to view.");
                 this.diffIndicatorButton.disabled = isBusy;
@@ -212,9 +221,9 @@ export class ActionBarComponent extends Component {
     private renderWatchModeTimer(isWatchModeEnabled: boolean, countdown: number | null, isProcessing: boolean) {
         if (isWatchModeEnabled && countdown !== null && !isProcessing) {
             this.watchModeTimerEl.setText(`(${countdown}s)`);
-            this.watchModeTimerEl.show();
+            this.watchModeTimerEl.classList.remove('is-hidden');
         } else {
-            this.watchModeTimerEl.hide();
+            this.watchModeTimerEl.classList.add('is-hidden');
         }
     }
 

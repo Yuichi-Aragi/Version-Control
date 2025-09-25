@@ -5,31 +5,25 @@ import { actions } from "../../state/appSlice";
 import { BasePanelComponent } from "./BasePanelComponent";
 
 export class ConfirmationPanelComponent extends BasePanelComponent {
-    private innerPanel: HTMLElement;
-
     constructor(parent: HTMLElement, store: AppStore) {
-        super(parent, store, ["v-panel-container"]); 
-        this.innerPanel = this.container.createDiv({ cls: "v-inline-panel v-confirmation-panel" });
-        this.container.classList.add('is-modal-like');
+        super(parent, store, ["v-panel-container", "is-modal-like"]);
     }
 
     render(panelState: ConfirmationPanelState | null) {
         this.toggle(!!panelState);
+        this.container.empty(); // Ensure a clean slate on every render.
         
         if (!panelState) {
-            if (this.innerPanel.hasChildNodes()) {
-                this.innerPanel.empty();
-            }
             return;
         }
         
-        this.innerPanel.empty();
-        this.innerPanel.dataset['confirmationTitle'] = panelState.title;
+        const innerPanel = this.container.createDiv({ cls: "v-inline-panel v-confirmation-panel" });
+        innerPanel.dataset['confirmationTitle'] = panelState.title;
 
-        this.innerPanel.createEl("h3", { text: panelState.title });
-        this.innerPanel.createEl("p", { text: panelState.message });
+        innerPanel.createEl("h3", { text: panelState.title });
+        innerPanel.createEl("p", { text: panelState.message });
 
-        const buttonsContainer = this.innerPanel.createDiv("modal-buttons");
+        const buttonsContainer = innerPanel.createDiv("modal-buttons");
 
         const confirmBtn = buttonsContainer.createEl("button", { text: "Confirm", cls: "mod-warning" });
         confirmBtn.setAttribute("aria-label", `Confirm: ${panelState.title}`);

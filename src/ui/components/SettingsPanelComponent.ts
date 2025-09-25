@@ -6,19 +6,22 @@ import { actions } from "../../state/appSlice";
 import { thunks } from "../../state/thunks/index";
 import { BasePanelComponent } from "./BasePanelComponent";
 import type { VersionControlSettings } from "../../types";
+import { isEqual } from 'lodash-es';
 
 export class SettingsPanelComponent extends BasePanelComponent {
     private innerPanel: HTMLElement;
     private autoCloseTimer: number | null = null;
     private readonly AUTO_CLOSE_DELAY_MS = 30000;
 
+    private lastRenderedState: AppState | null = null;
+
     constructor(parent: HTMLElement, store: AppStore) {
         super(parent, store, ["v-settings-panel"]); 
         
         this.innerPanel = this.container.createDiv('v-settings-panel-content-wrapper');
 
-        this.registerDomEvent(this.innerPanel, 'click', this.resetAutoCloseTimer, { capture: true });
-        this.registerDomEvent(this.innerPanel, 'input', this.resetAutoCloseTimer, { capture: true });
+        this.registerDomEvent(this.innerPanel, 'click', this.handleUserActivity, { capture: true });
+        this.registerDomEvent(this.innerPanel, 'input', this.handleUserActivity, { capture: true });
 
         this.register(() => {
             if (this.autoCloseTimer) {
@@ -37,17 +40,29 @@ export class SettingsPanelComponent extends BasePanelComponent {
         }
 
         if (!isOpen) {
+            this.lastRenderedState = null;
             return;
         }
+
+        // --- START: Bail-out logic to prevent unnecessary re-renders ---
+        if (this.lastRenderedState) {
+            const settingsChanged = !isEqual(this.lastRenderedState.settings, state.settings);
+            const fileChanged = this.lastRenderedState.file?.path !== state.file?.path;
+            const noteIdChanged = this.lastRenderedState.noteId !== state.noteId;
+            const historyLengthChanged = this.lastRenderedState.history.length !== state.history.length;
+
+            // If nothing relevant to the settings panel has changed, do not re-render its contents.
+            // This prevents focus loss and flickering from state changes like the watch mode countdown.
+            if (!settingsChanged && !fileChanged && !noteIdChanged && !historyLengthChanged) {
+                this.lastRenderedState = state; // Still update state for next comparison
+                this.startOrResetAutoCloseTimer(); // Reset timer on any interaction that triggers a render
+                return; // *** EXIT RENDER EARLY ***
+            }
+        }
+        // --- END: Bail-out logic ---
         
         this.innerPanel.empty(); 
-
-        this.autoCloseTimer = window.setTimeout(() => {
-            const currentState = this.store.getState();
-            if (currentState.status === AppStatus.READY && currentState.panel?.type === 'settings') {
-                this.store.dispatch(thunks.closeSettingsPanelWithNotice("Settings panel auto-closed.", 2000));
-            }
-        }, this.AUTO_CLOSE_DELAY_MS);
+        this.startOrResetAutoCloseTimer();
 
         // --- Global Settings ---
         const globalSettingsSection = this.innerPanel.createDiv('v-settings-section');
@@ -104,9 +119,15 @@ export class SettingsPanelComponent extends BasePanelComponent {
 
             this.createPluginSettingsControls(this.innerPanel, state);
         }
+
+        this.lastRenderedState = state;
     }
 
-    private resetAutoCloseTimer = () => {
+    private handleUserActivity = () => {
+        this.startOrResetAutoCloseTimer();
+    }
+
+    private startOrResetAutoCloseTimer = () => {
         if (this.autoCloseTimer) {
             window.clearTimeout(this.autoCloseTimer);
         }
@@ -121,7 +142,6 @@ export class SettingsPanelComponent extends BasePanelComponent {
             }, this.AUTO_CLOSE_DELAY_MS);
         }
     }
-
 
     private handleRefresh() {
         const state = this.store.getState();
@@ -192,6 +212,53 @@ export class SettingsPanelComponent extends BasePanelComponent {
                         this.store.dispatch(thunks.renameDatabasePath(newDbPath));
                     });
             });
+
+        new Setting(parent)
+            .setName('Automatically track new notes')
+            .setDesc('When enabled, any opened note not currently under version control will be automatically added and an initial version will be saved.')
+            .addToggle(toggle => {
+                toggle
+                    .setValue(state.settings.autoRegisterNotes)
+                    .onChange(value => {
+                        this.store.dispatch(thunks.updateGlobalSettings({ autoRegisterNotes: value }));
+                    });
+            });
+
+        if (state.settings.autoRegisterNotes) {
+            const filterDesc = parent.createEl('p', { cls: 'v-settings-info v-meta-label' });
+            filterDesc.setText('Enter one case-sensitive regular expression per line. Notes with paths matching any of these patterns will be excluded from auto-tracking.');
+
+            const textarea = parent.createEl('textarea', {
+                cls: 'v-settings-textarea',
+                attr: {
+                    'rows': 3,
+                    'placeholder': '^Private/.*\n_templates/.*'
+                }
+            });
+            textarea.value = state.settings.pathFilters.join('\n');
+
+            const setHeight = () => {
+                if (!textarea.isConnected) return;
+                textarea.style.height = 'auto';
+                const maxHeight = this.innerPanel.clientHeight / 2;
+                const newHeight = Math.min(textarea.scrollHeight + 5, maxHeight);
+                textarea.style.height = `${newHeight}px`;
+            };
+
+            this.registerDomEvent(textarea, 'focus', setHeight);
+            this.registerDomEvent(textarea, 'input', setHeight);
+            
+            setTimeout(setHeight, 0);
+
+            const debouncedSave = debounce((value: string) => {
+                const filters = value.split('\n').map(s => s.trim()).filter(Boolean);
+                this.store.dispatch(thunks.updateGlobalSettings({ pathFilters: filters }));
+            }, 1000);
+
+            this.registerDomEvent(textarea, 'input', () => {
+                debouncedSave(textarea.value);
+            });
+        }
     }
 
     private createMinLinesChangedControls(parent: HTMLElement, settings: VersionControlSettings, areControlsDisabled: boolean) {

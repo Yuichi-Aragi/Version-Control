@@ -6,7 +6,6 @@ import { BasePanelComponent } from "./BasePanelComponent";
 import type { AppThunk }from "../../state/store";
 
 export class ActionPanelComponent extends BasePanelComponent {
-    private innerPanel: HTMLElement;
     private filterInput: HTMLInputElement | null = null;
     private listEl: HTMLElement | null = null;
     private currentItems: ActionItem<any>[] = [];
@@ -15,30 +14,25 @@ export class ActionPanelComponent extends BasePanelComponent {
     private debouncedFilter: (value: string) => void;
 
     constructor(parent: HTMLElement, store: AppStore) {
-        super(parent, store, ["v-panel-container"]);
-        this.innerPanel = this.container.createDiv({ cls: "v-inline-panel v-action-panel" });
-        this.container.classList.add('is-modal-like');
+        super(parent, store, ["v-panel-container", "is-modal-like"]);
         this.debouncedFilter = debounce(this.filterList, 150, true);
     }
 
     render(panelState: ActionPanelState<any> | null) {
         this.toggle(!!panelState);
+        this.container.empty(); // Ensure a clean slate on every render.
+        this.cleanup(); // Resets internal state like focusedIndex.
 
         if (!panelState) {
-            if (this.innerPanel.hasChildNodes()) {
-                this.innerPanel.empty();
-                this.cleanup();
-            }
             return;
         }
 
-        this.innerPanel.empty();
+        const innerPanel = this.container.createDiv({ cls: "v-inline-panel v-action-panel" });
         this.currentItems = panelState.items;
         this.onChooseAction = panelState.onChooseAction;
-        this.focusedIndex = -1;
 
         // Header
-        const header = this.innerPanel.createDiv("v-panel-header");
+        const header = innerPanel.createDiv("v-panel-header");
         header.createEl("h3", { text: panelState.title });
         const closeBtn = header.createEl("button", { 
             cls: "clickable-icon v-panel-close", 
@@ -49,7 +43,7 @@ export class ActionPanelComponent extends BasePanelComponent {
 
         // Filter input
         if (panelState.showFilter) {
-            const filterContainer = this.innerPanel.createDiv('v-action-panel-filter');
+            const filterContainer = innerPanel.createDiv('v-action-panel-filter');
             this.filterInput = filterContainer.createEl('input', {
                 type: 'text',
                 placeholder: 'Filter options...'
@@ -59,7 +53,7 @@ export class ActionPanelComponent extends BasePanelComponent {
         }
 
         // List
-        this.listEl = this.innerPanel.createDiv('v-action-panel-list');
+        this.listEl = innerPanel.createDiv('v-action-panel-list');
         this.renderList(this.currentItems);
 
         // Focus management

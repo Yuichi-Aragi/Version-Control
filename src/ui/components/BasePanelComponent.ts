@@ -13,9 +13,9 @@ export abstract class BasePanelComponent extends Component {
 
     constructor(parent: HTMLElement, store: AppStore, cssClasses: string[]) {
         super();
+        this.store = store; // FIX: Initialize the store property.
         this.container = parent.createDiv({ cls: cssClasses });
-        this.store = store;
-        this.container.hide(); // Initially hidden
+        // this.container is hidden by default via CSS (.v-panel-container { display: none; })
 
         // Add a click handler to the background overlay to close modal-like panels.
         this.registerDomEvent(this.container, 'click', (event) => {
@@ -35,12 +35,10 @@ export abstract class BasePanelComponent extends Component {
     abstract render(panelSpecificState: any, ...args: any[]): void;
 
     protected show(): void {
-        this.container.show();
         this.container.classList.add('is-active');
     }
 
     protected hide(): void {
-        this.container.hide();
         this.container.classList.remove('is-active');
     }
 
@@ -57,7 +55,7 @@ export abstract class BasePanelComponent extends Component {
     }
 
     public get isVisible(): boolean {
-        return this.container.style.display !== 'none' && this.container.classList.contains('is-active');
+        return this.container.classList.contains('is-active');
     }
 
     public getContainer(): HTMLElement {
