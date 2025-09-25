@@ -34,7 +34,7 @@ export const VirtualizedHistoryListComponent = ({ items, state, entryRenderer }:
         // This outer div handles the gap between items in card view.
         // Virtuoso positions this div, and the inner component renders the content.
         return (
-            <div style={{ paddingBottom: isListView ? 0 : `${CARD_ITEM_GAP}px` }}>
+            <div className={isListView ? undefined : "v-history-item-card-wrapper"}>
                 <HistoryEntryComponent
                     version={version}
                     state={state}
@@ -46,7 +46,7 @@ export const VirtualizedHistoryListComponent = ({ items, state, entryRenderer }:
 
     return (
         <Virtuoso
-            style={{ height: '100%' }}
+            className="v-virtuoso-container"
             data={items}
             fixedItemHeight={itemHeight}
             itemContent={renderItem}
