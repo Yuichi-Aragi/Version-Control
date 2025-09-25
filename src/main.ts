@@ -1,5 +1,5 @@
 import 'reflect-metadata'; // Must be the first import
-import { Plugin, Notice, WorkspaceLeaf, debounce, type Debouncer, TFile } from 'obsidian';
+import { Plugin, Notice, WorkspaceLeaf, type Debouncer, TFile } from 'obsidian';
 import { get } from 'lodash-es';
 import type { Container } from 'inversify';
 import type { AppStore } from './state/store';

@@ -22,6 +22,8 @@ export const DEFAULT_SETTINGS: VersionControlSettings = {
   autoSaveOnSaveInterval: 2, // 2 seconds
   enableMinLinesChangedCheck: false,
   minLinesChanged: 5,
+  autoRegisterNotes: false,
+  pathFilters: [],
   centralManifest: {
     version: "1.0.0",
     notes: {},

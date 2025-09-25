@@ -17,19 +17,23 @@ export interface VersionControlSettings {
   autoSaveOnSaveInterval: number; // in seconds
   enableMinLinesChangedCheck: boolean;
   minLinesChanged: number;
+  autoRegisterNotes: boolean;
+  pathFilters: string[]; // Array of regex strings
   centralManifest: CentralManifest;
   isGlobal?: boolean; // True if these settings are the global default. In UI state, true if a note is following global settings.
+}
+
+export interface NoteEntry {
+  notePath: string;
+  manifestPath: string;
+  createdAt: string;
+  lastModified: string;
 }
 
 export interface CentralManifest {
   version: string;
   notes: {
-    [noteId: string]: {
-      notePath: string;
-      manifestPath: string;
-      createdAt: string;
-      lastModified: string;
-    };
+    [noteId: string]: NoteEntry;
   };
 }
 
