@@ -1,10 +1,10 @@
 import { TFile, App, debounce } from 'obsidian';
 import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
-import type { VersionControlSettings, VersionHistoryEntry } from '../../types';
+import type { VersionControlSettings, VersionHistoryEntry, AppError } from '../../types';
 import { AppStatus } from '../state';
-import { NOTE_FRONTMATTER_KEY, DEFAULT_SETTINGS } from '../../constants';
-import { loadHistoryForNoteId, initializeView, loadEffectiveSettingsForNote } from './core.thunks';
+import { NOTE_FRONTMATTER_KEY } from '../../constants';
+import { loadHistoryForNoteId, initializeView, loadHistory } from './core.thunks';
 import { VersionManager } from '../../core/version-manager';
 import { NoteManager } from '../../core/note-manager';
 import { UIService } from '../../services/ui-service';
@@ -17,6 +17,48 @@ import type VersionControlPlugin from '../../main';
 /**
  * Thunks for direct version management (CRUD operations).
  */
+
+export const autoRegisterNote = (file: TFile): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const uiService = container.get<UIService>(TYPES.UIService);
+    const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
+
+    // Set a loading state for the file
+    dispatch(actions.initializeView({ file, noteId: null, source: 'none' }));
+    
+    try {
+        const result = await versionManager.saveNewVersionForFile(file, {
+            name: 'Initial Version',
+            isAuto: true,
+            force: true, // Save even if empty
+            settings: getState().settings,
+        });
+
+        if (result.status === 'saved') {
+            uiService.showNotice(`"${file.basename}" is now under version control.`);
+            // After saving, we have a noteId and history, so we can load it directly.
+            const history = await versionManager.getVersionHistory(result.newNoteId);
+            dispatch(actions.historyLoadedSuccess({ file, noteId: result.newNoteId, history }));
+        } else {
+            // This could happen if another process registered it, or if content is identical to a deleted note's last version.
+            // In this case, just proceed with a normal history load.
+            dispatch(loadHistory(file));
+        }
+    } catch (error) {
+        console.error(`Version Control: Failed to auto-register note "${file.path}".`, error);
+        const appError: AppError = {
+            title: "Auto-registration failed",
+            message: `Could not automatically start version control for "${file.basename}".`,
+            details: error instanceof Error ? error.message : String(error),
+        };
+        dispatch(actions.reportError(appError));
+    } finally {
+        if (!isPluginUnloading(container)) {
+            backgroundTaskManager.syncWatchMode();
+        }
+    }
+};
 
 export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;

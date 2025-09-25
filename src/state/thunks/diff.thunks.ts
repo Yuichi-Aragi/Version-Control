@@ -180,6 +180,9 @@ export const viewReadyDiff = (): AppThunk => (dispatch, getState, container) => 
 
     const { version1, version2, diffChanges } = diffRequest;
 
-    dispatch(actions.openPanel({ type: 'diff', version1, version2, diffChanges }));
+    // FIX: Dispatch clearDiffRequest first to ensure the indicator is hidden immediately
+    // in the same render cycle that the panel is opened. The diffRequest object is
+    // captured in a local variable, so its data is safe to use for opening the panel.
     dispatch(actions.clearDiffRequest());
+    dispatch(actions.openPanel({ type: 'diff', version1, version2, diffChanges }));
 };

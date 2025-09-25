@@ -11,9 +11,10 @@ import { ManifestManager } from '../../core/manifest-manager';
 import { CleanupManager } from '../../core/cleanup-manager';
 import { BackgroundTaskManager } from '../../core/BackgroundTaskManager';
 import { TYPES } from '../../types/inversify.types';
-import { DEFAULT_SETTINGS } from '../../constants';
 import { isPluginUnloading } from './ThunkUtils';
 import type VersionControlPlugin from '../../main';
+import { autoRegisterNote } from './version.thunks';
+import { isPathAllowed } from '../../utils/path-filter';
 
 /**
  * Thunks related to the core application lifecycle, such as view initialization and history loading.
@@ -55,6 +56,12 @@ export const loadEffectiveSettingsForNote = (noteId: string | null): AppThunk =>
         effectiveSettings = { ...globalSettings, isGlobal: true };
     }
 
+    // Overwrite with true global values for settings that are ALWAYS global.
+    // This ensures the UI state is always correct for these specific settings.
+    effectiveSettings.autoRegisterNotes = globalSettings.autoRegisterNotes;
+    effectiveSettings.databasePath = globalSettings.databasePath;
+    effectiveSettings.pathFilters = globalSettings.pathFilters;
+
     // Only dispatch if the settings have actually changed to avoid needless re-renders.
     if (JSON.stringify(getState().settings) !== JSON.stringify(effectiveSettings)) {
         dispatch(actions.updateSettings(effectiveSettings));
@@ -66,6 +73,7 @@ export const initializeView = (leaf?: WorkspaceLeaf | null): AppThunk => async (
     if (isPluginUnloading(container)) return;
     const app = container.get<App>(TYPES.App);
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);
+    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
 
     try {
         let targetLeaf: WorkspaceLeaf | null;
@@ -78,6 +86,15 @@ export const initializeView = (leaf?: WorkspaceLeaf | null): AppThunk => async (
 
         const activeNoteInfo = await noteManager.getActiveNoteState(targetLeaf);
         
+        // New feature: Auto-register untracked notes if the setting is enabled.
+        if (activeNoteInfo.file && !activeNoteInfo.noteId && plugin.settings.autoRegisterNotes) {
+            if (isPathAllowed(activeNoteInfo.file.path, plugin.settings)) {
+                // This thunk will handle the entire state transition to READY.
+                dispatch(autoRegisterNote(activeNoteInfo.file));
+                return; // Halt this execution path to prevent race conditions.
+            }
+        }
+
         dispatch(actions.initializeView(activeNoteInfo));
 
         if (activeNoteInfo.source === 'manifest' && activeNoteInfo.file && activeNoteInfo.noteId) {

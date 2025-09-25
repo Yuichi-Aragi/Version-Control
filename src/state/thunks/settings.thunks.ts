@@ -11,7 +11,6 @@ import { ExportManager } from '../../services/export-manager';
 import { VersionManager } from '../../core/version-manager';
 import { BackgroundTaskManager } from '../../core/BackgroundTaskManager';
 import { TYPES } from '../../types/inversify.types';
-import { DEFAULT_SETTINGS } from '../../constants';
 import { isPluginUnloading } from './ThunkUtils';
 import type VersionControlPlugin from '../../main';
 import { initializeView, loadEffectiveSettingsForNote } from './core.thunks';
@@ -19,6 +18,26 @@ import { initializeView, loadEffectiveSettingsForNote } from './core.thunks';
 /**
  * Thunks for updating settings and handling export functionality.
  */
+
+export const updateGlobalSettings = (settingsUpdate: Partial<Pick<VersionControlSettings, 'autoRegisterNotes' | 'pathFilters'>>): AppThunk => async (dispatch, _getState, container) => {
+    if (isPluginUnloading(container)) return;
+    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
+    const uiService = container.get<UIService>(TYPES.UIService);
+    const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
+
+    try {
+        const newGlobalSettings = { ...plugin.settings, ...settingsUpdate };
+        plugin.settings = newGlobalSettings;
+        await plugin.saveSettings();
+
+        // Dispatch to update the UI state for any open note that is following global settings.
+        dispatch(actions.updateSettings(settingsUpdate));
+        backgroundTaskManager.syncWatchMode();
+    } catch (error) {
+        console.error(`VC: Failed to update global settings.`, error);
+        uiService.showNotice("Failed to save global settings.", 5000);
+    }
+};
 
 export const toggleGlobalSettings = (applyGlobally: boolean): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
@@ -51,7 +70,7 @@ export const toggleGlobalSettings = (applyGlobally: boolean): AppThunk => async 
             const currentGlobalSettings = plugin.settings;
             await manifestManager.updateNoteManifest(noteId, (manifest) => {
                 // We take all global settings (except db path etc.) and make them this note's settings.
-                const { databasePath, centralManifest, ...localSettings } = currentGlobalSettings;
+                const { databasePath, centralManifest, autoRegisterNotes, pathFilters, ...localSettings } = currentGlobalSettings;
                 manifest.settings = { ...localSettings, isGlobal: false };
             });
             // Reload effective settings to update the UI.
