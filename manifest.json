@@ -3,7 +3,7 @@
 	"name": "Version Control",
 	"version": "1.9.13",
 	"minAppVersion": "1.7.0",
-	"description": "A local snapshot-based version control system that lets you save versions of your notes only when you choose—not just automatic or scheduled saves.",
+	"description": "Fearlessly edit. Capture intentional, local snapshots of your notes at any point. Stop relying on background autosaves—take charge of your document's history and versions.",
 	"author": "Yuichi-Aragi",
 	"isDesktopOnly": false
 }
