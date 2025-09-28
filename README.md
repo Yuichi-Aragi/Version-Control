@@ -71,6 +71,15 @@ In simple terms, think of it this way:
 *   **Obsidian File Recovery:** A fantastic, passive safety net for "oops" moments.
 *   **Version Control (This Plugin):** An active, hands-on tool for perfectionists, writers, and anyone who wants to consciously manage the evolution of their ideas.
 
+### Data Storage and Persistence
+
+**Your data stays with you.** All version history data is stored locally within your Obsidian vault in a hidden folder (specifically, a folder named `.versiondb`). Inside this folder, the data for each version is saved as standard Markdown (`.md`) files.
+
+This structure ensures data persistence and privacy:
+*   **Local Storage:** Your version history never leaves your vault or connects to an external service.
+*   **Data Stays:** Your version history and all associated data will remain in your vault even if you uninstall or remove the plugin.
+*   **Accessible Format:** Because it is stored as standard Markdown files, your data is always accessible and readable, even without the plugin.
+
 ### How To Get Started
 
 1.  **Open the View:** Click the **History** icon (`⟲`) in the ribbon sidebar to open the Version Control panel.
