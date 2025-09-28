@@ -3,7 +3,7 @@
 	"name": "Version Control",
 	"version": "1.9.13",
 	"minAppVersion": "1.7.0",
-	"description": "Allows you to create a finite number of versions for any note, exactly when you need to.",
+	"description": "A local snapshot-based version control system that lets you save versions on demand, creating a clean, finite history for your notes only when you choose—not just automatic or scheduled saves.",
 	"author": "Yuichi-Aragi",
 	"isDesktopOnly": false
 }
