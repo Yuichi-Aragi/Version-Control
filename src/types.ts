@@ -2,6 +2,7 @@ import type { TFile } from "obsidian";
 import type { Change } from "diff";
 
 export interface VersionControlSettings {
+  version: string;
   databasePath: string;
   maxVersionsPerNote: number;
   autoCleanupOldVersions: boolean;
@@ -39,7 +40,7 @@ export interface CentralManifest {
 
 export interface NoteManifest {
   noteId: string;
-  notePath: string;
+  notePath:string;
   versions: {
     [versionId: string]: {
       versionNumber: number;
@@ -95,6 +96,8 @@ export interface AppError {
 
 // --- Diff-related types ---
 
+export type DiffType = 'lines' | 'words' | 'chars' | 'json';
+
 /** Represents a target for comparison, either a saved version or the current file state. */
 export type DiffTarget = VersionHistoryEntry | {
     id: 'current';
@@ -105,10 +108,13 @@ export type DiffTarget = VersionHistoryEntry | {
 
 /** State for a background diff generation request. */
 export interface DiffRequest {
-    status: 'generating' | 'ready';
+    status: 'generating' | 'ready' | 're-diffing';
     version1: VersionHistoryEntry;
     version2: DiffTarget;
     diffChanges: Change[] | null;
+    diffType: DiffType;
+    content1: string;
+    content2: string;
 }
 
 /** State for displaying a diff in a new tab view. */
@@ -118,4 +124,15 @@ export interface DiffViewDisplayState {
     diffChanges: Change[];
     noteName: string;
     notePath: string;
+    content1: string;
+    content2: string;
+}
+
+// --- Comlink Worker API ---
+/**
+ * Defines the API exposed by the diff web worker.
+ * This interface is used by Comlink to create a typed proxy.
+ */
+export interface DiffWorkerApi {
+    computeDiff(type: DiffType, content1: string, content2: string): Change[];
 }

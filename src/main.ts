@@ -5,11 +5,11 @@ import type { Container } from 'inversify';
 import type { AppStore } from './state/store';
 import { appSlice } from './state/appSlice';
 import { thunks } from './state/thunks/index';
-import type { CleanupManager } from './core/cleanup-manager';
+import type { CleanupManager } from './core/tasks/cleanup-manager';
 import type { UIService } from './services/ui-service';
 import type { ManifestManager } from './core/manifest-manager';
 import type { DiffManager } from './services/diff-manager';
-import type { BackgroundTaskManager } from './core/BackgroundTaskManager';
+import type { BackgroundTaskManager } from './core/tasks/BackgroundTaskManager';
 import { configureServices } from './inversify.config';
 import { registerViews, addRibbonIcon, registerCommands } from './setup/UISetup';
 import { registerSystemEventListeners } from './setup/EventSetup';
@@ -21,6 +21,7 @@ import { DEFAULT_SETTINGS } from './constants';
 import type { CentralManifest, VersionControlSettings } from './types';
 import type { PluginEvents } from './core/plugin-events';
 import { AppStatus } from './state/state';
+import { compareVersions } from './utils/versions';
 
 export interface DebouncerInfo {
     debouncer: Debouncer<[TFile], void>;
@@ -91,6 +92,7 @@ export default class VersionControlPlugin extends Plugin {
                 // This thunk will now load the correct settings for the active note (or defaults)
                 // by using the recommended API to find the active view.
                 this.store.dispatch(thunks.initializeView());
+                this.checkForUpdates();
             });
 			
 		} catch (error) {
@@ -187,5 +189,16 @@ export default class VersionControlPlugin extends Plugin {
     async saveSettings() {
         // This method saves the global settings object.
         await this.saveData(this.settings);
+    }
+
+    private async checkForUpdates() {
+        const currentPluginVersion = this.manifest.version;
+        const savedVersion = this.settings.version || '0.0.0';
+
+        if (compareVersions(currentPluginVersion, savedVersion) > 0) {
+            // This is a new install or an update.
+            // The thunk is now responsible for updating the version upon successful display.
+            this.store.dispatch(thunks.showChangelogPanel({ forceRefresh: true }));
+        }
     }
 }

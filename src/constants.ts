@@ -5,8 +5,10 @@ export const VIEW_TYPE_VERSION_PREVIEW = "version-preview-view";
 export const VIEW_TYPE_VERSION_DIFF = "version-diff-view";
 export const DEFAULT_DB_PATH = ".versiondb";
 export const NOTE_FRONTMATTER_KEY = "vc-id";
+export const CHANGELOG_URL = "https://raw.githubusercontent.com/Yuichi-Aragi/Version-Control/main/CHANGELOG.md";
 
 export const DEFAULT_SETTINGS: VersionControlSettings = {
+  version: "0.0.0",
   databasePath: DEFAULT_DB_PATH,
   maxVersionsPerNote: 50,
   autoCleanupOldVersions: false,
