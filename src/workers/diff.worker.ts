@@ -1,171 +1,69 @@
-import { diffLines, type Change } from 'diff';
+/// <reference lib="webworker" />
+
+import { expose } from 'comlink';
+import { diffLines, diffWordsWithSpace, diffChars, diffJson, type Change } from 'diff';
 import { isString } from 'lodash-es';
+import type { DiffType } from '../types';
 
-// Define message interfaces for strong typing
-interface DiffWorkerRequest {
-    requestId: string;
-    content1: string;
-    content2: string;
-}
-
-interface DiffWorkerSuccessResponse {
-    status: 'success';
-    requestId: string;
-    changes: Change[];
-}
-
-interface DiffWorkerErrorResponse {
-    status: 'error';
-    requestId: string;
-    error: {
-        message: string;
-        stack?: string;
-    };
-}
-
-type DiffWorkerResponse = DiffWorkerSuccessResponse | DiffWorkerErrorResponse;
-
-// Worker global context type assertion for better TypeScript support
-declare const self: WorkerGlobalScope;
-
-// Input validation utility
-function validateWorkerRequest(data: unknown): asserts data is DiffWorkerRequest {
-    if (!data || typeof data !== 'object') {
-        throw new Error('Invalid request format: expected object');
-    }
-    
-    const request = data as Partial<DiffWorkerRequest>;
-    
-    if (typeof request.requestId !== 'string' || request.requestId.trim() === '') {
-        throw new Error('Invalid request: requestId must be a non-empty string');
-    }
-    
-    if (!isString(request.content1)) {
-        throw new Error('Invalid request: content1 must be a string');
-    }
-    
-    if (!isString(request.content2)) {
-        throw new Error('Invalid request: content2 must be a string');
-    }
-}
-
-// Safe postMessage wrapper with error handling
-function safePostMessage(response: DiffWorkerResponse): void {
-    try {
-        // Validate response structure before posting
-        if (!response || typeof response !== 'object') {
-            throw new Error('Cannot post invalid response');
+/**
+ * Defines the API that will be exposed to the main thread via Comlink.
+ * This object contains the computationally intensive tasks to be offloaded.
+ */
+const diffEngine = {
+    /**
+     * Calculates the differences between two strings using a specified algorithm.
+     * This method is designed to be executed in a web worker context.
+     * @param type The type of diff to perform ('lines', 'words', 'chars', 'json').
+     * @param content1 The first string for comparison.
+     * @param content2 The second string for comparison.
+     * @returns An array of Change objects representing the differences.
+     * @throws {Error} If inputs are not valid strings or if the diffing algorithm fails.
+     */
+    computeDiff(type: DiffType, content1: string, content2: string): Change[] {
+        // Robust validation at the worker boundary is critical.
+        if (!isString(content1)) {
+            throw new Error('Invalid input: content1 must be a string.');
         }
-        
-        if (typeof response.status !== 'string' || !['success', 'error'].includes(response.status)) {
-            throw new Error('Invalid response status');
+        if (!isString(content2)) {
+            throw new Error('Invalid input: content2 must be a string.');
         }
-        
-        if (typeof response.requestId !== 'string' || response.requestId.trim() === '') {
-            throw new Error('Invalid requestId in response');
-        }
-        
-        self.postMessage(response);
-    } catch (postError) {
-        console.error('Version Control: Failed to post message to main thread', postError);
-        // Attempt to send minimal error notification if possible
+
         try {
-            const fallbackRequestId = (response as any)?.requestId || 'unknown';
-            self.postMessage({
-                status: 'error',
-                requestId: fallbackRequestId,
-                error: {
-                    message: `Failed to send response: ${postError instanceof Error ? postError.message : 'Unknown error'}`
-                }
-            } as DiffWorkerErrorResponse);
-        } catch (fallbackError) {
-            console.error('Version Control: Failed to send fallback error message', fallbackError);
-        }
-    }
-}
+            let changes: Change[];
 
-// Main worker message handler
-self.onmessage = (event: MessageEvent) => {
-    try {
-        // Validate the event and its data
-        if (!event || !('data' in event)) {
-            throw new Error('Received invalid message event');
-        }
+            switch (type) {
+                case 'lines':
+                    changes = diffLines(content1, content2, { newlineIsToken: true });
+                    break;
+                case 'words':
+                    changes = diffWordsWithSpace(content1, content2);
+                    break;
+                case 'chars':
+                    changes = diffChars(content1, content2);
+                    break;
+                case 'json':
+                    // FIX: The `diffJson` function does not accept the `newlineIsToken` option.
+                    // It has its own specific options, but for this use case, no options are needed.
+                    changes = diffJson(content1, content2);
+                    break;
+                default:
+                    throw new Error(`Unsupported diff type: ${type}`);
+            }
 
-        // Validate request structure
-        validateWorkerRequest(event.data);
-        
-        const { requestId, content1, content2 } = event.data as DiffWorkerRequest;
-        
-        // Perform the CPU-intensive diff operation
-        let changes: Change[];
-        try {
-            changes = diffLines(content1, content2, { 
-                newlineIsToken: true,
-            });
+            // Post-condition validation ensures the diff library behaves as expected.
+            if (!Array.isArray(changes)) {
+                // This case should be rare but protects against unexpected library behavior.
+                throw new Error('Diff algorithm returned an invalid result format.');
+            }
+
+            return changes;
         } catch (diffError) {
-            throw new Error(`Diff calculation failed: ${diffError instanceof Error ? diffError.message : 'Unknown error'}`);
+            // Wrap any error from the diff library for better context on the main thread.
+            const message = diffError instanceof Error ? diffError.message : String(diffError);
+            throw new Error(`Diff calculation failed: ${message}`);
         }
-        
-        // Validate output
-        if (!Array.isArray(changes)) {
-            throw new Error('Diff algorithm returned invalid result format');
-        }
-        
-        // Create and send success response
-        const response: DiffWorkerSuccessResponse = {
-            status: 'success',
-            requestId,
-            changes
-        };
-        
-        safePostMessage(response);
-        
-    } catch (error) {
-        // Create comprehensive error response
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        const errorStack = error instanceof Error ? error.stack : undefined;
-        
-        const response: DiffWorkerErrorResponse = {
-            status: 'error',
-            requestId: (event?.data as any)?.requestId || 'unknown',
-            error: {
-                message: errorMessage,
-                ...(errorStack ? { stack: errorStack } : {})
-            }
-        };
-        
-        safePostMessage(response);
     }
 };
 
-// Handle uncaught errors in the worker
-self.onerror = (error: ErrorEvent) => {
-    console.error('Version Control: Uncaught error in diff worker', {
-        message: error.message,
-        filename: error.filename,
-        lineno: error.lineno,
-        colno: error.colno,
-        error: error.error
-    });
-    
-    // Try to notify main thread if we have a requestId context
-    // Note: This is best-effort since we may not have the requestId
-    try {
-        self.postMessage({
-            status: 'error',
-            requestId: 'unknown',
-            error: {
-                message: `Uncaught worker error: ${error.message}`,
-                stack: error.error?.stack || `${error.filename}:${error.lineno}:${error.colno}`
-            }
-        } as DiffWorkerErrorResponse);
-    } catch (e) {
-        console.error('Version Control: Failed to report uncaught error', e);
-    }
-};
-
-// Graceful shutdown handling
-self.addEventListener('close', () => {
-    console.debug('Version Control: Diff worker shutting down gracefully');
-});
+// Expose the API to the main thread. Comlink handles all the communication boilerplate.
+expose(diffEngine);
