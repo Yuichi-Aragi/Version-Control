@@ -19,6 +19,7 @@ export const TYPES = {
   Store: Symbol.for('Store'),
   // Low-level Storage Services & Repositories
   PathService: Symbol.for('PathService'),
+  StorageService: Symbol.for('StorageService'),
   CentralManifestRepo: Symbol.for('CentralManifestRepo'),
   NoteManifestRepo: Symbol.for('NoteManifestRepo'),
   VersionContentRepo: Symbol.for('VersionContentRepo'),
