@@ -9,7 +9,7 @@ import { UIService } from '../../services/ui-service';
 import { ManifestManager } from '../../core/manifest-manager';
 import { ExportManager } from '../../services/export-manager';
 import { VersionManager } from '../../core/version-manager';
-import { BackgroundTaskManager } from '../../core/BackgroundTaskManager';
+import { BackgroundTaskManager } from '../../core/tasks/BackgroundTaskManager';
 import { TYPES } from '../../types/inversify.types';
 import { isPluginUnloading } from './ThunkUtils';
 import type VersionControlPlugin from '../../main';

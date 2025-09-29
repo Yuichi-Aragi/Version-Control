@@ -8,7 +8,7 @@ import { loadHistoryForNoteId, initializeView, loadHistory } from './core.thunks
 import { VersionManager } from '../../core/version-manager';
 import { NoteManager } from '../../core/note-manager';
 import { UIService } from '../../services/ui-service';
-import { BackgroundTaskManager } from '../../core/BackgroundTaskManager';
+import { BackgroundTaskManager } from '../../core/tasks/BackgroundTaskManager';
 import { ManifestManager } from '../../core/manifest-manager';
 import { TYPES } from '../../types/inversify.types';
 import { isPluginUnloading } from './ThunkUtils';

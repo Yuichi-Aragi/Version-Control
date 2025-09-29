@@ -1,20 +1,122 @@
 import { App, TFolder } from 'obsidian';
+import type { Container } from 'inversify';
 import type { AppThunk, AppStore } from '../store';
 import { actions } from '../appSlice';
 import type { VersionHistoryEntry } from '../../types';
-import { AppStatus, type ActionItem, type SortOrder } from '../state';
-import { VIEW_TYPE_VERSION_PREVIEW } from '../../constants';
+import { AppStatus, type ActionItem, type SortOrder, type SortProperty, type SortDirection } from '../state';
+import { VIEW_TYPE_VERSION_PREVIEW, CHANGELOG_URL } from '../../constants';
 import { initializeView } from './core.thunks';
 import { UIService } from '../../services/ui-service';
 import { VersionManager } from '../../core/version-manager';
 import { TYPES } from '../../types/inversify.types';
 import { isPluginUnloading } from './ThunkUtils';
 import { versionActions } from '../../ui/VersionActions';
-import type { SortProperty, SortDirection } from '../../state/state';
+import type VersionControlPlugin from '../../main';
+import { requestWithRetry } from '../../utils/network';
 
 /**
  * Thunks related to UI interactions, such as opening panels, tabs, and modals.
  */
+
+let changelogCache: string | null = null;
+let isFetchingChangelog = false; // Flag to prevent concurrent fetches
+
+/**
+ * Updates the plugin version in settings to the current manifest version.
+ * This is called after a changelog is successfully displayed to prevent it
+ * from showing again on the next startup.
+ * @param container The Inversify container.
+ */
+const updateVersionInSettings = async (container: Container): Promise<void> => {
+    try {
+        const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
+        const currentPluginVersion = plugin.manifest.version;
+        if (plugin.settings.version !== currentPluginVersion) {
+            plugin.settings.version = currentPluginVersion;
+            await plugin.saveSettings();
+        }
+    } catch (error) {
+        console.error("Version Control: Failed to save updated version to settings.", error);
+        // This is a non-critical error, so we don't bother the user with a notice.
+    }
+};
+
+export const showChangelogPanel = (options: { forceRefresh?: boolean } = {}): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
+    
+    const { forceRefresh = false } = options;
+    const uiService = container.get<UIService>(TYPES.UIService);
+
+    // If a manual view is requested, we should always update the version upon success.
+    // If we have a cache and it's not a forced refresh, just show it.
+    if (!forceRefresh && changelogCache) {
+        dispatch(actions.openPanel({ type: 'changelog', content: changelogCache }));
+        return;
+    }
+
+    if (isFetchingChangelog) {
+        // If a fetch is already in progress, don't start another one.
+        // If it was a manual request, let the user know.
+        if (forceRefresh) {
+            uiService.showNotice("Already fetching changelog...", 2000);
+        }
+        return;
+    }
+
+    if (!navigator.onLine) {
+        if (forceRefresh) { // Only show notice on manual attempts
+            uiService.showNotice("No internet connection available.", 4000);
+        }
+        return;
+    }
+
+    isFetchingChangelog = true;
+    dispatch(actions.openPanel({ type: 'changelog', content: null })); // Show loading state
+    if (forceRefresh) {
+        uiService.showNotice("Fetching latest changelog...", 2000);
+    }
+
+    try {
+        const response = await requestWithRetry(CHANGELOG_URL);
+        changelogCache = response.text;
+        
+        const currentState = getState();
+        // The view is considered stable if it's in a state that can show a panel.
+        const canOpenPanel = currentState.status === AppStatus.READY || currentState.status === AppStatus.PLACEHOLDER || currentState.status === AppStatus.LOADING;
+        // We open it if there's no panel, or if the changelog loading panel is still visible.
+        // This prevents overwriting a confirmation dialog or other important UI.
+        const isPanelSafeToOverwrite = !currentState.panel || currentState.panel.type === 'changelog';
+        
+        if (canOpenPanel && isPanelSafeToOverwrite) {
+            dispatch(actions.openPanel({ type: 'changelog', content: changelogCache }));
+        }
+
+        // On successful fetch and display, update the stored version.
+        // This covers both initial load and manual refresh from a button.
+        await updateVersionInSettings(container);
+
+    } catch (error) {
+        console.error("Version Control: Failed to fetch changelog.", error);
+        
+        let errorMessage = "Could not fetch changelog. Check console for details.";
+        if (!navigator.onLine) {
+            errorMessage = "Could not fetch changelog: No internet connection.";
+        } else if (error instanceof Error && (error.message.includes('status') || error.message.includes('Failed to fetch') || error.message.includes('No internet connection'))) {
+            errorMessage = "Could not fetch changelog: The server could not be reached.";
+        }
+
+        uiService.showNotice(errorMessage, 5000);
+        
+        if (getState().panel?.type === 'changelog') {
+            dispatch(actions.closePanel());
+        }
+        // Do not update settings on failure.
+    } finally {
+        if (!isPluginUnloading(container)) {
+            isFetchingChangelog = false;
+        }
+    }
+};
 
 export const viewVersionInPanel = (version: VersionHistoryEntry): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;

@@ -1,7 +1,8 @@
 import { App, moment } from 'obsidian';
+import type { Change } from 'diff';
 import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
-import type { VersionHistoryEntry, DiffTarget } from '../../types';
+import type { VersionHistoryEntry, DiffTarget, DiffType } from '../../types';
 import { AppStatus, type ActionItem } from '../state';
 import { VIEW_TYPE_VERSION_DIFF } from '../../constants';
 import { UIService } from '../../services/ui-service';
@@ -65,7 +66,7 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
                 id: version.id,
                 data: version,
                 text: versionLabel,
-                subtext: moment(version.timestamp).format('LLLL'),
+                subtext: (moment as any)(version.timestamp).format('LLLL'),
             };
         } else {
             return {
@@ -93,7 +94,6 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
 export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: DiffTarget, mode: 'panel' | 'tab'): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
 
-    // This thunk is the final step in an action panel flow. It must close the panel.
     dispatch(actions.closePanel());
 
     const uiService = container.get<UIService>(TYPES.UIService);
@@ -104,17 +104,20 @@ export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: Dif
     if (initialState.status !== AppStatus.READY || !initialState.noteId || !initialState.file) return;
     const { noteId } = initialState;
 
-    if (mode === 'tab') {
-        uiService.showNotice("Generating diff for new tab...", 2000);
-        try {
-            const diffChanges = await diffManager.generateDiff(noteId, version1, version2);
+    uiService.showNotice("Generating diff...", 2000);
 
-            const stateAfterGen = getState();
-            if (isPluginUnloading(container) || stateAfterGen.status !== AppStatus.READY || stateAfterGen.noteId !== noteId || !stateAfterGen.file) {
-                uiService.showNotice("View context changed while generating diff. Tab opening cancelled.", 4000);
-                return;
-            }
+    try {
+        const content1 = await diffManager.getContent(noteId, version1);
+        const content2 = await diffManager.getContent(noteId, version2);
+        
+        const stateAfterContentFetch = getState();
+        if (isPluginUnloading(container) || stateAfterContentFetch.status !== AppStatus.READY || stateAfterContentFetch.noteId !== noteId || !stateAfterContentFetch.file) {
+            uiService.showNotice("View context changed while fetching content. Diff cancelled.", 4000);
+            return;
+        }
 
+        if (mode === 'tab') {
+            const diffChanges = await diffManager.computeDiff(noteId, version1.id, version2.id, content1, content2, 'lines');
             const leaf = app.workspace.getLeaf('tab');
             await leaf.setViewState({
                 type: VIEW_TYPE_VERSION_DIFF,
@@ -123,25 +126,20 @@ export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: Dif
                     version1,
                     version2,
                     diffChanges,
-                    noteName: stateAfterGen.file.basename,
-                    notePath: stateAfterGen.file.path,
+                    noteName: stateAfterContentFetch.file.basename,
+                    notePath: stateAfterContentFetch.file.path,
+                    content1,
+                    content2,
                 }
             });
             app.workspace.revealLeaf(leaf);
-        } catch (error) {
-            console.error("Version Control: Error generating diff for tab.", error);
-            uiService.showNotice("Failed to generate diff. Check the console for details.");
+            return;
         }
-        return;
-    }
 
-    // --- Panel Mode Logic ---
-    dispatch(actions.startDiffGeneration({ version1, version2 }));
-    uiService.showNotice("Generating diff in background...", 3000);
-
-    try {
-        const diffChanges = await diffManager.generateDiff(noteId, version1, version2);
-
+        // --- Panel Mode Logic ---
+        dispatch(actions.startDiffGeneration({ version1, version2, content1, content2 }));
+        const diffChanges = await diffManager.computeDiff(noteId, version1.id, version2.id, content1, content2, 'lines');
+        
         const finalState = getState();
         if (isPluginUnloading(container) || finalState.status !== AppStatus.READY || finalState.noteId !== noteId) {
             uiService.showNotice("View context changed, diff cancelled.", 3000);
@@ -153,8 +151,8 @@ export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: Dif
         uiService.showNotice("Diff is ready. Click the indicator to view.", 4000);
 
     } catch (error) {
-        console.error("Version Control: Error during background diff generation.", error);
-        uiService.showNotice("Failed to generate diff. Check the console for details.", 5000);
+        console.error("Version Control: Error generating diff.", error);
+        uiService.showNotice("Failed to generate diff. Check the console for details.");
         dispatch(actions.diffGenerationFailed({ version1Id: version1.id, version2Id: version2.id }));
     }
 };
@@ -169,20 +167,42 @@ export const viewReadyDiff = (): AppThunk => (dispatch, getState, container) => 
     const diffRequest = state.diffRequest;
     if (!diffRequest) return;
 
-    if (diffRequest.status === 'generating') {
-        const v1Label = diffRequest.version1.name || `V${diffRequest.version1.versionNumber}`;
-        const v2Label = diffRequest.version2.name;
-        uiService.showNotice(`A diff between ${v1Label} and ${v2Label} is already being generated.`, 4000);
+    if (diffRequest.status === 'generating' || diffRequest.status === 're-diffing') {
+        uiService.showNotice(`A diff is currently being generated.`, 4000);
         return;
     }
     
     if (diffRequest.status !== 'ready' || !diffRequest.diffChanges) return;
 
-    const { version1, version2, diffChanges } = diffRequest;
+    const { version1, version2, diffChanges, diffType, content1, content2 } = diffRequest;
 
-    // FIX: Dispatch clearDiffRequest first to ensure the indicator is hidden immediately
-    // in the same render cycle that the panel is opened. The diffRequest object is
-    // captured in a local variable, so its data is safe to use for opening the panel.
     dispatch(actions.clearDiffRequest());
-    dispatch(actions.openPanel({ type: 'diff', version1, version2, diffChanges }));
+    dispatch(actions.openPanel({ type: 'diff', version1, version2, diffChanges, diffType, content1, content2, isReDiffing: false }));
+};
+
+export const recomputeDiff = (newDiffType: DiffType): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
+    const diffManager = container.get<DiffManager>(TYPES.DiffManager);
+    const uiService = container.get<UIService>(TYPES.UIService);
+    const state = getState();
+
+    if (state.panel?.type !== 'diff') return;
+    const { version1, version2, content1, content2 } = state.panel;
+    const noteId = state.noteId;
+    if (!noteId) return;
+
+    dispatch(actions.startReDiffing({ newDiffType }));
+    try {
+        const diffChanges = await diffManager.computeDiff(noteId, version1.id, version2.id, content1, content2, newDiffType);
+        dispatch(actions.reDiffingSucceeded({ diffChanges }));
+    } catch (error) {
+        console.error("Version Control: Failed to re-compute diff.", error);
+        uiService.showNotice("Failed to re-compute diff. Check console.", 4000);
+        dispatch(actions.reDiffingFailed());
+    }
+};
+
+export const computeDiffOnly = (diffType: DiffType, noteId: string, version1: VersionHistoryEntry, version2: DiffTarget, content1: string, content2: string): AppThunk<Promise<Change[]>> => async (_dispatch, _getState, container) => {
+    const diffManager = container.get<DiffManager>(TYPES.DiffManager);
+    return await diffManager.computeDiff(noteId, version1.id, version2.id, content1, content2, diffType);
 };
