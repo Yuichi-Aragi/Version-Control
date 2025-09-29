@@ -1,6 +1,6 @@
 ***
 
-**Version: 1.9.14**
+**Version: 1.9.15**
 #### ✨ New Features
 
 *   **Advanced Diffing Modes:** You can now choose how to visualize the differences between two versions of a note. In addition to the standard line-by-line comparison, you can now select:
