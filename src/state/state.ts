@@ -1,5 +1,5 @@
 import { TFile } from 'obsidian';
-import type { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, DiffRequest } from '../types';
+import type { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, DiffRequest, DiffType } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
 import type { AppThunk } from './store';
 import type { Change } from 'diff';
@@ -39,11 +39,20 @@ export interface DiffPanel {
     type: 'diff';
     version1: VersionHistoryEntry;
     version2: DiffTarget;
-    diffChanges: Change[] | null; // null while loading
+    diffChanges: Change[] | null; // null while loading initial diff
+    diffType: DiffType;
+    content1: string;
+    content2: string;
+    isReDiffing?: boolean;
 }
 
 export interface SettingsPanel {
     type: 'settings';
+}
+
+export interface ChangelogPanel {
+    type: 'changelog';
+    content: string | null; // null while loading
 }
 
 /** A generic item for the ActionPanel. */
@@ -67,7 +76,7 @@ export interface ActionPanel<T> {
     showFilter?: boolean; // Whether to show a filter/search input.
 }
 
-export type PanelState = ConfirmationPanel | PreviewPanel | DiffPanel | SettingsPanel | ActionPanel<any> | null;
+export type PanelState = ConfirmationPanel | PreviewPanel | DiffPanel | SettingsPanel | ActionPanel<any> | ChangelogPanel | null;
 
 // --- Core Application State ---
 

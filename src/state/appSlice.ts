@@ -5,7 +5,7 @@ import type { Change } from 'diff';
 import { find } from 'lodash-es';
 import { AppStatus, getInitialState } from './state';
 import type { AppState, PanelState, SortOrder } from './state';
-import type { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, ActiveNoteInfo } from '../types';
+import type { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, ActiveNoteInfo, DiffType } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
 
 const initialState: AppState = getInitialState(DEFAULT_SETTINGS);
@@ -43,7 +43,9 @@ export const appSlice = createSlice({
                 // Reset other fields
                 state.noteId = null;
                 state.history = [];
-                state.panel = null;
+                if (state.panel?.type !== 'changelog') {
+                    state.panel = null;
+                }
             }
         },
         historyLoadedSuccess(state, action: PayloadAction<{ file: TFile; noteId: string | null; history: VersionHistoryEntry[] }>) {
@@ -52,7 +54,9 @@ export const appSlice = createSlice({
                 state.noteId = action.payload.noteId;
                 state.history = action.payload.history;
                 state.isProcessing = false;
-                state.panel = null;
+                if (state.panel?.type !== 'changelog') {
+                    state.panel = null;
+                }
                 state.namingVersionId = null;
                 state.highlightedVersionId = null;
                 state.diffRequest = null;
@@ -63,7 +67,9 @@ export const appSlice = createSlice({
             state.file = null;
             state.noteId = null;
             state.history = [];
-            state.panel = null;
+            if (state.panel?.type !== 'changelog') {
+                state.panel = null;
+            }
             state.error = null;
         },
 
@@ -75,8 +81,21 @@ export const appSlice = createSlice({
             state.isRenaming = action.payload;
         },
         openPanel(state, action: PayloadAction<NonNullable<PanelState>>) {
+            const panelToOpen = action.payload;
+
+            // Changelog is special: it's not note-dependent and can be shown
+            // as soon as the view is available, even in a placeholder or loading state.
+            if (panelToOpen.type === 'changelog') {
+                if (state.status === AppStatus.READY || state.status === AppStatus.PLACEHOLDER || state.status === AppStatus.LOADING) {
+                    state.panel = panelToOpen;
+                }
+                // We don't reset other state fields here, as the changelog is an overlay.
+                return;
+            }
+
+            // All other panels are note-dependent and require a fully ready state.
             if (state.status === AppStatus.READY) {
-                state.panel = action.payload;
+                state.panel = panelToOpen;
                 state.isProcessing = false;
                 state.namingVersionId = null;
                 state.isSearchActive = false;
@@ -84,7 +103,8 @@ export const appSlice = createSlice({
             }
         },
         closePanel(state) {
-            if (state.status === AppStatus.READY) {
+            // A panel can be closed in any state where it could be open.
+            if (state.status === AppStatus.READY || state.status === AppStatus.PLACEHOLDER || state.status === AppStatus.LOADING) {
                 state.panel = null;
             }
         },
@@ -161,12 +181,15 @@ export const appSlice = createSlice({
                 state.highlightedVersionId = action.payload.versionId;
             }
         },
-        startDiffGeneration(state, action: PayloadAction<{ version1: VersionHistoryEntry; version2: DiffTarget }>) {
+        startDiffGeneration(state, action: PayloadAction<{ version1: VersionHistoryEntry; version2: DiffTarget; content1: string; content2: string }>) {
             if (state.status === AppStatus.READY) {
                 state.diffRequest = {
                     status: 'generating',
                     version1: action.payload.version1,
                     version2: action.payload.version2,
+                    content1: action.payload.content1,
+                    content2: action.payload.content2,
+                    diffType: 'lines',
                     diffChanges: null,
                 };
                 state.panel = null; // Close any open panel when starting a diff
@@ -186,6 +209,23 @@ export const appSlice = createSlice({
         clearDiffRequest(state) {
             if (state.status === AppStatus.READY) {
                 state.diffRequest = null;
+            }
+        },
+        startReDiffing(state, action: PayloadAction<{ newDiffType: DiffType }>) {
+            if (state.panel?.type === 'diff') {
+                state.panel.isReDiffing = true;
+                state.panel.diffType = action.payload.newDiffType;
+            }
+        },
+        reDiffingSucceeded(state, action: PayloadAction<{ diffChanges: Change[] }>) {
+            if (state.panel?.type === 'diff') {
+                state.panel.isReDiffing = false;
+                state.panel.diffChanges = action.payload.diffChanges;
+            }
+        },
+        reDiffingFailed(state) {
+            if (state.panel?.type === 'diff') {
+                state.panel.isReDiffing = false;
             }
         },
 
