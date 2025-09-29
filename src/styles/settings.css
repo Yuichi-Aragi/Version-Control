@@ -38,8 +38,8 @@
     border-radius: var(--radius-m);
     border: 1px solid var(--background-modifier-border);
     
-    /* Padding for the content inside the scrollable area. */
-    padding: var(--size-4-4);
+    /* NEW: Reduced horizontal padding for a more compact layout. */
+    padding: var(--size-4-3) var(--size-4-2);
 }
 
 .v-settings-actions {

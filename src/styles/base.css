@@ -57,6 +57,7 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    position: relative;
 }
 
 .v-ready-state-container {
@@ -73,6 +74,12 @@
    preventing layout conflicts with the placeholder component. */
 .v-ready-state-container.is-hidden {
     display: none;
+}
+
+/* NEW: Visual feedback for background search processing */
+.v-history-list.is-searching-bg {
+    opacity: 0.7;
+    transition: opacity 0.2s ease-in-out;
 }
 
 /* Animations */
