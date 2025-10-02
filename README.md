@@ -6,6 +6,15 @@ So in my work flow I have to constantly modify the same version of the note. I'm
 
 A simple yet powerful versioning system for your Obsidian notes. Never lose a good idea again just because you rewrote a sentence. Create, manage, and restore different versions of your notes right inside Obsidian.
 
+### Why Choose This Plugin?
+
+This plugin is designed for writers, thinkers, and perfectionists who want a simple, intuitive, and robust way to manage the evolution of their notes. If you've ever found yourself creating multiple copies of a file just to explore a new idea, or wished you could go back to a previous version of a paragraph, this plugin is for you.
+
+*   **Per-File Version Control:** Unlike Git, which versions your entire vault, this plugin focuses on individual notes. This means you can track the history of a single piece of writing without the complexity of commits, branches, or repositories.
+*   **Simplicity and Intuition:** If you find Git's learning curve steep or its features excessive for your needs, this plugin offers a straightforward alternative. It's designed to "just work" out of the box, with a clear and accessible interface.
+*   **Mobile-Friendly:** Running a full Git client on mobile or tablets can be impractical. This plugin provides a reliable, self-contained versioning system that works seamlessly across all your devices, including mobile.
+*   **Plays Well with Others:** You can use this plugin alongside Git without any conflicts. Let Git manage your overall vault structure and synchronization, while this plugin handles the fine-grained versioning of your individual notes.
+
 ---
 
 ### The Interface
