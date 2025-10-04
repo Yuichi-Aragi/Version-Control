@@ -5,6 +5,8 @@ export interface RetryOptions {
     delay: number; // initial delay in ms
     maxDelay: number; // max delay in ms
     jitter: boolean;
+    backoffFactor?: number; // multiplier for exponential backoff
+    retryCondition?: (error: unknown, response?: RequestUrlResponse) => boolean; // custom retry condition
 }
 
 const DEFAULT_RETRY_OPTIONS: Required<RetryOptions> = {
@@ -12,6 +14,8 @@ const DEFAULT_RETRY_OPTIONS: Required<RetryOptions> = {
     delay: 500,
     maxDelay: 5000,
     jitter: true,
+    backoffFactor: 2,
+    retryCondition: () => true,
 };
 
 /**
@@ -26,12 +30,18 @@ function validateRetryOptions(options: Partial<RetryOptions>): Required<RetryOpt
         if (typeof options.retries !== 'number' || !Number.isInteger(options.retries) || options.retries < 0) {
             throw new TypeError('RetryOptions.retries must be a non-negative integer');
         }
+        if (options.retries > 10) {
+            throw new TypeError('RetryOptions.retries must not exceed 10 to prevent resource exhaustion');
+        }
     }
 
     // Validate delay
     if (options.delay !== undefined) {
         if (typeof options.delay !== 'number' || options.delay < 0 || !isFinite(options.delay)) {
             throw new TypeError('RetryOptions.delay must be a non-negative finite number');
+        }
+        if (options.delay > 30000) {
+            throw new TypeError('RetryOptions.delay must not exceed 30 seconds');
         }
     }
 
@@ -40,23 +50,33 @@ function validateRetryOptions(options: Partial<RetryOptions>): Required<RetryOpt
         if (typeof options.maxDelay !== 'number' || options.maxDelay < 0 || !isFinite(options.maxDelay)) {
             throw new TypeError('RetryOptions.maxDelay must be a non-negative finite number');
         }
+        if (options.maxDelay > 300000) {
+            throw new TypeError('RetryOptions.maxDelay must not exceed 5 minutes');
+        }
         // Ensure maxDelay is not less than delay
         if (options.delay !== undefined && options.maxDelay < options.delay) {
             throw new TypeError('RetryOptions.maxDelay must be greater than or equal to delay');
         }
-    } else if (options.delay !== undefined && options.delay > DEFAULT_RETRY_OPTIONS.maxDelay) {
-        // If maxDelay is not provided but delay exceeds default maxDelay, adjust maxDelay accordingly
-        return {
-            retries: options.retries ?? DEFAULT_RETRY_OPTIONS.retries,
-            delay: options.delay,
-            maxDelay: options.delay,
-            jitter: options.jitter ?? DEFAULT_RETRY_OPTIONS.jitter,
-        };
+    }
+
+    // Validate backoffFactor
+    if (options.backoffFactor !== undefined) {
+        if (typeof options.backoffFactor !== 'number' || options.backoffFactor < 1 || !isFinite(options.backoffFactor)) {
+            throw new TypeError('RetryOptions.backoffFactor must be a finite number >= 1');
+        }
+        if (options.backoffFactor > 10) {
+            throw new TypeError('RetryOptions.backoffFactor must not exceed 10');
+        }
     }
 
     // Validate jitter
     if (options.jitter !== undefined && typeof options.jitter !== 'boolean') {
         throw new TypeError('RetryOptions.jitter must be a boolean');
+    }
+
+    // Validate retryCondition
+    if (options.retryCondition !== undefined && typeof options.retryCondition !== 'function') {
+        throw new TypeError('RetryOptions.retryCondition must be a function');
     }
 
     // Apply defaults and ensure all required properties are present
@@ -65,6 +85,8 @@ function validateRetryOptions(options: Partial<RetryOptions>): Required<RetryOpt
         delay: options.delay ?? DEFAULT_RETRY_OPTIONS.delay,
         maxDelay: options.maxDelay ?? DEFAULT_RETRY_OPTIONS.maxDelay,
         jitter: options.jitter ?? DEFAULT_RETRY_OPTIONS.jitter,
+        backoffFactor: options.backoffFactor ?? DEFAULT_RETRY_OPTIONS.backoffFactor,
+        retryCondition: options.retryCondition ?? DEFAULT_RETRY_OPTIONS.retryCondition,
     };
 
     // Final validation: ensure maxDelay >= delay
@@ -86,14 +108,8 @@ function wait(ms: number): Promise<void> {
         throw new TypeError('Delay must be a non-negative finite number');
     }
     
-    return new Promise(resolve => {
-        const timeoutId = setTimeout(() => {
-            resolve();
-        }, ms);
-        
-        // Prevent potential memory leaks in long-running applications
-        // by ensuring the timeout is properly managed (though setTimeout
-        // is generally well-behaved in modern JS engines)
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
     });
 }
 
@@ -111,6 +127,37 @@ function isOnline(): boolean {
         // as we cannot definitively determine offline status
         return true;
     }
+}
+
+/**
+ * Validates a URL string with strict checks.
+ * @param url The URL to validate
+ * @returns The validated URL string
+ * @throws TypeError if URL is invalid
+ */
+function validateUrl(url: string): string {
+    if (typeof url !== 'string') {
+        throw new TypeError('URL must be a string');
+    }
+    
+    if (url.trim() === '') {
+        throw new TypeError('URL cannot be empty');
+    }
+    
+    // Check for potentially dangerous protocols
+    const trimmedUrl = url.trim();
+    if (trimmedUrl.startsWith('javascript:') || trimmedUrl.startsWith('data:') || trimmedUrl.startsWith('vbscript:')) {
+        throw new TypeError('URL contains potentially unsafe protocol');
+    }
+    
+    try {
+        // Try to construct a URL object to validate format
+        new URL(trimmedUrl);
+    } catch {
+        throw new TypeError('URL is not in a valid format');
+    }
+    
+    return trimmedUrl;
 }
 
 /**
@@ -152,13 +199,7 @@ export async function requestWithRetry(
     options: Partial<RetryOptions> = {}
 ): Promise<RequestUrlResponse> {
     // Strict input validation - proactive rather than reactive
-    if (typeof url !== 'string') {
-        throw new TypeError('URL must be a string');
-    }
-    
-    if (url.trim() === '') {
-        throw new TypeError('URL cannot be empty');
-    }
+    const validatedUrl = validateUrl(url);
     
     if (typeof options !== 'object' || options === null) {
         throw new TypeError('Options must be an object or undefined');
@@ -179,7 +220,10 @@ export async function requestWithRetry(
             }
             
             // Execute the request
-            const response = await requestUrl(url);
+            const response = await requestUrl({
+                url: validatedUrl,
+                throw: true,
+            });
             
             // Defensive check: ensure response object has expected structure
             if (typeof response !== 'object' || response === null) {
@@ -199,13 +243,24 @@ export async function requestWithRetry(
             }
             
             // Create specific error for non-2xx responses
-            lastError = new Error(`HTTP ${status}: Request failed with non-success status code`);
-            (lastError as any).statusCode = status;
-            (lastError as any).attempt = attempt + 1;
+            const httpError = new Error(`HTTP ${status}: Request failed with non-success status code`);
+            (httpError as any).statusCode = status;
+            (httpError as any).attempt = attempt + 1;
+            lastError = httpError;
+            
+            // Check if we should retry based on custom condition
+            if (!config.retryCondition(lastError, response)) {
+                break;
+            }
             
         } catch (error) {
             lastError = error;
             (lastError as any).attempt = attempt + 1;
+            
+            // Check if we should retry based on custom condition
+            if (!config.retryCondition(lastError)) {
+                break;
+            }
         }
         
         // If this was the final attempt, break and throw
@@ -219,7 +274,7 @@ export async function requestWithRetry(
         
         // Log retry attempt (maintain existing logging format for compatibility)
         console.warn(
-            `Version Control: Attempt ${attempt + 1} to fetch ${url} failed. Retrying in ${roundedDelay}ms...`,
+            `Version Control: Attempt ${attempt + 1} to fetch ${validatedUrl} failed. Retrying in ${roundedDelay}ms...`,
             lastError
         );
         
@@ -227,11 +282,11 @@ export async function requestWithRetry(
         await wait(nextDelay);
         
         // Apply exponential backoff, bounded by maxDelay
-        currentDelay = Math.min(currentDelay * 2, config.maxDelay);
+        currentDelay = Math.min(currentDelay * config.backoffFactor, config.maxDelay);
     }
     
     // Final error logging (maintain existing format for compatibility)
-    console.error(`Version Control: Final attempt to fetch ${url} failed.`, lastError);
+    console.error(`Version Control: Final attempt to fetch ${validatedUrl} failed.`, lastError);
     
     // Ensure we always throw an Error instance for consistent error handling
     if (lastError instanceof Error) {
