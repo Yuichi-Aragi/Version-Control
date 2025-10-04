@@ -1,7 +1,7 @@
 {
 	"id": "version-control",
 	"name": "Version Control",
-	"version": "1.9.15",
+	"version": "1.9.16",
 	"minAppVersion": "1.7.0",
 	"description": "Fearlessly edit. Capture intentional, local snapshots of your notes at any point. Stop relying on background autosaves—take charge of your document's history and versions.",
 	"author": "Yuichi-Aragi",
