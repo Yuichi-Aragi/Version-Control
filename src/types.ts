@@ -1,9 +1,11 @@
-import type { TFile } from "obsidian";
+import type { TFile, EditorPosition } from "obsidian";
 import type { Change } from "diff";
 
 export interface VersionControlSettings {
   version: string;
   databasePath: string;
+  noteIdFrontmatterKey: string;
+  keyUpdatePathFilters: string[]; // Array of regex strings for key update blacklist
   maxVersionsPerNote: number;
   autoCleanupOldVersions: boolean;
   autoCleanupDays: number;
@@ -38,27 +40,42 @@ export interface CentralManifest {
   };
 }
 
+export interface BranchState {
+    content: string;
+    cursor: EditorPosition;
+    scroll: { left: number; top: number };
+}
+
+export interface Branch {
+    versions: {
+        [versionId: string]: {
+            versionNumber: number;
+            timestamp: string;
+            name?: string;
+            size: number;
+        };
+    };
+    totalVersions: number;
+    // Per-branch settings can override any global setting.
+    settings?: Partial<Omit<VersionControlSettings, 'databasePath' | 'centralManifest'>> & { isGlobal?: boolean };
+    state?: BranchState; // Saved editor state
+}
+
 export interface NoteManifest {
   noteId: string;
-  notePath:string;
-  versions: {
-    [versionId: string]: {
-      versionNumber: number;
-      timestamp: string;
-      name?: string;
-      size: number;
-    };
+  notePath: string;
+  currentBranch: string;
+  branches: {
+      [branchName: string]: Branch;
   };
-  totalVersions: number;
   createdAt: string;
   lastModified: string;
-  // Per-note settings can override any global setting.
-  settings?: Partial<Omit<VersionControlSettings, 'databasePath' | 'centralManifest'>> & { isGlobal?: boolean };
 }
 
 export interface VersionData {
   id: string;
   noteId: string;
+  branchName: string;
   versionNumber: number;
   timestamp: string;
   name?: string;
@@ -69,7 +86,8 @@ export interface VersionData {
 export interface VersionHistoryEntry {
     id: string;
     noteId: string;
-    notePath: string; // Added for context in diffing
+    notePath: string;
+    branchName: string;
     versionNumber: number;
     timestamp: string;
     name?: string;

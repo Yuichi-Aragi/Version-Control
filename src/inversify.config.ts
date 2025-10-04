@@ -19,6 +19,7 @@ import { DiffManager } from './services/diff-manager';
 import { UIService } from './services/ui-service';
 import { BackgroundTaskManager } from './core/tasks/BackgroundTaskManager';
 import { StorageService } from './core/storage/storage-service';
+import { KeyUpdateManager } from './core/tasks/KeyUpdateManager';
 
 export function configureServices(plugin: VersionControlPlugin): Container {
   const container = new Container({
@@ -48,6 +49,7 @@ export function configureServices(plugin: VersionControlPlugin): Container {
   // Task Managers
   container.bind<CleanupManager>(TYPES.CleanupManager).to(CleanupManager);
   container.bind<BackgroundTaskManager>(TYPES.BackgroundTaskManager).to(BackgroundTaskManager);
+  container.bind<KeyUpdateManager>(TYPES.KeyUpdateManager).to(KeyUpdateManager);
   // Other Services
   container.bind<ExportManager>(TYPES.ExportManager).to(ExportManager);
   container.bind<DiffManager>(TYPES.DiffManager).to(DiffManager);
