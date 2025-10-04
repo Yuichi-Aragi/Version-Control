@@ -46,18 +46,22 @@ Have you ever been editing a note, trying to perfect it, only to realize you've 
 
 This plugin solves that. It allows you to save "snapshots" of your notes at any point in time. Think of it like a manual save point in a video game, but for your thoughts. You can create as many versions as you need, give them names, and easily jump back to any previous state.
 
+***
+
 ### Key Features
 
 *   💾 **Save Snapshots:** At any time, save the current state of your note as a new version. You can give it a custom name (e.g., "First Draft," "Added Research Links") for easy reference.
 
 *   👀 **Preview & Restore:** Quickly glance at the content of any old version without commitment. If you like what you see, restore it with a single click. Don't worry—the plugin automatically saves a backup of your current content before restoring!
 
-*   🔍 **Compare Versions (Diff):** See the exact changes between any two versions of your note, highlighting what was added, removed, or modified. (Obviously!)
+*   🔍 **Advanced Comparison (Diff):** See exactly what changed between any two versions. Go beyond standard line-by-line comparison with advanced modes like **Word**, **Character**, and **JSON Diff** to pinpoint every modification.
 
-*   🌿 **Create Deviations:** Found an old version with a brilliant idea you want to explore separately? Create a brand-new note from any version to branch your thoughts without cluttering the original.
-  
+*   🌿 **Create Deviations (New Note):** Want to turn an old version into a completely separate file? Create a "deviation" to start a brand-new note from any point in your history, perfect for major rewrites or spin-off ideas.
+
+*   🌳 **Explore with Branches (Same Note):** Need to try a different direction within the *same file*? Create a "branch" to work on parallel ideas. Each branch has its own independent history, so you can experiment freely without affecting your main draft.
+
 *   ⚙️ **Smart Cleanup:** Keep your history tidy. Set a maximum number of versions per note, or automatically clean up versions older than a certain number of days.
-  
+
 *   📤 **Export Your History:** Need to back up your work or use it elsewhere? Export the entire version history of a note to various formats, including Markdown, JSON, and plain text.
 
 *   💅 **Flexible Interface:** Choose between a detailed **Card View** that shows all actions at a glance, or a sleek, **Compact List View** for a more minimal look.
