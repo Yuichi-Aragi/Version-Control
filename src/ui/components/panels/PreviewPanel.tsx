@@ -52,11 +52,11 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
                         </h3>
                         <div className="v-panel-header-actions">
                             {!settings.renderMarkdownInPreview && (
-                                <button className="v-action-btn v-preview-toggle-btn" aria-label="Toggle markdown rendering" title="Toggle markdown rendering" onClick={toggleRenderMode}>
+                                <button className="v-action-btn v-preview-toggle-btn" aria-label="Toggle markdown rendering" onClick={toggleRenderMode}>
                                     <Icon name={localRenderMarkdown ? "code" : "book-open"} />
                                 </button>
                             )}
-                            <button className="clickable-icon v-panel-close" aria-label="Close preview" title="Close preview" onClick={handleClose}>
+                            <button className="clickable-icon v-panel-close" aria-label="Close preview" onClick={handleClose}>
                                 <Icon name="x" />
                             </button>
                         </div>

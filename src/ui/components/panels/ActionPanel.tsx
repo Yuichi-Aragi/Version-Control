@@ -17,17 +17,38 @@ export const ActionPanel: FC<ActionPanelProps> = ({ panelState }) => {
     const filterInputRef = useRef<HTMLInputElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
 
+    const { items, onCreateAction } = panelState;
+
     const filteredItems = useMemo(() => {
-        if (!filterQuery) return panelState.items;
-        const lowerCaseQuery = filterQuery.toLowerCase();
-        return panelState.items.filter(item =>
+        const query = filterQuery.trim();
+        const lowerCaseQuery = query.toLowerCase();
+
+        const results = items.filter(item =>
             item.text.toLowerCase().includes(lowerCaseQuery) ||
             (item.subtext && item.subtext.toLowerCase().includes(lowerCaseQuery))
         );
-    }, [panelState.items, filterQuery]);
+
+        if (onCreateAction && query && !items.some(item => item.text.toLowerCase() === lowerCaseQuery)) {
+            results.push({
+                id: '__create__',
+                data: query,
+                text: `Create new "${query}"`,
+                icon: 'plus-circle'
+            });
+        }
+        
+        return results;
+    }, [items, filterQuery, onCreateAction]);
 
     const handleClose = useCallback(() => dispatch(actions.closePanel()), [dispatch]);
-    const chooseItem = useCallback((data: any) => dispatch(panelState.onChooseAction(data)), [dispatch, panelState.onChooseAction]);
+    
+    const chooseItem = useCallback((item: any) => {
+        if (item.id === '__create__' && onCreateAction) {
+            dispatch(onCreateAction(item.data));
+        } else {
+            dispatch(panelState.onChooseAction(item.data));
+        }
+    }, [dispatch, panelState.onChooseAction, onCreateAction]);
 
     const debouncedSetFilter = useMemo(() => debounce(setFilterQuery, 150, true), []);
 
@@ -71,7 +92,7 @@ export const ActionPanel: FC<ActionPanelProps> = ({ panelState }) => {
             const activeItem = filteredItems[focusedIndex];
             if (activeItem) {
                 e.preventDefault();
-                chooseItem(activeItem.data);
+                chooseItem(activeItem);
             }
         }
 
@@ -88,13 +109,13 @@ export const ActionPanel: FC<ActionPanelProps> = ({ panelState }) => {
             <div className="v-inline-panel v-action-panel" onKeyDown={handleKeyDown}>
                 <div className="v-panel-header">
                     <h3>{panelState.title}</h3>
-                    <button className="clickable-icon v-panel-close" aria-label="Close" title="Close" onClick={handleClose}>
+                    <button className="clickable-icon v-panel-close" aria-label="Close" onClick={handleClose}>
                         <Icon name="x" />
                     </button>
                 </div>
                 {panelState.showFilter && (
                     <div className="v-action-panel-filter">
-                        <input ref={filterInputRef} type="text" placeholder="Filter options..." onChange={e => debouncedSetFilter(e.target.value)} />
+                        <input ref={filterInputRef} type="text" placeholder="Filter or create..." onChange={e => debouncedSetFilter(e.target.value)} />
                     </div>
                 )}
                 <div ref={listRef} className="v-action-panel-list">
@@ -108,7 +129,7 @@ export const ActionPanel: FC<ActionPanelProps> = ({ panelState }) => {
                                     key={item.id}
                                     className={clsx('v-action-panel-item', { 'is-selected': item.isSelected })}
                                     tabIndex={0}
-                                    onClick={() => chooseItem(item.data)}
+                                    onClick={() => chooseItem(item)}
                                     onFocus={() => setFocusedIndex(index)}
                                 >
                                     {iconToShow && (

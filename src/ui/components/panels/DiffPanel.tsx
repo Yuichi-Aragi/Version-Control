@@ -66,7 +66,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
     return (
         <div className="v-panel-container is-active">
             <div className="v-inline-panel v-diff-panel">
-                <div className="v-panel-header">
+                <div className="v-panel-header" onClick={(e) => e.stopPropagation()}>
                     <h3>Comparing versions</h3>
                     <div className="v-panel-header-actions">
                         <DiffDropdown currentType={diffType} onSelect={handleDiffTypeChange}>

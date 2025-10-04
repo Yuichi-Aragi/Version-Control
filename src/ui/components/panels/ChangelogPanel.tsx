@@ -39,7 +39,7 @@ export const ChangelogPanel: FC<ChangelogPanelProps> = ({ panelState }) => {
                     <div className="v-panel-header">
                         <h3>Plugin Changelog</h3>
                         <div className="v-panel-header-actions">
-                            <button className="clickable-icon v-panel-close" aria-label="Close changelog" title="Close changelog" onClick={handleClose}>
+                            <button className="clickable-icon v-panel-close" aria-label="Close changelog" onClick={handleClose}>
                                 <Icon name="x" />
                             </button>
                         </div>
