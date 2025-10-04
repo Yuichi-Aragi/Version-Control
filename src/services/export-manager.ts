@@ -139,6 +139,7 @@ export class ExportManager {
                         const result: VersionData = {
                             id: versionEntry.id,
                             noteId: versionEntry.noteId ?? noteId, // Fallback to provided noteId
+                            branchName: versionEntry.branchName,
                             versionNumber: typeof versionEntry.versionNumber === 'number' ? versionEntry.versionNumber : 0,
                             timestamp: versionEntry.timestamp ?? new Date().toISOString(),
                             content: safeContent,
@@ -195,6 +196,7 @@ export class ExportManager {
                     return {
                         id: 'unknown',
                         noteId: 'unknown',
+                        branchName: 'unknown',
                         versionNumber: 0,
                         timestamp: new Date().toISOString(),
                         size: 0,
@@ -205,6 +207,7 @@ export class ExportManager {
                 return {
                     id: typeof v.id === 'string' ? v.id : 'unknown',
                     noteId: typeof v.noteId === 'string' ? v.noteId : 'unknown',
+                    branchName: typeof v.branchName === 'string' ? v.branchName : 'unknown',
                     versionNumber: typeof v.versionNumber === 'number' ? v.versionNumber : 0,
                     timestamp: typeof v.timestamp === 'string' ? v.timestamp : new Date().toISOString(),
                     size: typeof v.size === 'number' ? v.size : 0,
