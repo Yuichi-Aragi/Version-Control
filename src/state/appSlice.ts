@@ -31,7 +31,16 @@ export const appSlice = createSlice({
                 state.file = null;
                 state.noteId = null;
                 state.history = [];
+                state.currentBranch = null;
+                state.availableBranches = [];
+                if (state.panel?.type !== 'changelog') {
+                    state.panel = null;
+                }
             } else {
+                const shouldPreservePanel =
+                    (state.panel?.type === 'diff' || state.panel?.type === 'preview') &&
+                    state.file?.path === file.path;
+
                 // Avoid unnecessary loading states if the view is already correct
                 if (state.status === AppStatus.READY && state.file?.path === file.path && !state.isProcessing) {
                     if (state.noteId === action.payload.noteId && action.payload.source !== 'manifest') {
@@ -43,20 +52,29 @@ export const appSlice = createSlice({
                 // Reset other fields
                 state.noteId = null;
                 state.history = [];
-                if (state.panel?.type !== 'changelog') {
+                state.currentBranch = null;
+                state.availableBranches = [];
+                if (!shouldPreservePanel && state.panel?.type !== 'changelog') {
                     state.panel = null;
                 }
             }
         },
-        historyLoadedSuccess(state, action: PayloadAction<{ file: TFile; noteId: string | null; history: VersionHistoryEntry[] }>) {
+        historyLoadedSuccess(state, action: PayloadAction<{ file: TFile; noteId: string | null; history: VersionHistoryEntry[], currentBranch: string, availableBranches: string[] }>) {
             if (state.file?.path === action.payload.file.path) {
+                const shouldPreservePanel =
+                    (state.panel?.type === 'diff' || state.panel?.type === 'preview');
+
                 state.status = AppStatus.READY;
                 state.noteId = action.payload.noteId;
                 state.history = action.payload.history;
+                state.currentBranch = action.payload.currentBranch;
+                state.availableBranches = action.payload.availableBranches;
                 state.isProcessing = false;
-                if (state.panel?.type !== 'changelog') {
+                
+                if (!shouldPreservePanel && state.panel?.type !== 'changelog') {
                     state.panel = null;
                 }
+
                 state.namingVersionId = null;
                 state.highlightedVersionId = null;
                 state.diffRequest = null;
@@ -67,6 +85,8 @@ export const appSlice = createSlice({
             state.file = null;
             state.noteId = null;
             state.history = [];
+            state.currentBranch = null;
+            state.availableBranches = [];
             if (state.panel?.type !== 'changelog') {
                 state.panel = null;
             }
@@ -234,6 +254,25 @@ export const appSlice = createSlice({
             if (state.status === AppStatus.READY) {
                 state.watchModeCountdown = action.payload;
             }
+        },
+
+        // --- Key Update Progress Actions ---
+        startKeyUpdate(state, action: PayloadAction<{ total: number }>) {
+            state.keyUpdateProgress = {
+                active: true,
+                progress: 0,
+                total: action.payload.total,
+                message: 'Starting frontmatter key update...',
+            };
+        },
+        updateKeyUpdateProgress(state, action: PayloadAction<{ processed: number; message: string }>) {
+            if (state.keyUpdateProgress) {
+                state.keyUpdateProgress.progress = action.payload.processed;
+                state.keyUpdateProgress.message = action.payload.message;
+            }
+        },
+        endKeyUpdate(state) {
+            state.keyUpdateProgress = null;
         },
     },
 });

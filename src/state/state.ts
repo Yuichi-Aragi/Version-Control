@@ -71,8 +71,9 @@ export interface ActionPanel<T> {
     type: 'action';
     title: string;
     items: ActionItem<T>[];
-    // FIX: This is a thunk creator that receives the chosen item's data payload and returns a thunk.
     onChooseAction: (data: T) => AppThunk;
+    // Optional handler for when user tries to create a new item from the filter input
+    onCreateAction?: (value: string) => AppThunk;
     showFilter?: boolean; // Whether to show a filter/search input.
 }
 
@@ -88,6 +89,13 @@ export interface SortOrder {
     direction: SortDirection;
 }
 
+export interface KeyUpdateProgress {
+    active: boolean;
+    progress: number;
+    total: number;
+    message: string;
+}
+
 export interface AppState {
     status: AppStatus;
     settings: VersionControlSettings;
@@ -97,6 +105,8 @@ export interface AppState {
     file: TFile | null; 
     noteId: string | null;
     history: VersionHistoryEntry[];
+    currentBranch: string | null;
+    availableBranches: string[];
     
     // Properties primarily for READY state
     isProcessing: boolean;
@@ -116,6 +126,9 @@ export interface AppState {
 
     // Watch Mode properties
     watchModeCountdown: number | null;
+
+    // Key update progress
+    keyUpdateProgress: KeyUpdateProgress | null;
 }
 
 export const getInitialState = (loadedSettings: VersionControlSettings): AppState => {
@@ -127,6 +140,8 @@ export const getInitialState = (loadedSettings: VersionControlSettings): AppStat
         file: null,
         noteId: null,
         history: [],
+        currentBranch: null,
+        availableBranches: [],
         isProcessing: false,
         isRenaming: false,
         panel: null,
@@ -138,5 +153,6 @@ export const getInitialState = (loadedSettings: VersionControlSettings): AppStat
         sortOrder: defaultSortOrder,
         diffRequest: null,
         watchModeCountdown: null,
+        keyUpdateProgress: null,
     };
 };
