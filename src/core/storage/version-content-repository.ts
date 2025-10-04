@@ -253,15 +253,15 @@ export class VersionContentRepository {
       return null;
     }
 
-    // Defensive: Check for versions property
-    if (!noteManifest.versions || typeof noteManifest.versions !== 'object') {
-      console.debug(`VC: No versions found in manifest for note ${noteId}`);
-      return null;
-    }
-
     try {
+      const currentBranch = noteManifest.branches[noteManifest.currentBranch];
+      if (!currentBranch || !currentBranch.versions) {
+        console.debug(`VC: No versions found in current branch for note ${noteId}`);
+        return null;
+      }
+
       // Convert to array and sort by version number (descending)
-      const versions = Object.entries(noteManifest.versions).sort(
+      const versions = Object.entries(currentBranch.versions).sort(
         ([, a], [, b]) => {
           // Defensive: Validate version metadata
           if (!a || typeof a !== 'object' || !b || typeof b !== 'object') {

@@ -1,10 +1,17 @@
 import { injectable, inject } from 'inversify';
 import { produce, type Draft } from 'immer';
 import type { App } from 'obsidian';
-import type { NoteManifest } from '../../types';
+import type { NoteManifest, Branch } from '../../types';
 import { PathService } from './path-service';
 import { TYPES } from '../../types/inversify.types';
 import { QueueService } from '../../services/queue-service';
+import { DEFAULT_BRANCH_NAME } from '../../constants';
+
+type V1NoteManifest = Omit<NoteManifest, 'branches' | 'currentBranch'> & {
+    versions: { [versionId: string]: any };
+    totalVersions: number;
+    settings?: any;
+};
 
 /**
  * Repository for managing individual note manifest files.
@@ -34,7 +41,7 @@ export class NoteManifestRepository {
     }
 
     /**
-     * Loads a note manifest from cache or disk.
+     * Loads a note manifest from cache or disk, performing on-the-fly migration if necessary.
      * @param noteId - The unique identifier of the note
      * @param forceReload - Whether to bypass cache and reload from disk
      * @returns The note manifest or null if not found
@@ -53,10 +60,33 @@ export class NoteManifestRepository {
         }
 
         try {
-            const loaded = await this.readManifest(normalizedNoteId);
+            let loaded = await this.readManifest(normalizedNoteId);
+
+            // MIGRATION LOGIC: If the manifest is in the old format, migrate it.
+            if (loaded && this.isV1Manifest(loaded)) {
+                console.log(`VC: Migrating manifest for note ${normalizedNoteId} to branch structure.`);
+                const migratedManifest = this.migrateV1Manifest(loaded as unknown as V1NoteManifest);
+                // Persist the migrated structure immediately to complete the migration for this note.
+                await this.writeManifestWithLock(normalizedNoteId, migratedManifest);
+                loaded = migratedManifest;
+            }
+
             if (loaded) {
                 // Validate loaded manifest before caching
                 this.validateManifest(loaded, normalizedNoteId);
+
+                // Enforce data integrity for totalVersions on each branch
+                for (const branchName in loaded.branches) {
+                    const branch = loaded.branches[branchName];
+                    if (branch) {
+                        const actualCount = Object.keys(branch.versions || {}).length;
+                        if (branch.totalVersions !== actualCount) {
+                            console.warn(`VC: Correcting totalVersions for noteId ${normalizedNoteId}, branch ${branchName}. Stored: ${branch.totalVersions}, Actual: ${actualCount}.`);
+                            branch.totalVersions = actualCount;
+                        }
+                    }
+                }
+
                 this.cache.set(normalizedNoteId, loaded);
             }
             return loaded;
@@ -103,8 +133,13 @@ export class NoteManifestRepository {
             const newManifest: NoteManifest = {
                 noteId: normalizedNoteId,
                 notePath: normalizedNotePath,
-                versions: {},
-                totalVersions: 0,
+                currentBranch: DEFAULT_BRANCH_NAME,
+                branches: {
+                    [DEFAULT_BRANCH_NAME]: {
+                        versions: {},
+                        totalVersions: 0,
+                    }
+                },
                 createdAt: now,
                 lastModified: now,
             };
@@ -175,10 +210,15 @@ export class NoteManifestRepository {
                 // Validate current manifest
                 this.validateManifest(currentManifest, normalizedNoteId);
 
-                // 2. Apply the synchronous transformation function
+                // 2. Apply the synchronous transformation and enforce integrity
                 const updatedManifest = produce(currentManifest, (draft) => {
                     try {
                         updateFn(draft);
+                        // Enforce integrity after the update function has run
+                        const currentBranch = draft.branches[draft.currentBranch];
+                        if (currentBranch) {
+                            currentBranch.totalVersions = Object.keys(currentBranch.versions || {}).length;
+                        }
                     } catch (error) {
                         console.error(`VC: Update function failed for noteId: ${normalizedNoteId}`, error);
                         throw new Error(`Update function failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -293,12 +333,7 @@ export class NoteManifestRepository {
                 return null;
             }
 
-            // Type validation
-            if (!this.isValidNoteManifest(parsed, normalizedNoteId)) {
-                console.error(`VC: Manifest ${manifestPath} has invalid structure.`);
-                return null;
-            }
-
+            // Return the parsed object. Validation and migration will happen in the `load` method.
             return parsed as NoteManifest;
         } catch (error) {
             console.error(`VC: Failed to load/parse manifest ${manifestPath}.`, error);
@@ -393,6 +428,30 @@ export class NoteManifestRepository {
         }
     }
 
+    private isV1Manifest(obj: any): obj is V1NoteManifest {
+        return obj && typeof obj === 'object' && obj.versions && !obj.branches;
+    }
+    
+    private migrateV1Manifest(v1Manifest: V1NoteManifest): NoteManifest {
+        const mainBranch: Branch = {
+            versions: v1Manifest.versions,
+            totalVersions: v1Manifest.totalVersions,
+            settings: v1Manifest.settings,
+        };
+    
+        const newManifest: NoteManifest = {
+            noteId: v1Manifest.noteId,
+            notePath: v1Manifest.notePath,
+            createdAt: v1Manifest.createdAt,
+            lastModified: v1Manifest.lastModified,
+            currentBranch: DEFAULT_BRANCH_NAME,
+            branches: {
+                [DEFAULT_BRANCH_NAME]: mainBranch,
+            },
+        };
+        return newManifest;
+    }
+
     /**
      * Validates that a manifest object has the correct structure and data.
      * @param manifest - The manifest to validate
@@ -417,11 +476,15 @@ export class NoteManifestRepository {
             throw new Error(`lastModified (${manifest.lastModified}) cannot be before createdAt (${manifest.createdAt})`);
         }
 
-        // Validate totalVersions matches actual versions count
-        const actualVersionsCount = Object.keys(manifest.versions || {}).length;
-        if (manifest.totalVersions !== actualVersionsCount) {
-            console.warn(`VC: totalVersions (${manifest.totalVersions}) doesn't match actual versions count (${actualVersionsCount}) for noteId: ${expectedNoteId}`);
-            // We don't throw here as this might be a recoverable inconsistency
+        // Validate totalVersions matches actual versions count for each branch
+        for (const branchName in manifest.branches) {
+            const branch = manifest.branches[branchName];
+            if (branch) {
+                const actualVersionsCount = Object.keys(branch.versions || {}).length;
+                if (branch.totalVersions !== actualVersionsCount) {
+                    console.warn(`VC: totalVersions mismatch detected for branch "${branchName}" (${branch.totalVersions} vs ${actualVersionsCount}) for noteId: ${expectedNoteId}. This will be auto-corrected on next update.`);
+                }
+            }
         }
     }
 
@@ -445,29 +508,35 @@ export class NoteManifestRepository {
         if (typeof manifest.notePath !== 'string' || manifest.notePath.trim() === '') {
             return false;
         }
-        if (typeof manifest.totalVersions !== 'number' || !Number.isInteger(manifest.totalVersions) || manifest.totalVersions < 0) {
-            return false;
-        }
         if (typeof manifest.createdAt !== 'string' || !this.isValidISODate(manifest.createdAt)) {
             return false;
         }
         if (typeof manifest.lastModified !== 'string' || !this.isValidISODate(manifest.lastModified)) {
             return false;
         }
-        
-        // Optional but should be object if present
-        if (manifest.versions !== undefined && (manifest.versions === null || typeof manifest.versions !== 'object')) {
+        if (typeof manifest.currentBranch !== 'string' || manifest.currentBranch.trim() === '') {
             return false;
         }
+        if (manifest.branches === null || typeof manifest.branches !== 'object') {
+            return false;
+        }
+        if (!manifest.branches[manifest.currentBranch]) {
+            return false; // currentBranch must exist in branches
+        }
 
-        // If versions is an object, ensure all keys are strings and values are objects
-        if (manifest.versions && typeof manifest.versions === 'object') {
-            for (const [key, value] of Object.entries(manifest.versions)) {
-                if (typeof key !== 'string' || !key.trim()) {
-                    return false;
-                }
-                if (!value || typeof value !== 'object') {
-                    return false;
+        for (const branchName in manifest.branches) {
+            const branch = manifest.branches[branchName];
+            if (!branch || typeof branch !== 'object') return false;
+            if (typeof branch.totalVersions !== 'number' || !Number.isInteger(branch.totalVersions) || branch.totalVersions < 0) {
+                return false;
+            }
+            if (branch.versions !== undefined && (branch.versions === null || typeof branch.versions !== 'object')) {
+                return false;
+            }
+            if (branch.versions) {
+                for (const [key, value] of Object.entries(branch.versions)) {
+                    if (typeof key !== 'string' || !key.trim()) return false;
+                    if (!value || typeof value !== 'object') return false;
                 }
             }
         }
