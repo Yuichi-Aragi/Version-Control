@@ -1,5 +1,22 @@
 ***
 
+**Version: 1.9.16**
+#### ✨ New Features
+
+*   **Note Branching:** You can now explore different ideas and writing paths within a single note without creating duplicates.
+    *   Create, manage, and switch between different "branches" of a note's history directly from the Version Control view in the right sidebar.
+    *   Click the branch name (e.g., `main`) to open a menu where you can select an existing branch or create a new one.
+    *   Each branch saves its own content, cursor position, and history, allowing you to experiment freely without fear of messing up your primary version.
+    *   This is a power-user feature. For regular use, you can continue working on the default `main` branch with no changes to your workflow.
+
+*   **Customizable Frontmatter Key:** You can now change the frontmatter key used to store the version control ID (previously hardcoded as `vc-id`) via the plugin settings. This provides greater flexibility and avoids conflicts with other plugins.
+
+#### 🎨 Improvements & UX
+
+*   **General Stability and UI Polish:** Squashed numerous bugs and implemented various UI/UX enhancements for a smoother and more reliable experience.
+
+***
+
 **Version: 1.9.15**
 #### ✨ New Features
 
