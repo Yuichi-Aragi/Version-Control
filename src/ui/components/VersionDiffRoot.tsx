@@ -97,7 +97,7 @@ export const VersionDiffRoot: FC<VersionDiffRootProps> = ({ displayState }) => {
 
     return (
         <div className="v-tab-view-content">
-            <div className="v-panel-header">
+            <div className="v-panel-header" onClick={(e) => e.stopPropagation()}>
                 <div className="v-panel-title-row">
                     <h3>Comparing versions of "{noteName}"</h3>
                     <div className="v-panel-header-actions">

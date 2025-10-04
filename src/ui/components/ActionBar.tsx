@@ -1,6 +1,6 @@
 import { debounce } from 'obsidian';
 import clsx from 'clsx';
-import { type FC, type ChangeEvent, type KeyboardEvent, useCallback, useEffect, useRef } from 'react';
+import { type FC, type ChangeEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
 import { AppStatus } from '../../state/state';
 import { actions } from '../../state/appSlice';
@@ -12,7 +12,7 @@ export const ActionBar: FC = () => {
     const { 
         status, 
         isSearchActive, 
-        searchQuery, 
+        searchQuery: globalSearchQuery, 
         isSearchCaseSensitive, 
         isProcessing, 
         isRenaming,
@@ -35,7 +35,12 @@ export const ActionBar: FC = () => {
         panel: state.panel,
     }));
 
+    const [localQuery, setLocalQuery] = useState(globalSearchQuery);
     const searchInputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        setLocalQuery(globalSearchQuery);
+    }, [globalSearchQuery]);
 
     const isBusy = isProcessing || isRenaming;
 
@@ -70,11 +75,15 @@ export const ActionBar: FC = () => {
     }, 300), [dispatch]);
 
     const handleSearchInputChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
-        debouncedSearch(e.target.value);
+        const value = e.target.value;
+        setLocalQuery(value);
+        debouncedSearch(value);
     }, [debouncedSearch]);
 
     const handleSearchKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Escape') {
+            setLocalQuery('');
+            dispatch(actions.setSearchQuery(''));
             dispatch(actions.toggleSearch(false));
         }
     }, [dispatch]);
@@ -86,6 +95,7 @@ export const ActionBar: FC = () => {
 
     const handleClearSearch = useCallback((event: React.MouseEvent) => {
         event.preventDefault();
+        setLocalQuery('');
         dispatch(actions.setSearchQuery(''));
         searchInputRef.current?.focus();
     }, [dispatch]);
@@ -166,7 +176,7 @@ export const ActionBar: FC = () => {
                 </div>
             </div>
 
-            <div className={clsx('v-search-bar-container', { 'is-query-active': searchQuery.trim().length > 0 })}>
+            <div className={clsx('v-search-bar-container', { 'is-query-active': localQuery.trim().length > 0 })}>
                 <div className="v-search-input-wrapper">
                     <div 
                         className="v-search-icon" 
@@ -181,7 +191,7 @@ export const ActionBar: FC = () => {
                         type="search"
                         placeholder="Search versions..."
                         aria-label="Search versions by name, date, or size"
-                        defaultValue={searchQuery}
+                        value={localQuery}
                         onChange={handleSearchInputChange}
                         onKeyDown={handleSearchKeyDown}
                     />
@@ -194,7 +204,7 @@ export const ActionBar: FC = () => {
                             <Icon name="case-sensitive" />
                         </button>
                         <button 
-                            className={clsx('clickable-icon', { 'is-hidden': !searchQuery })} 
+                            className={clsx('clickable-icon', { 'is-hidden': !localQuery })} 
                             aria-label="Clear search"
                             onMouseDown={handleClearSearch}
                         >

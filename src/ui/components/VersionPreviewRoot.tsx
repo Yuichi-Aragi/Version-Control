@@ -48,7 +48,7 @@ export const VersionPreviewRoot: FC<VersionPreviewRootProps> = ({ app, displaySt
                         {versionDisplayLabel}
                     </h3>
                     {!settings.renderMarkdownInPreview && (
-                        <button className="v-action-btn" aria-label="Toggle markdown rendering" title="Toggle markdown rendering" onClick={toggleRenderMode}>
+                        <button className="v-action-btn" aria-label="Toggle markdown rendering" onClick={toggleRenderMode}>
                             <Icon name={localRenderMarkdown ? "code" : "book-open"} />
                         </button>
                     )}

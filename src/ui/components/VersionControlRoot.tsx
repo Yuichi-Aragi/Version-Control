@@ -8,14 +8,16 @@ import { ActionBar } from './ActionBar';
 import { HistoryList } from './HistoryList';
 import { PanelContainer } from './panels/PanelContainer';
 import { SettingsPanel } from './SettingsPanel';
+import { KeyUpdateOverlay } from './KeyUpdateOverlay';
 
 export const VersionControlRoot: FC = () => {
-    const { status, error, panel, isProcessing, isRenaming } = useAppSelector(state => ({
+    const { status, error, panel, isProcessing, isRenaming, keyUpdateActive } = useAppSelector(state => ({
         status: state.status,
         error: state.error,
         panel: state.panel,
         isProcessing: state.isProcessing,
         isRenaming: state.isRenaming,
+        keyUpdateActive: state.keyUpdateProgress?.active ?? false,
     }));
 
     const isOverlayActive = panel !== null && panel.type !== 'settings';
@@ -27,6 +29,10 @@ export const VersionControlRoot: FC = () => {
     );
 
     const renderContent = () => {
+        if (keyUpdateActive) {
+            return <KeyUpdateOverlay />;
+        }
+
         switch (status) {
             case AppStatus.INITIALIZING:
                 return <Placeholder title="Initializing version control..." iconName="sync" />;
@@ -57,7 +63,7 @@ export const VersionControlRoot: FC = () => {
     return (
         <div className={rootClassName}>
             {renderContent()}
-            <PanelContainer />
+            { !keyUpdateActive && <PanelContainer /> }
         </div>
     );
 };
