@@ -3,7 +3,6 @@ import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
 import type { AppError, VersionControlSettings } from '../../types';
 import { AppStatus } from '../state';
-import { NOTE_FRONTMATTER_KEY } from '../../constants';
 import { NoteManager } from '../../core/note-manager';
 import { UIService } from '../../services/ui-service';
 import { VersionManager } from '../../core/version-manager';
@@ -31,38 +30,29 @@ export const loadEffectiveSettingsForNote = (noteId: string | null): AppThunk =>
     if (noteId) {
         try {
             const noteManifest = await manifestManager.loadNoteManifest(noteId);
-            const perNoteSettings = noteManifest?.settings;
+            const currentBranchName = noteManifest?.currentBranch;
+            const perBranchSettings = currentBranchName ? noteManifest?.branches[currentBranchName]?.settings : undefined;
 
-            // A note is under global influence if its isGlobal flag is explicitly true,
-            // or if it has no settings defined at all (the default for new notes).
-            const isUnderGlobalInfluence = perNoteSettings?.isGlobal === true || perNoteSettings === undefined;
+            const isUnderGlobalInfluence = perBranchSettings?.isGlobal === true || perBranchSettings === undefined;
 
             if (isUnderGlobalInfluence) {
-                // Use global settings, but ensure the `isGlobal` flag is set for the UI toggle.
                 effectiveSettings = { ...globalSettings, isGlobal: true };
             } else {
-                // It has its own settings. Merge them over the global defaults.
-                // The `isGlobal` flag will be false or undefined, which is correct for the UI.
-                effectiveSettings = { ...globalSettings, ...perNoteSettings, isGlobal: false };
+                effectiveSettings = { ...globalSettings, ...perBranchSettings, isGlobal: false };
             }
         } catch (error) {
             console.error(`VC: Could not load per-note settings for note ${noteId}. Using global settings.`, error);
-            // Fallback to global settings on error
             effectiveSettings = { ...globalSettings, isGlobal: true };
         }
     } else {
-        // No active note, so the "effective" settings are just the global ones.
-        // Set isGlobal to true so the toggle in the placeholder view shows the correct default state.
         effectiveSettings = { ...globalSettings, isGlobal: true };
     }
 
-    // Overwrite with true global values for settings that are ALWAYS global.
-    // This ensures the UI state is always correct for these specific settings.
     effectiveSettings.autoRegisterNotes = globalSettings.autoRegisterNotes;
     effectiveSettings.databasePath = globalSettings.databasePath;
     effectiveSettings.pathFilters = globalSettings.pathFilters;
+    effectiveSettings.noteIdFrontmatterKey = globalSettings.noteIdFrontmatterKey;
 
-    // Only dispatch if the settings have actually changed to avoid needless re-renders.
     if (JSON.stringify(getState().settings) !== JSON.stringify(effectiveSettings)) {
         dispatch(actions.updateSettings(effectiveSettings));
     }
@@ -86,12 +76,10 @@ export const initializeView = (leaf?: WorkspaceLeaf | null): AppThunk => async (
 
         const activeNoteInfo = await noteManager.getActiveNoteState(targetLeaf);
         
-        // New feature: Auto-register untracked notes if the setting is enabled.
         if (activeNoteInfo.file && !activeNoteInfo.noteId && plugin.settings.autoRegisterNotes) {
             if (isPathAllowed(activeNoteInfo.file.path, plugin.settings)) {
-                // This thunk will handle the entire state transition to READY.
                 dispatch(autoRegisterNote(activeNoteInfo.file));
-                return; // Halt this execution path to prevent race conditions.
+                return;
             }
         }
 
@@ -150,7 +138,11 @@ export const loadHistory = (file: TFile): AppThunk => async (dispatch, _getState
         }
         
         const history = noteId ? await versionManager.getVersionHistory(noteId) : [];
-        dispatch(actions.historyLoadedSuccess({ file, noteId, history }));
+        const noteManifest = noteId ? await manifestManager.loadNoteManifest(noteId) : null;
+        const currentBranch = noteManifest?.currentBranch ?? '';
+        const availableBranches = noteManifest ? Object.keys(noteManifest.branches) : [];
+
+        dispatch(actions.historyLoadedSuccess({ file, noteId, history, currentBranch, availableBranches }));
 
         backgroundTaskManager.syncWatchMode();
 
@@ -168,11 +160,16 @@ export const loadHistory = (file: TFile): AppThunk => async (dispatch, _getState
 export const loadHistoryForNoteId = (file: TFile, noteId: string): AppThunk => async (dispatch, _getState, container) => {
     if (isPluginUnloading(container)) return;
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
     const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
     try {
         dispatch(loadEffectiveSettingsForNote(noteId));
         const history = await versionManager.getVersionHistory(noteId);
-        dispatch(actions.historyLoadedSuccess({ file, noteId, history }));
+        const noteManifest = await manifestManager.loadNoteManifest(noteId);
+        const currentBranch = noteManifest?.currentBranch ?? '';
+        const availableBranches = noteManifest ? Object.keys(noteManifest.branches) : [];
+        
+        dispatch(actions.historyLoadedSuccess({ file, noteId, history, currentBranch, availableBranches }));
 
         backgroundTaskManager.syncWatchMode();
     } catch (error) {
@@ -206,9 +203,11 @@ export const handleMetadataChange = (file: TFile, cache: CachedMetadata): AppThu
     }
 
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
+    const noteIdKey = plugin.settings.noteIdFrontmatterKey;
 
     const fileCache = cache;
-    const newNoteIdFromFrontmatter = fileCache?.frontmatter?.[NOTE_FRONTMATTER_KEY] ?? null;
+    const newNoteIdFromFrontmatter = fileCache?.frontmatter?.[noteIdKey] ?? null;
     const oldNoteIdInManifest = await manifestManager.getNoteIdByPath(file.path);
 
     let idChanged = false;

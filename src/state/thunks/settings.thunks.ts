@@ -10,6 +10,7 @@ import { ManifestManager } from '../../core/manifest-manager';
 import { ExportManager } from '../../services/export-manager';
 import { VersionManager } from '../../core/version-manager';
 import { BackgroundTaskManager } from '../../core/tasks/BackgroundTaskManager';
+import { KeyUpdateManager } from '../../core/tasks/KeyUpdateManager';
 import { TYPES } from '../../types/inversify.types';
 import { isPluginUnloading } from './ThunkUtils';
 import type VersionControlPlugin from '../../main';
@@ -19,7 +20,7 @@ import { initializeView, loadEffectiveSettingsForNote } from './core.thunks';
  * Thunks for updating settings and handling export functionality.
  */
 
-export const updateGlobalSettings = (settingsUpdate: Partial<Pick<VersionControlSettings, 'autoRegisterNotes' | 'pathFilters'>>): AppThunk => async (dispatch, _getState, container) => {
+export const updateGlobalSettings = (settingsUpdate: Partial<Pick<VersionControlSettings, 'autoRegisterNotes' | 'pathFilters' | 'noteIdFrontmatterKey' | 'keyUpdatePathFilters'>>): AppThunk => async (dispatch, _getState, container) => {
     if (isPluginUnloading(container)) return;
     const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
     const uiService = container.get<UIService>(TYPES.UIService);
@@ -39,6 +40,47 @@ export const updateGlobalSettings = (settingsUpdate: Partial<Pick<VersionControl
     }
 };
 
+export const requestKeyUpdate = (newKeyRaw: string): AppThunk => (dispatch, _getState, container) => {
+    if (isPluginUnloading(container)) return;
+    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
+    const uiService = container.get<UIService>(TYPES.UIService);
+    const oldKey = plugin.settings.noteIdFrontmatterKey;
+    const newKey = newKeyRaw.trim();
+
+    if (!newKey) {
+        uiService.showNotice("Frontmatter key cannot be empty.", 3000);
+        return;
+    }
+    if (newKey.includes(':')) {
+        uiService.showNotice("Frontmatter key cannot contain a colon.", 3000);
+        return;
+    }
+    if (newKey === oldKey) {
+        return;
+    }
+
+    dispatch(actions.openPanel({
+        type: 'confirmation',
+        title: 'Update Frontmatter Key?',
+        message: `This will update the frontmatter key from "${oldKey}" to "${newKey}" in all tracked notes and their version histories. This operation can take some time and is irreversible. Are you sure?`,
+        onConfirmAction: confirmKeyUpdate(oldKey, newKey),
+    }));
+};
+
+const confirmKeyUpdate = (oldKey: string, newKey: string): AppThunk => async (dispatch, _getState, container) => {
+    if (isPluginUnloading(container)) return;
+    const keyUpdateManager = container.get<KeyUpdateManager>(TYPES.KeyUpdateManager);
+    
+    dispatch(actions.closePanel());
+    
+    // This is a fire-and-forget call. The manager will dispatch progress updates.
+    keyUpdateManager.updateAllKeys(oldKey, newKey);
+
+    // Immediately update the setting so new operations use the new key.
+    dispatch(updateGlobalSettings({ noteIdFrontmatterKey: newKey }));
+};
+
+
 export const toggleGlobalSettings = (applyGlobally: boolean): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     const state = getState();
@@ -54,33 +96,29 @@ export const toggleGlobalSettings = (applyGlobally: boolean): AppThunk => async 
 
     try {
         if (applyGlobally) {
-            // User is turning ON global settings for this note.
-            // This means we clear its specific settings and set isGlobal: true.
             await manifestManager.updateNoteManifest(noteId, (manifest) => {
-                // We keep the settings object just for the isGlobal flag.
-                // Any other per-note settings are effectively discarded.
-                manifest.settings = { isGlobal: true };
+                const branch = manifest.branches[manifest.currentBranch];
+                if (branch) {
+                    branch.settings = { isGlobal: true };
+                }
             });
-            // Now, reload the effective settings for the UI to update.
             dispatch(loadEffectiveSettingsForNote(noteId));
             uiService.showNotice("Note now follows global settings.", 3000);
         } else {
-            // User is turning OFF global settings.
-            // The note becomes independent, inheriting the current global settings as its own.
             const currentGlobalSettings = plugin.settings;
             await manifestManager.updateNoteManifest(noteId, (manifest) => {
-                // We take all global settings (except db path etc.) and make them this note's settings.
-                const { databasePath, centralManifest, autoRegisterNotes, pathFilters, ...localSettings } = currentGlobalSettings;
-                manifest.settings = { ...localSettings, isGlobal: false };
+                const branch = manifest.branches[manifest.currentBranch];
+                if (branch) {
+                    const { databasePath, centralManifest, autoRegisterNotes, pathFilters, noteIdFrontmatterKey, keyUpdatePathFilters, ...localSettings } = currentGlobalSettings;
+                    branch.settings = { ...localSettings, isGlobal: false };
+                }
             });
-            // Reload effective settings to update the UI.
             dispatch(loadEffectiveSettingsForNote(noteId));
             uiService.showNotice("Note now has its own independent settings.", 3000);
         }
     } catch (error) {
         console.error(`VC: Failed to toggle global settings for note ${noteId}.`, error);
         uiService.showNotice("Failed to update settings. Please try again.", 5000);
-        // On failure, reload the original state to keep UI consistent.
         dispatch(loadEffectiveSettingsForNote(noteId));
     }
 };
@@ -101,7 +139,6 @@ export const updateSettings = (settingsUpdate: Partial<Omit<VersionControlSettin
     const { noteId, file } = stateBeforeUpdate;
     const isUnderGlobalInfluence = stateBeforeUpdate.settings.isGlobal;
 
-    // --- UI Update (Optimistic) ---
     if (file && (settingsUpdate.hasOwnProperty('autoSaveOnSaveInterval') || settingsUpdate.hasOwnProperty('autoSaveOnSave'))) {
         const debouncerInfo = plugin.autoSaveDebouncers.get(file.path);
         debouncerInfo?.debouncer.cancel();
@@ -110,39 +147,36 @@ export const updateSettings = (settingsUpdate: Partial<Omit<VersionControlSettin
     dispatch(actions.updateSettings(settingsUpdate));
     backgroundTaskManager.syncWatchMode();
 
-    // --- Persistence Logic ---
     try {
         if (isUnderGlobalInfluence) {
-            // Update the GLOBAL settings.
             const newGlobalSettings = { ...plugin.settings, ...settingsUpdate };
             plugin.settings = newGlobalSettings;
             await plugin.saveSettings();
-
-            // Also update the current note's manifest to ensure `isGlobal: true` is persisted,
-            // especially if it was a brand new note that didn't have a settings object yet.
             if (noteId) {
                 await manifestManager.updateNoteManifest(noteId, (manifest) => {
-                    if (!manifest.settings) manifest.settings = {};
-                    manifest.settings.isGlobal = true;
+                    const branch = manifest.branches[manifest.currentBranch];
+                    if (branch) {
+                        if (!branch.settings) branch.settings = {};
+                        branch.settings.isGlobal = true;
+                    }
                 });
             }
         } else {
-            // Update PER-NOTE settings.
             if (!noteId) {
                 throw new Error("Cannot save per-note settings without an active note ID.");
             }
             await manifestManager.updateNoteManifest(noteId, (manifest) => {
-                if (!manifest.settings) manifest.settings = {};
-                // Ensure it's marked as local
-                manifest.settings.isGlobal = false;
-                // Apply the update
-                Object.assign(manifest.settings, settingsUpdate);
+                const branch = manifest.branches[manifest.currentBranch];
+                if (branch) {
+                    if (!branch.settings) branch.settings = {};
+                    branch.settings.isGlobal = false;
+                    Object.assign(branch.settings, settingsUpdate);
+                }
             });
         }
     } catch (error) {
         console.error(`VC: Failed to update settings. Reverting UI.`, error);
         uiService.showNotice("Failed to save settings. Reverting.", 5000);
-        // Revert the optimistic UI update by reloading the last known good state.
         dispatch(loadEffectiveSettingsForNote(noteId));
     }
 };
@@ -307,7 +341,7 @@ export const exportAllVersions = (noteId: string, format: 'md' | 'json' | 'ndjso
             text: folder.isRoot() ? "/" : folder.path,
         }));
 
-        const onChooseFolder = (selectedFolder: TFolder): AppThunk => async (dispatch, getState) => {
+        const onChooseFolder = (selectedFolder: TFolder): AppThunk => async (dispatch, _getState) => {
             dispatch(actions.closePanel()); // Close the folder selection panel immediately.
 
             const latestState = getState();
@@ -411,6 +445,7 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: '
         const versionData: VersionData = {
             id: versionEntry.id,
             noteId: versionEntry.noteId,
+            branchName: versionEntry.branchName,
             versionNumber: versionEntry.versionNumber,
             timestamp: versionEntry.timestamp,
             name: versionEntry.name ?? '',
@@ -430,7 +465,7 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: '
             text: folder.isRoot() ? "/" : folder.path,
         }));
 
-        const onChooseFolder = (selectedFolder: TFolder): AppThunk => async (dispatch, getState) => {
+        const onChooseFolder = (selectedFolder: TFolder): AppThunk => async (dispatch, _getState) => {
             dispatch(actions.closePanel()); // Close the folder selection panel immediately.
 
             const latestState = getState();

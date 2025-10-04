@@ -13,6 +13,7 @@ import { isPluginUnloading } from './ThunkUtils';
 import { versionActions } from '../../ui/VersionActions';
 import type VersionControlPlugin from '../../main';
 import { requestWithRetry } from '../../utils/network';
+import { createBranch, switchBranch } from './version.thunks';
 
 /**
  * Thunks related to UI interactions, such as opening panels, tabs, and modals.
@@ -329,6 +330,37 @@ export const showSortMenu = (): AppThunk => (dispatch, getState, container) => {
         items,
         onChooseAction,
         showFilter: false,
+    }));
+};
+
+export const showBranchSwitcher = (): AppThunk => (dispatch, getState) => {
+    const state = getState();
+    if (state.status !== AppStatus.READY || !state.noteId) return;
+
+    const { availableBranches, currentBranch } = state;
+
+    const items: ActionItem<string>[] = availableBranches.map(branchName => ({
+        id: branchName,
+        data: branchName,
+        text: branchName,
+        isSelected: branchName === currentBranch,
+    }));
+
+    const onChooseAction = (branchName: string): AppThunk => (dispatch) => {
+        dispatch(switchBranch(branchName));
+    };
+
+    const onCreateAction = (newBranchName: string): AppThunk => (dispatch) => {
+        dispatch(createBranch(newBranchName));
+    };
+
+    dispatch(actions.openPanel({
+        type: 'action',
+        title: 'Switch or create branch',
+        items,
+        onChooseAction,
+        onCreateAction,
+        showFilter: true,
     }));
 };
 

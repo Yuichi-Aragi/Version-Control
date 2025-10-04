@@ -3,7 +3,6 @@ import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
 import type { VersionControlSettings, VersionHistoryEntry, AppError } from '../../types';
 import { AppStatus } from '../state';
-import { NOTE_FRONTMATTER_KEY } from '../../constants';
 import { loadHistoryForNoteId, initializeView, loadHistory } from './core.thunks';
 import { VersionManager } from '../../core/version-manager';
 import { NoteManager } from '../../core/note-manager';
@@ -38,8 +37,7 @@ export const autoRegisterNote = (file: TFile): AppThunk => async (dispatch, getS
         if (result.status === 'saved') {
             uiService.showNotice(`"${file.basename}" is now under version control.`);
             // After saving, we have a noteId and history, so we can load it directly.
-            const history = await versionManager.getVersionHistory(result.newNoteId);
-            dispatch(actions.historyLoadedSuccess({ file, noteId: result.newNoteId, history }));
+            dispatch(loadHistoryForNoteId(file, result.newNoteId));
         } else {
             // This could happen if another process registered it, or if content is identical to a deleted note's last version.
             // In this case, just proceed with a normal history load.
@@ -248,10 +246,11 @@ export const restoreVersion = (versionId: string): AppThunk => async (dispatch, 
         let effectiveSettings: VersionControlSettings = { ...globalSettings };
         try {
             const noteManifest = await manifestManager.loadNoteManifest(initialNoteIdFromState);
-            const perNoteSettings = noteManifest?.settings;
-            const isUnderGlobalInfluence = perNoteSettings?.isGlobal === true || perNoteSettings === undefined;
+            const currentBranch = noteManifest?.branches[noteManifest.currentBranch];
+            const perBranchSettings = currentBranch?.settings;
+            const isUnderGlobalInfluence = perBranchSettings?.isGlobal === true || perBranchSettings === undefined;
             if (!isUnderGlobalInfluence) {
-                effectiveSettings = { ...globalSettings, ...perNoteSettings };
+                effectiveSettings = { ...globalSettings, ...perBranchSettings };
             }
         } catch (e) { /* use global on error */ }
 
@@ -295,17 +294,17 @@ export const restoreVersion = (versionId: string): AppThunk => async (dispatch, 
 export const requestDelete = (version: VersionHistoryEntry): AppThunk => (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     const state = getState();
+    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
     if (state.status === AppStatus.READY) {
         const { file, history } = state;
         if (!file) return;
 
-        const firstVersion = history.length > 0 ? history[0] : null;
-        const isLastVersion = history.length === 1 && firstVersion && firstVersion.id === version.id;
+        const isLastVersion = history.length === 1 && history[0]?.id === version.id;
         
         const versionLabel = version.name ? `"${version.name}" (V${version.versionNumber})` : `Version ${version.versionNumber}`;
         let message = `Are you sure you want to permanently delete ${versionLabel} for "${file.basename}"? This action cannot be undone.`;
         if (isLastVersion) {
-            message += ` This is the last version. Deleting it will also remove the note from version control (its ${NOTE_FRONTMATTER_KEY} will be cleared).`;
+            message += ` This is the last version in this branch. Deleting it will also delete the branch. If this is the only branch, the note will be removed from version control (its '${plugin.settings.noteIdFrontmatterKey}' will be cleared).`;
         }
 
         dispatch(actions.openPanel({
@@ -350,13 +349,12 @@ export const deleteVersion = (versionId: string): AppThunk => async (dispatch, g
             }
         }
 
-        const firstVersion = initialHistory.length > 0 ? initialHistory[0] : null;
-        const wasLastVersion = initialHistory.length === 1 && firstVersion && firstVersion.id === versionId;
+        const wasLastVersion = initialHistory.length === 1 && initialHistory[0]?.id === versionId;
 
         const success = await versionManager.deleteVersion(initialNoteIdFromState, versionId);
 
         const stateAfterDelete = getState();
-        if (isPluginUnloading(container) || stateAfterDelete.status !== AppStatus.READY || stateAfterDelete.noteId !== initialNoteIdFromState) {
+        if (isPluginUnloading(container) || stateAfterDelete.file?.path !== initialFileFromState.path) {
             if (success) {
                 uiService.showNotice(`Version deleted for "${initialFileFromState.basename}" in the background.`, 4000);
             }
@@ -365,7 +363,7 @@ export const deleteVersion = (versionId: string): AppThunk => async (dispatch, g
 
         if (success) {
             if (wasLastVersion) {
-                uiService.showNotice(`Last version deleted. "${initialFileFromState.basename}" is no longer under version control.`);
+                uiService.showNotice(`Last version and branch deleted. "${initialFileFromState.basename}" may now be on a different branch or no longer under version control.`);
                 dispatch(initializeView());
             } else {
                  dispatch(loadHistoryForNoteId(initialFileFromState, initialNoteIdFromState)); 
@@ -388,14 +386,14 @@ export const requestDeleteAll = (): AppThunk => (dispatch, getState, container) 
     if (isPluginUnloading(container)) return;
     const state = getState();
     if (state.status === AppStatus.READY) {
-        const { file } = state;
-        if (!file) return;
+        const { file, currentBranch } = state;
+        if (!file || !currentBranch) return;
 
         const basename = file.basename;
         dispatch(actions.openPanel({
             type: 'confirmation',
-            title: "Confirm delete all",
-            message: `This will permanently delete all version history for "${basename}" and remove it from version control (its ${NOTE_FRONTMATTER_KEY} will be cleared). This action cannot be undone. Are you sure?`,
+            title: `Delete all in branch "${currentBranch}"?`,
+            message: `This will permanently delete all version history for the branch "${currentBranch}" of note "${basename}". This action cannot be undone. Are you sure?`,
             onConfirmAction: deleteAllVersions(),
         }));
     }
@@ -422,7 +420,7 @@ export const deleteAllVersions = (): AppThunk => async (dispatch, getState, cont
     dispatch(actions.closePanel());
 
     try {
-        const success = await versionManager.deleteAllVersions(initialNoteIdFromState);
+        const success = await versionManager.deleteAllVersionsInCurrentBranch(initialNoteIdFromState);
 
         if (isPluginUnloading(container) || getState().file?.path !== initialFileFromState.path) {
             if (success) {
@@ -432,7 +430,7 @@ export const deleteAllVersions = (): AppThunk => async (dispatch, getState, cont
         }
 
         if (success) {
-            uiService.showNotice(`All versions for "${initialFileFromState.basename}" have been deleted.`);
+            uiService.showNotice(`All versions for the current branch of "${initialFileFromState.basename}" have been deleted.`);
             dispatch(initializeView());
         } else {
             throw new Error(`Failed to delete all versions for "${initialFileFromState.basename}".`);
@@ -447,9 +445,6 @@ export const deleteAllVersions = (): AppThunk => async (dispatch, getState, cont
     }
 };
 
-/**
- * The actual auto-save logic. This is called by the debounced function.
- */
 export const performAutoSave = (file: TFile): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     const state = getState();
@@ -468,10 +463,11 @@ export const performAutoSave = (file: TFile): AppThunk => async (dispatch, getSt
     let effectiveSettings: VersionControlSettings = { ...globalSettings };
     try {
         const noteManifest = await manifestManager.loadNoteManifest(noteId);
-        const perNoteSettings = noteManifest?.settings;
-        const isUnderGlobalInfluence = perNoteSettings?.isGlobal === true || perNoteSettings === undefined;
+        const currentBranch = noteManifest?.branches[noteManifest.currentBranch];
+        const perBranchSettings = currentBranch?.settings;
+        const isUnderGlobalInfluence = perBranchSettings?.isGlobal === true || perBranchSettings === undefined;
         if (!isUnderGlobalInfluence) {
-            effectiveSettings = { ...globalSettings, ...perNoteSettings };
+            effectiveSettings = { ...globalSettings, ...perBranchSettings };
         }
     } catch (e) { /* use global on error */ }
 
@@ -493,10 +489,6 @@ export const performAutoSave = (file: TFile): AppThunk => async (dispatch, getSt
     }
 };
 
-/**
- * Handles the vault's `modify` event. This thunk is responsible for debouncing
- * auto-save requests to prevent queue flooding.
- */
 export const handleVaultSave = (file: TFile): AppThunk => async (dispatch, _getState, container) => {
     if (isPluginUnloading(container)) return;
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);
@@ -510,10 +502,13 @@ export const handleVaultSave = (file: TFile): AppThunk => async (dispatch, _getS
     let effectiveSettings: VersionControlSettings = { ...globalSettings };
     try {
         const noteManifest = await manifestManager.loadNoteManifest(noteId);
-        const perNoteSettings = noteManifest?.settings;
-        const isUnderGlobalInfluence = perNoteSettings?.isGlobal === true || perNoteSettings === undefined;
-        if (!isUnderGlobalInfluence) {
-            effectiveSettings = { ...globalSettings, ...perNoteSettings };
+        if (noteManifest) {
+            const currentBranch = noteManifest.branches[noteManifest.currentBranch];
+            const perBranchSettings = currentBranch?.settings;
+            const isUnderGlobalInfluence = perBranchSettings?.isGlobal === true || perBranchSettings === undefined;
+            if (!isUnderGlobalInfluence) {
+                effectiveSettings = { ...globalSettings, ...perBranchSettings };
+            }
         }
     } catch (e) {
         // Manifest might not exist yet. Use global settings.
@@ -546,5 +541,44 @@ export const handleVaultSave = (file: TFile): AppThunk => async (dispatch, _getS
         plugin.autoSaveDebouncers.set(file.path, { debouncer: newDebouncerFunc, interval: intervalMs });
         
         newDebouncerFunc(file);
+    }
+};
+
+export const createBranch = (newBranchName: string): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
+    const state = getState();
+    if (state.status !== AppStatus.READY || !state.noteId) return;
+    const { noteId } = state;
+
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const uiService = container.get<UIService>(TYPES.UIService);
+
+    try {
+        await versionManager.createBranch(noteId, newBranchName);
+        dispatch(actions.closePanel());
+        uiService.showNotice(`Branch "${newBranchName}" created.`, 3000);
+        dispatch(switchBranch(newBranchName));
+    } catch (error) {
+        console.error("VC: Failed to create branch.", error);
+        uiService.showNotice(`Failed to create branch: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+};
+
+export const switchBranch = (newBranchName: string): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
+    const state = getState();
+    if (state.status !== AppStatus.READY || !state.noteId || !state.file) return;
+    const { noteId, file } = state;
+
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const uiService = container.get<UIService>(TYPES.UIService);
+
+    try {
+        await versionManager.switchBranch(noteId, newBranchName);
+        dispatch(actions.closePanel());
+        dispatch(loadHistoryForNoteId(file, noteId));
+    } catch (error) {
+        console.error("VC: Failed to switch branch.", error);
+        uiService.showNotice(`Failed to switch branch: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 };
