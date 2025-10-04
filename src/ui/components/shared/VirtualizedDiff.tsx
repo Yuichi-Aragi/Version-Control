@@ -1,4 +1,4 @@
-import { useMemo, type FC, Fragment } from 'react';
+import { useMemo, type FC } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { Change } from 'diff';
 import type { DiffType } from '../../../types';
