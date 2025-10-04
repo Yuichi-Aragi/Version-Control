@@ -2,7 +2,7 @@ import { ItemView, WorkspaceLeaf, TFile, App } from "obsidian";
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider } from 'react-redux';
 import { StrictMode } from 'react';
-import { VIEW_TYPE_VERSION_PREVIEW, NOTE_FRONTMATTER_KEY } from "../constants";
+import { VIEW_TYPE_VERSION_PREVIEW } from "../constants";
 import type { VersionHistoryEntry } from "../types";
 import type { AppStore } from "../state/store";
 import { AppStatus } from "../state/state";
@@ -104,6 +104,7 @@ export class VersionPreviewView extends ItemView {
             }
 
             const appState = this.store.getState();
+            const noteIdKey = appState.settings.noteIdFrontmatterKey;
             let isStale = false;
             let staleReason = "";
 
@@ -113,7 +114,7 @@ export class VersionPreviewView extends ItemView {
                 staleReason = "Original note deleted/moved";
             } else {
                 const fileCache = this.app.metadataCache.getFileCache(liveFile);
-                const idFromFrontmatter = fileCache?.frontmatter?.[NOTE_FRONTMATTER_KEY] ?? null;
+                const idFromFrontmatter = fileCache?.frontmatter?.[noteIdKey] ?? null;
                 if (idFromFrontmatter !== previewingNoteId) {
                     isStale = true;
                     staleReason = "History dissociated from file";
