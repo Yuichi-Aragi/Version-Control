@@ -150,3 +150,27 @@ body .version-diff-view.version-diff-view .v-tab-view-content::-webkit-scrollbar
 body .version-diff-view.version-diff-view .v-diff-content-wrapper::-webkit-scrollbar {
     display: none;
 }
+
+/*
+ * TAP HIGHLIGHT COLOR REMOVAL (HIGH SPECIFICITY)
+ *
+ * This section uses highly specific selectors to disable the tap highlight color
+ * (a semi-transparent grey overlay on mobile/touch) for all interactive elements
+ * across all plugin UI components. The `body` prefix and repeated view class
+ * are used to create a specificity high enough to override any Obsidian theme styles.
+ */
+body .version-control-view.version-control-view button,
+body .version-control-view.version-control-view .clickable-icon,
+body .version-control-view.version-control-view .is-clickable,
+body .version-control-view.version-control-view [role="button"],
+body .version-control-view.version-control-view .v-history-entry,
+body .version-preview-view.version-preview-view button,
+body .version-preview-view.version-preview-view .clickable-icon,
+body .version-preview-view.version-preview-view .is-clickable,
+body .version-preview-view.version-preview-view [role="button"],
+body .version-diff-view.version-diff-view button,
+body .version-diff-view.version-diff-view .clickable-icon,
+body .version-diff-view.version-diff-view .is-clickable,
+body .version-diff-view.version-diff-view [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+}

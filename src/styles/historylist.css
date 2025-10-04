@@ -4,15 +4,14 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    /* FIX: Remove top padding to reduce gap with action bar. */
     padding: 0 0 var(--size-4-2);
 }
 
-/* NEW: Disable interactions when a panel is active */
+/* Disable interactions when a panel is active */
 .v-history-list-container.is-panel-active .v-history-list {
     pointer-events: none;
     opacity: 0.6;
-    transition: opacity 0.3s ease-in-out;
+    transition: opacity 0.25s ease-in-out;
 }
 
 .v-history-header {
@@ -24,9 +23,17 @@
     font-size: var(--font-ui-medium);
     padding-bottom: var(--size-4-2);
     border-bottom: 1px solid var(--background-modifier-border);
-    /* FIX: Add horizontal padding here to match action bar */
     padding-left: var(--size-4-2);
     padding-right: var(--size-4-2);
+}
+
+.v-history-header.is-clickable {
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    border-radius: var(--radius-s) var(--radius-s) 0 0;
+}
+.v-history-header.is-clickable:hover {
+    background-color: var(--background-modifier-hover);
 }
 
 .v-history-count {
@@ -41,23 +48,20 @@
     overflow-y: auto;
     min-height: 0;
     padding-top: var(--size-4-2);
-    position: relative; /* Required for virtual list absolute positioning */
-    /* FIX: Remove horizontal padding. Padding is now handled by individual entries,
-       which aligns their content with the header above. */
+    position: relative;
     padding-left: 0;
     padding-right: 0;
 }
 
-/* NEW: Wrapper for card-view items to provide consistent spacing */
+/* Wrapper for card-view items */
 .v-history-item-card-wrapper {
-    padding-bottom: 8px; /* CARD_ITEM_GAP */
+    padding-bottom: 8px;
 }
-
 
 .v-history-list-sizer {
     position: relative;
     width: 100%;
-    height: 0; /* Will be set by JS */
+    height: 0;
 }
 
 .v-history-list.hide-timestamps .v-version-timestamp {
@@ -71,34 +75,32 @@
     border-radius: var(--radius-m);
     background-color: var(--background-secondary);
     border: 1px solid var(--background-modifier-border);
-    
-    /*
-     * FIX: Removed absolute positioning properties.
-     * The virtualization library (React Virtuoso) provides its own wrapper element
-     * for positioning, and these properties were causing all items to stack on top of each other.
-     */
     box-sizing: border-box;
 
-    /* FIX: Add transform and transition for smooth hover/active effects */
-    transform: translateY(0);
-    transition: box-shadow 0.2s ease-out, border-color 0.2s ease-out, transform 0.2s ease-out, background-color 0.2s ease-out;
+    /* Hardware acceleration hint */
+    transform: translateZ(0);
+    will-change: transform, box-shadow, background-color, opacity;
+    transition: box-shadow 180ms ease-out, border-color 180ms ease-out, transform 180ms ease-out, background-color 180ms ease-out;
 }
 
-/* FIX: Replace unscoped hover with specific, scoped rules for cards and list items */
-/* Card hover/active effects */
+/* Animation for items entering the list */
+.v-history-entry:not(.is-skeleton) {
+    animation: v-item-enter 0.4s cubic-bezier(0.215, 0.61, 0.355, 1) forwards;
+}
+
+/* Card view hover/active effects (lightweight shadows) */
 @media (hover: hover) and (pointer: fine) {
     .v-history-entry:not(.is-list-view):hover {
         border-color: var(--interactive-accent);
         transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+        box-shadow: 0 6px 14px rgba(0,0,0,0.06);
         z-index: 10;
     }
 }
 .v-history-entry:not(.is-list-view):active {
-    /* Make active state match hover state for a consistent touch/click experience */
     border-color: var(--interactive-accent);
-    transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.06);
     z-index: 10;
 }
 
@@ -112,7 +114,6 @@
     background-color: var(--background-modifier-active);
 }
 
-
 .v-history-entry.is-error {
     border-color: var(--color-red);
 }
@@ -121,11 +122,9 @@
     margin-left: auto;
 }
 .v-history-entry.is-highlighted {
-    /* Make highlight slimmer and more subtle */
     box-shadow: 0 0 0 1.5px var(--interactive-accent);
-    transition: box-shadow 0.5s ease-out;
+    transition: box-shadow 280ms ease-out;
 }
-
 
 .v-entry-header {
     display: flex;
@@ -140,6 +139,7 @@
     padding: var(--size-4-1) var(--size-4-2);
     border-radius: var(--radius-s);
     font-size: var(--font-ui-smaller);
+    flex-shrink: 0;
 }
 .v-version-name {
     font-weight: 600;
@@ -147,11 +147,10 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    flex-shrink: 1; 
-    min-width: 0; 
+    flex-shrink: 1;
+    min-width: 0;
 }
 .v-version-name.is-empty {
-    /* This is a placeholder to maintain alignment in list view when a name is absent */
     visibility: hidden;
     flex-grow: 1;
 }
@@ -160,7 +159,7 @@
     color: var(--text-muted);
     margin-left: auto;
     white-space: nowrap;
-    flex-shrink: 0; 
+    flex-shrink: 0;
 }
 .v-version-content {
     font-size: var(--font-ui-smaller);
@@ -182,21 +181,19 @@
     color: var(--text-muted);
     cursor: pointer;
     border-radius: var(--radius-s);
-    transition: transform 0.2s ease-out, background-color 0.2s ease-out, color 0.2s ease-out;
+    transition: transform 160ms ease-out, background-color 160ms ease-out, color 160ms ease-out;
     display: flex;
     align-items: center;
     justify-content: center;
 }
 .v-action-btn:hover {
-    /* FIX: Set background to transparent to remove the square hover effect. */
     background-color: transparent;
     color: var(--text-normal);
 }
 .v-action-btn:active {
-    transform: translateY(1px); /* Add a subtle press-in effect */
+    transform: translateY(1px);
 }
 .v-action-btn.danger:hover {
-    /* FIX: Set background to transparent and change icon color to red for feedback. */
     background-color: transparent;
     color: var(--text-error);
 }
@@ -211,7 +208,7 @@
 .is-list-view .v-entry-header {
     flex-grow: 1;
     margin-bottom: 0;
-    min-width: 0; 
+    min-width: 0;
     overflow: hidden;
     flex-wrap: nowrap;
     gap: var(--size-4-2);
@@ -221,18 +218,16 @@
     display: none;
 }
 
-/* New wrapper for name and tags in list view */
 .v-entry-main-info {
     display: flex;
     align-items: center;
-    flex: 1 1 0; /* Grow and shrink, with 0 basis */
-    min-width: 0; /* Critical for shrinking */
+    flex: 1 1 0;
+    min-width: 0;
     overflow: hidden;
     gap: var(--size-4-3);
 }
 
 .v-history-entry.is-naming {
-    /* Make naming indicator slimmer and sharper */
     border-color: var(--interactive-accent);
     box-shadow: 0 0 0 1px var(--interactive-accent);
     transform: translateY(0);
@@ -254,7 +249,7 @@
     width: 100%;
     height: auto;
     line-height: 1.2;
-    flex-shrink: 1; 
+    flex-shrink: 1;
     min-width: 0;
     font-family: inherit;
     font-weight: 600;
@@ -262,7 +257,7 @@
     color: var(--text-normal);
     caret-color: var(--interactive-accent);
     border-bottom: 1px solid transparent;
-    transition: border-color 0.2s ease-in-out;
+    transition: border-color 160ms ease-in-out;
 }
 
 .version-control-view .v-history-entry.is-naming input.v-version-name-input:focus {
@@ -277,12 +272,10 @@
 }
 
 /* --- Skeleton Styles for History List --- */
-/* Skeletons are not virtualized, so they are positioned statically */
 .v-history-list .v-history-entry.is-skeleton {
     position: static;
     transform: none;
     margin-bottom: var(--size-4-2);
-    animation: v-fade-in 0.3s ease-out forwards;
 }
 
 .v-history-entry.is-skeleton {
@@ -291,21 +284,52 @@
     border-color: transparent;
     box-shadow: none;
     transform: none;
+    animation: v-fade-in 0.28s ease-out forwards;
 }
 .v-history-entry.is-skeleton:hover {
     transform: none;
 }
 
 /* Card View Skeleton Layout */
-.v-history-entry.is-skeleton:not(.is-list-view) { height: 110px; } /* Match new card height */
+.v-history-entry.is-skeleton:not(.is-list-view) { height: 110px; }
 .v-history-entry.is-skeleton:not(.is-list-view) .v-version-id { width: 40px; height: 24px; }
 .v-history-entry.is-skeleton:not(.is-list-view) .v-version-name { width: 60%; height: 18px; }
 .v-history-entry.is-skeleton:not(.is-list-view) .v-version-timestamp { width: 80px; height: 16px; }
 .v-history-entry.is-skeleton:not(.is-list-view) .v-version-content { width: 40%; height: 16px; margin-top: var(--size-4-1); }
 
 /* List View Skeleton Layout */
-.v-history-entry.is-skeleton.is-list-view { height: 44px; } /* Match list item height */
+.v-history-entry.is-skeleton.is-list-view { height: 44px; }
 .v-history-entry.is-skeleton.is-list-view .v-version-id { width: 40px; height: 24px; flex-shrink: 0; }
 .v-history-entry.is-skeleton.is-list-view .v-entry-main-info { flex-basis: 0; flex-grow: 1; }
 .v-history-entry.is-skeleton.is-list-view .v-version-name { width: 70%; height: 18px; }
 .v-history-entry.is-skeleton.is-list-view .v-version-timestamp { width: 80px; height: 16px; flex-shrink: 0; }
+
+/* Keyframes for item entrance */
+@keyframes v-item-enter {
+    from {
+        opacity: 0;
+        transform: translateY(15px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* small fade-in for skeletons */
+@keyframes v-fade-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Respect user motion preferences */
+@media (prefers-reduced-motion: reduce) {
+    .v-history-entry,
+    .v-action-btn {
+        transition: none !important;
+        will-change: auto !important;
+    }
+    .v-history-entry:not(.is-skeleton) {
+        animation: none;
+    }
+}

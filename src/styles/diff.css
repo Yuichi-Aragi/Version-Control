@@ -111,7 +111,7 @@
     white-space: pre-wrap;
     word-break: break-all;
     padding-left: var(--size-4-2);
-    /* Removed left border from here */
+    user-select: text;
 }
 
 /* Added lines */
@@ -148,6 +148,7 @@
     padding: var(--size-4-3);
     white-space: pre-wrap;
     word-break: break-all;
+    user-select: text;
 }
 
 .v-unified-diff-view .diff-add {

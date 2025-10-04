@@ -226,6 +226,7 @@
     flex-grow: 1;
     line-height: 1.5;
     animation: v-fade-in 0.3s ease;
+    user-select: text; /* NEW: Ensure content is selectable */
 }
 .v-version-content-preview.is-plaintext {
     /* For virtualized plaintext, hide the container's scrollbar. */
