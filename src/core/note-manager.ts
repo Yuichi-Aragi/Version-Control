@@ -1,10 +1,10 @@
 import { App, TFile, WorkspaceLeaf, MarkdownView, type FrontMatterCache } from "obsidian";
 import { injectable, inject } from 'inversify';
 import { ManifestManager } from "./manifest-manager";
-import { NOTE_FRONTMATTER_KEY } from "../constants";
 import type { ActiveNoteInfo } from "../types";
 import { generateUniqueId } from "../utils/id";
 import { TYPES } from "../types/inversify.types";
+import type VersionControlPlugin from "../main";
 
 @injectable()
 export class NoteManager {
@@ -13,9 +13,14 @@ export class NoteManager {
     private pendingDeviations = new Set<string>();
 
     constructor(
+        @inject(TYPES.Plugin) private plugin: VersionControlPlugin,
         @inject(TYPES.App) private app: App, 
         @inject(TYPES.ManifestManager) private manifestManager: ManifestManager
     ) {}
+
+    private get noteIdKey(): string {
+        return this.plugin.settings.noteIdFrontmatterKey;
+    }
 
     async getActiveNoteState(leaf?: WorkspaceLeaf | null): Promise<ActiveNoteInfo> {
         const targetLeaf = leaf;
@@ -30,7 +35,7 @@ export class NoteManager {
         }
 
         const fileCache = this.app.metadataCache.getFileCache(file);
-        let noteIdFromFrontmatter = fileCache?.frontmatter?.[NOTE_FRONTMATTER_KEY] ?? null;
+        let noteIdFromFrontmatter = fileCache?.frontmatter?.[this.noteIdKey] ?? null;
 
         // Treat empty string vc-id as null
         if (typeof noteIdFromFrontmatter === 'string' && noteIdFromFrontmatter.trim() === '') {
@@ -58,7 +63,7 @@ export class NoteManager {
         if (!file) return null;
 
         const fileCache = this.app.metadataCache.getFileCache(file);
-        let idFromCache = fileCache?.frontmatter?.[NOTE_FRONTMATTER_KEY];
+        let idFromCache = fileCache?.frontmatter?.[this.noteIdKey];
 
         if (typeof idFromCache === 'string' && idFromCache.trim() !== '') {
             return idFromCache;
@@ -102,7 +107,7 @@ export class NoteManager {
     async writeNoteIdToFrontmatter(file: TFile, noteId: string): Promise<boolean> {
         try {
             await this.app.fileManager.processFrontMatter(file, (frontmatter: FrontMatterCache) => {
-                frontmatter[NOTE_FRONTMATTER_KEY] = noteId;
+                frontmatter[this.noteIdKey] = noteId;
             });
             return true;
         } catch (error) {

@@ -1,4 +1,3 @@
-import { App, Vault } from "obsidian";
 import { injectable, inject } from 'inversify';
 import type { Draft } from 'immer';
 import type { NoteManifest } from "../types";
@@ -16,16 +15,12 @@ import type { StorageService } from "./storage/storage-service";
  */
 @injectable()
 export class ManifestManager {
-    private vault: Vault;
-
     constructor(
-        @inject(TYPES.App) app: App,
         @inject(TYPES.PathService) private pathService: PathService,
         @inject(TYPES.StorageService) private storageService: StorageService,
         @inject(TYPES.CentralManifestRepo) private centralManifestRepo: CentralManifestRepository,
         @inject(TYPES.NoteManifestRepo) private noteManifestRepo: NoteManifestRepository
     ) {
-        this.vault = app.vault;
     }
 
     async initializeDatabase(): Promise<void> {

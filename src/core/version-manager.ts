@@ -4,13 +4,14 @@ import { injectable, inject } from 'inversify';
 import { diffLines } from 'diff';
 import { ManifestManager } from './manifest-manager';
 import { NoteManager } from './note-manager';
-import type { VersionControlSettings, VersionHistoryEntry } from '../types';
+import type { VersionControlSettings, VersionHistoryEntry, BranchState, Branch } from '../types';
 import { generateUniqueFilePath } from '../utils/file';
-import { NOTE_FRONTMATTER_KEY } from '../constants';
 import { PluginEvents } from './plugin-events';
 import { generateUniqueId } from '../utils/id';
 import { VersionContentRepository } from './storage/version-content-repository';
 import { TYPES } from '../types/inversify.types';
+import type VersionControlPlugin from '../main';
+import { DEFAULT_BRANCH_NAME } from '../constants';
 
 /**
  * Manages the core business logic for versioning operations like saving,
@@ -20,12 +21,17 @@ import { TYPES } from '../types/inversify.types';
 @injectable()
 export class VersionManager {
   constructor(
+    @inject(TYPES.Plugin) private readonly plugin: VersionControlPlugin,
     @inject(TYPES.App) private readonly app: App,
     @inject(TYPES.ManifestManager) private readonly manifestManager: ManifestManager,
     @inject(TYPES.NoteManager) private readonly noteManager: NoteManager,
     @inject(TYPES.VersionContentRepo) private readonly versionContentRepo: VersionContentRepository,
     @inject(TYPES.EventBus) private readonly eventBus: PluginEvents
   ) {}
+
+  private get noteIdKey(): string {
+    return this.plugin.settings.noteIdFrontmatterKey;
+  }
 
   /**
    * Saves a new version of a given file. This method encapsulates the entire
@@ -48,46 +54,41 @@ export class VersionManager {
       throw new Error('Invalid file provided to saveNewVersionForFile.');
     }
 
-    // 1. Ensures an ID exists in the note's frontmatter.
     const noteId = await this.noteManager.getOrCreateNoteId(file);
     if (!noteId) {
       throw new Error('Could not get or create a note ID for the file.');
     }
 
-    // 2. Check if the database entry (manifest) for this note exists. If not, create it.
-    // This defers database creation until the first version is actually saved.
     let noteManifest = await this.manifestManager.loadNoteManifest(noteId);
     if (!noteManifest) {
       console.log(`VC: First version for "${file.path}". Creating database entry.`);
       noteManifest = await this.manifestManager.createNoteEntry(noteId, file.path);
     }
+    const branchName = noteManifest.currentBranch;
+    const currentBranch = noteManifest.branches[branchName];
+    if (!currentBranch) {
+        throw new Error(`Current branch "${branchName}" not found in manifest for note ${noteId}.`);
+    }
 
-    // 3. Get content to save, prioritizing the active editor, then a direct disk read.
     const activeMarkdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
     let contentToSave: string;
 
     if (activeMarkdownView?.file?.path === file.path) {
-        // The most up-to-date content is in the active editor, including unsaved changes.
         contentToSave = activeMarkdownView.editor.getValue();
     } else {
-        // If the file is not in the active editor, read directly from disk via the adapter
-        // to bypass Obsidian's cache and get the definitive file state.
         if (!(await this.app.vault.adapter.exists(file.path))) {
             throw new Error(`File to be saved does not exist at path: ${file.path}`);
         }
         contentToSave = await this.app.vault.adapter.read(file.path);
     }
 
-    // 4. Get latest content for comparison checks.
     const latestContent = await this.versionContentRepo.getLatestVersionContent(noteId, noteManifest);
 
-    // 5. Check for minimum lines changed on auto-save, if enabled.
     if (isAuto && settings.enableMinLinesChangedCheck && latestContent !== null) {
         const changes = diffLines(latestContent, contentToSave);
         let changedLines = 0;
         for (const part of changes) {
             if (part.added || part.removed) {
-                // The 'count' property is guaranteed to exist on added/removed parts.
                 changedLines += part.count!;
             }
         }
@@ -97,7 +98,6 @@ export class VersionManager {
         }
     }
 
-    // 6. Check for duplicate content, unless forced.
     if (!force) {
       if (latestContent !== null && latestContent === contentToSave) {
         return { status: 'duplicate', newVersionEntry: null, displayName: '', newNoteId: noteId };
@@ -107,25 +107,26 @@ export class VersionManager {
     const versionId = generateUniqueId();
 
     try {
-      // 7. Write version content file (queued by noteId inside the repository).
       const { size } = await this.versionContentRepo.write(noteId, versionId, contentToSave);
       const version_name = (name || '').trim();
       const timestamp = new Date().toISOString();
 
-      // 8. Update the note's manifest (also queued by noteId).
       const updatedManifest = await this.manifestManager.updateNoteManifest(noteId, (manifest) => {
-        const versionNumber = (manifest.totalVersions || 0) + 1;
-        manifest.versions[versionId] = {
-          versionNumber,
-          timestamp,
-          size,
-          ...(version_name && { name: version_name }),
-        };
-        manifest.totalVersions = versionNumber;
-        manifest.lastModified = timestamp;
+        const branch = manifest.branches[branchName];
+        if (branch) {
+            const versionNumber = (branch.totalVersions || 0) + 1;
+            branch.versions[versionId] = {
+              versionNumber,
+              timestamp,
+              size,
+              ...(version_name && { name: version_name }),
+            };
+            branch.totalVersions = versionNumber;
+            manifest.lastModified = timestamp;
+        }
       });
 
-      const savedVersionData = updatedManifest.versions[versionId];
+      const savedVersionData = updatedManifest.branches[branchName]?.versions[versionId];
       if (!savedVersionData) {
         throw new Error(`Failed to retrieve saved version data for version ${versionId} from manifest after update.`);
       }
@@ -139,6 +140,7 @@ export class VersionManager {
           id: versionId,
           noteId,
           notePath: file.path,
+          branchName,
           versionNumber: savedVersionData.versionNumber,
           timestamp,
           size,
@@ -149,11 +151,9 @@ export class VersionManager {
       };
     } catch (error) {
       console.error(`VC: CRITICAL FAILURE in saveNewVersionForFile for "${file.path}". Rolling back.`, error);
-      // Attempt to clean up the orphaned version file (this delete is also queued).
       await this.versionContentRepo.delete(noteId, versionId).catch((cleanupError) => {
         console.error(`VC: FAILED to clean up orphaned version file after an error: ${versionId}`, cleanupError);
       });
-      // Invalidate the manifest cache to force a reload on next read.
       this.manifestManager.invalidateNoteManifestCache(noteId);
       throw error;
     }
@@ -165,7 +165,10 @@ export class VersionManager {
     }
     const version_name = name.trim();
     await this.manifestManager.updateNoteManifest(noteId, (manifest) => {
-      const versionData = manifest.versions[versionId];
+      const branch = manifest.branches[manifest.currentBranch];
+      if (!branch) throw new Error(`Current branch not found for note ${noteId}`);
+      
+      const versionData = branch.versions[versionId];
       if (!versionData) {
         throw new Error(`Version ${versionId} not found in manifest for note ${noteId}.`);
       }
@@ -184,14 +187,19 @@ export class VersionManager {
     }
     try {
       const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
-      if (!noteManifest || !noteManifest.versions) {
+      if (!noteManifest) return [];
+      
+      const branchName = noteManifest.currentBranch;
+      const currentBranch = noteManifest.branches[branchName];
+      if (!currentBranch || !currentBranch.versions) {
         return [];
       }
 
-      const history = map(noteManifest.versions, (data, id) => ({
+      const history = map(currentBranch.versions, (data, id) => ({
         id,
         noteId,
         notePath: noteManifest.notePath,
+        branchName,
         versionNumber: data.versionNumber,
         timestamp: data.timestamp,
         size: data.size,
@@ -215,7 +223,6 @@ export class VersionManager {
     }
     try {
       if (!this.app.vault.getAbstractFileByPath(liveFile.path)) {
-        // Don't throw, just warn and return false. The file is gone.
         console.warn(`VC: Restoration failed. Note "${liveFile.basename}" no longer exists.`);
         return false;
       }
@@ -254,20 +261,17 @@ export class VersionManager {
     const newFileNameBase = `${baseName} (from V${versionId.substring(0, 6)}...)`;
     const newFilePath = await generateUniqueFilePath(this.app, newFileNameBase, parentPath);
 
-    // Add the path to the exclusion list BEFORE creating the file to prevent race conditions.
     this.noteManager.addPendingDeviation(newFilePath);
 
     try {
-      // Create the new file with the original content (including vc-id)
       const newFile = await this.app.vault.create(newFilePath, versionContent);
       if (!newFile) {
         throw new Error('Failed to create the new note file for deviation.');
       }
 
-      // Now, process the frontmatter of the newly created, permanent file to remove the vc-id
       try {
         await this.app.fileManager.processFrontMatter(newFile, (fm: FrontMatterCache) => {
-          delete fm[NOTE_FRONTMATTER_KEY];
+          delete fm[this.noteIdKey];
         });
       } catch (fmError) {
         console.error(`VC: Failed to remove vc-id from new deviation note "${newFilePath}". Trashing the file to prevent issues.`, fmError);
@@ -282,7 +286,6 @@ export class VersionManager {
       console.error(`VC: Failed to create deviation for note ${noteId}, version ${versionId}.`, error);
       throw error;
     } finally {
-      // CRITICAL: Ensure the path is removed from the exclusion list, even if an error occurred.
       this.noteManager.removePendingDeviation(newFilePath);
     }
   }
@@ -293,27 +296,28 @@ export class VersionManager {
     }
     try {
       const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
-      if (!noteManifest || !noteManifest.versions[versionId]) {
+      if (!noteManifest) return false;
+
+      const branchName = noteManifest.currentBranch;
+      const branch = noteManifest.branches[branchName];
+      if (!branch || !branch.versions[versionId]) {
         console.warn('VC: Version to delete not found in manifest. It may have already been deleted.');
-        // If the version is not in the manifest, still try to delete the content file just in case it's an orphan.
         await this.versionContentRepo.delete(noteId, versionId);
-        return true; // Return true as the desired state (version gone) is achieved.
+        return true;
       }
 
-      if (Object.keys(noteManifest.versions).length === 1) {
-        // This is the last version. The `deleteAllVersions` logic is now safe to call
-        // as its underlying repository calls are queued.
-        return this.deleteAllVersions(noteId);
+      if (Object.keys(branch.versions).length === 1) {
+        return this.deleteBranch(noteId, branchName);
       }
 
-      // This is NOT the last version, proceed with normal deletion.
-      // This manifest update is queued.
       await this.manifestManager.updateNoteManifest(noteId, (manifest) => {
-        delete manifest.versions[versionId];
-        manifest.lastModified = new Date().toISOString();
+        const b = manifest.branches[branchName];
+        if (b) {
+            delete b.versions[versionId];
+            manifest.lastModified = new Date().toISOString();
+        }
       });
 
-      // This content deletion is queued.
       await this.versionContentRepo.delete(noteId, versionId);
       this.eventBus.trigger('version-deleted', noteId);
       return true;
@@ -323,25 +327,11 @@ export class VersionManager {
     }
   }
 
-  public async deleteAllVersions(noteId: string): Promise<boolean> {
-    if (!noteId) {
-      throw new Error('Invalid noteId for deleteAllVersions.');
-    }
-    try {
-      const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
-      const liveFilePath = noteManifest?.notePath;
-      // This is a multi-step operation, but the critical parts inside are queued.
-      await this.manifestManager.deleteNoteEntry(noteId);
-
-      if (liveFilePath) {
-        await this.cleanupFrontmatter(liveFilePath, noteId);
-      }
-      this.eventBus.trigger('history-deleted', noteId);
-      return true;
-    } catch (error) {
-      console.error(`VC: Failed to delete all versions for note ${noteId}.`, error);
-      throw error;
-    }
+  public async deleteAllVersionsInCurrentBranch(noteId: string): Promise<boolean> {
+    if (!noteId) throw new Error('Invalid noteId for deleteAllVersionsInCurrentBranch.');
+    const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
+    if (!noteManifest) return false;
+    return this.deleteBranch(noteId, noteManifest.currentBranch);
   }
 
   private async cleanupFrontmatter(filePath: string, expectedNoteId: string): Promise<void> {
@@ -349,14 +339,138 @@ export class VersionManager {
     if (liveFile instanceof TFile) {
       try {
         await this.app.fileManager.processFrontMatter(liveFile, (fm) => {
-            // Only delete the key if it matches the one we expect, to avoid race conditions
-            if (fm[NOTE_FRONTMATTER_KEY] === expectedNoteId) {
-                delete fm[NOTE_FRONTMATTER_KEY];
+            if (fm[this.noteIdKey] === expectedNoteId) {
+                delete fm[this.noteIdKey];
             }
         });
       } catch (fmError) {
         console.error(`VC: WARNING: Could not clean vc-id from frontmatter of "${filePath}". Please remove it manually.`, fmError);
       }
+    }
+  }
+
+  // Branching logic
+  public async createBranch(noteId: string, newBranchName: string): Promise<void> {
+    await this.manifestManager.updateNoteManifest(noteId, manifest => {
+        if (manifest.branches[newBranchName]) {
+            throw new Error(`Branch "${newBranchName}" already exists.`);
+        }
+        const currentBranchSettings = manifest.branches[manifest.currentBranch]?.settings;
+        const newBranch: Branch = {
+            versions: {},
+            totalVersions: 0,
+        };
+        if (currentBranchSettings) {
+            newBranch.settings = currentBranchSettings;
+        }
+        manifest.branches[newBranchName] = newBranch;
+    });
+  }
+
+  public async switchBranch(noteId: string, newBranchName: string): Promise<void> {
+    const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
+    if (!noteManifest) throw new Error('Manifest not found');
+
+    const currentBranchName = noteManifest.currentBranch;
+    if (currentBranchName === newBranchName) return;
+
+    // Find the MarkdownView for the current note, regardless of focus.
+    let targetView: MarkdownView | null = null;
+    const markdownLeaves = this.app.workspace.getLeavesOfType('markdown');
+    for (const leaf of markdownLeaves) {
+        if (leaf.view instanceof MarkdownView && leaf.view.file?.path === noteManifest.notePath) {
+            targetView = leaf.view;
+            break;
+        }
+    }
+
+    // 1. Save current editor state to the old branch
+    if (targetView) {
+        const state: BranchState = {
+            content: targetView.editor.getValue(),
+            cursor: targetView.editor.getCursor(),
+            scroll: targetView.editor.getScrollInfo()
+        };
+        await this.manifestManager.updateNoteManifest(noteId, manifest => {
+            const branch = manifest.branches[currentBranchName];
+            if (branch) {
+                branch.state = state;
+            }
+        });
+    }
+
+    // 2. Switch branch pointer in manifest
+    await this.manifestManager.updateNoteManifest(noteId, manifest => {
+        if (!manifest.branches[newBranchName]) {
+            throw new Error(`Branch "${newBranchName}" does not exist.`);
+        }
+        manifest.currentBranch = newBranchName;
+    });
+
+    // 3. Load new state into the editor
+    const newManifest = await this.manifestManager.loadNoteManifest(noteId);
+    if (!newManifest) throw new Error("Failed to reload manifest after switching branch.");
+
+    const newBranch = newManifest.branches[newBranchName];
+    const newBranchState = newBranch?.state;
+
+    if (targetView) {
+        if (newBranchState) {
+            // A saved state exists for the new branch, restore it.
+            targetView.editor.setValue(newBranchState.content);
+            targetView.editor.setCursor(newBranchState.cursor);
+            targetView.editor.scrollTo(newBranchState.scroll.left, newBranchState.scroll.top);
+        } else {
+            // No saved state. Load the content of the latest version of the new branch.
+            const latestVersionContent = await this.versionContentRepo.getLatestVersionContent(noteId, newManifest);
+            if (latestVersionContent !== null) {
+                targetView.editor.setValue(latestVersionContent);
+            }
+        }
+    }
+  }
+
+  public async deleteBranch(noteId: string, branchName: string): Promise<boolean> {
+    if (!noteId || !branchName) throw new Error('Invalid noteId or branchName for deleteBranch.');
+    
+    try {
+        const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
+        if (!noteManifest || !noteManifest.branches[branchName]) {
+            console.warn(`VC: Branch to delete '${branchName}' not found.`);
+            return true;
+        }
+
+        if (Object.keys(noteManifest.branches).length === 1) {
+            // This is the last branch. Deleting it means deleting the entire note history.
+            const liveFilePath = noteManifest.notePath;
+            await this.manifestManager.deleteNoteEntry(noteId);
+            if (liveFilePath) {
+                await this.cleanupFrontmatter(liveFilePath, noteId);
+            }
+            this.eventBus.trigger('history-deleted', noteId);
+            return true;
+        }
+
+        const versionsToDelete = Object.keys(noteManifest.branches[branchName]?.versions ?? {});
+        
+        await this.manifestManager.updateNoteManifest(noteId, manifest => {
+            delete manifest.branches[branchName];
+            if (manifest.currentBranch === branchName) {
+                manifest.currentBranch = Object.keys(manifest.branches)[0] ?? DEFAULT_BRANCH_NAME;
+            }
+            manifest.lastModified = new Date().toISOString();
+        });
+
+        for (const versionId of versionsToDelete) {
+            await this.versionContentRepo.delete(noteId, versionId);
+        }
+        
+        this.eventBus.trigger('version-deleted', noteId);
+        return true;
+
+    } catch (error) {
+        console.error(`VC: Failed to delete branch ${branchName} for note ${noteId}.`, error);
+        throw error;
     }
   }
 }
