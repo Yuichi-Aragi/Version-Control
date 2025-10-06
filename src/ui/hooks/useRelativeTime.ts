@@ -1,29 +1,20 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useMemo } from 'react';
+import { useTime } from '../contexts/TimeContext';
 
-// Type definitions for better type safety
+// Type definitions
 type Timestamp = number;
 type RelativeTimeString = string;
-type UpdateInterval = number;
 
-// Constants for better maintainability
-const INTERVALS = {
-    FIRST_MINUTE: 5 * 1000,
-    FIRST_HOUR: 60 * 1000,
-    FIRST_DAY: 3600 * 1000,
-} as const;
-
-const TIME_THRESHOLDS = {
-    MINUTE: 60,
-    HOUR: 3600,
-    DAY: 86400,
-} as const;
-
-// Browser equivalent of moment.js fromNow function
-const formatRelativeTime = (timestamp: Timestamp): RelativeTimeString => {
+/**
+ * A pure function to format a timestamp into a relative time string (e.g., "a minute ago").
+ * This is a lightweight, browser-compatible alternative to moment.js's fromNow().
+ * @param timestamp - The timestamp to format (in milliseconds).
+ * @param now - The current time (in milliseconds) to compare against.
+ * @returns A formatted relative time string.
+ */
+const formatRelativeTime = (timestamp: Timestamp, now: Timestamp): RelativeTimeString => {
     try {
-        const now = new Date();
-        const date = new Date(timestamp);
-        const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+        const diffInSeconds = Math.floor((now - timestamp) / 1000);
         
         // Handle future timestamps
         if (diffInSeconds < 0) {
@@ -83,125 +74,35 @@ const formatRelativeTime = (timestamp: Timestamp): RelativeTimeString => {
         const years = Math.floor(months / 12);
         return `${years} years ago`;
     } catch (error) {
-        throw new Error(`Failed to format timestamp ${timestamp}: ${error instanceof Error ? error.message : String(error)}`);
+        console.error(`Failed to format timestamp ${timestamp}: ${error instanceof Error ? error.message : String(error)}`);
+        return 'Invalid time';
     }
 };
 
 /**
- * Validates if a value is a valid timestamp
- * @param value - The value to validate
- * @returns True if the value is a valid timestamp
+ * Validates if a value is a valid, positive, finite number.
+ * @param value - The value to validate.
+ * @returns True if the value is a valid timestamp.
  */
 const isValidTimestamp = (value: unknown): value is Timestamp => {
-    return typeof value === 'number' && 
-           !isNaN(value) && 
-           isFinite(value) && 
-           value > 0 && 
-           value <= Date.now() + 86400000; // Allow timestamps up to 24 hours in the future
-};
-
-/**
- * Determines the update interval for the relative time string based on how old the timestamp is.
- * More frequent updates are scheduled for more recent timestamps.
- * @param timestamp - The timestamp in milliseconds.
- * @returns The interval in milliseconds, or -1 if no further updates are needed.
- * @throws {Error} If the timestamp is invalid
- */
-const getUpdateInterval = (timestamp: Timestamp): UpdateInterval => {
-    if (!isValidTimestamp(timestamp)) {
-        throw new Error(`Invalid timestamp: ${timestamp}`);
-    }
-
-    const now = Date.now();
-    const secondsAgo = (now - timestamp) / 1000;
-    
-    // Handle future timestamps
-    if (secondsAgo < 0) {
-        return INTERVALS.FIRST_MINUTE;
-    }
-    
-    if (secondsAgo < TIME_THRESHOLDS.MINUTE) return INTERVALS.FIRST_MINUTE;
-    if (secondsAgo < TIME_THRESHOLDS.HOUR) return INTERVALS.FIRST_HOUR;
-    if (secondsAgo < TIME_THRESHOLDS.DAY) return INTERVALS.FIRST_DAY;
-    return -1; // No updates needed for timestamps older than a day
+    return typeof value === 'number' && Number.isFinite(value) && value > 0;
 };
 
 /**
  * A React hook that provides a self-updating relative time string (e.g., "a minute ago").
- * It uses a dynamic interval to efficiently update the timestamp, reducing re-renders.
+ * It subscribes to a global time context for efficient, batched updates, ensuring that
+ * all visible timestamps on the screen update simultaneously and smoothly.
  * @param timestamp - The timestamp to format, as a number (milliseconds since epoch).
- * @returns A formatted relative time string.
- * @throws {Error} If the timestamp is invalid or formatting fails
+ * @returns A memoized, formatted relative time string.
  */
 export const useRelativeTime = (timestamp: unknown): RelativeTimeString => {
-    // Validate input
-    if (!isValidTimestamp(timestamp)) {
-        throw new Error(`Invalid timestamp provided to useRelativeTime: ${timestamp}`);
-    }
+    const { now } = useTime();
 
-    const [relativeTime, setRelativeTime] = useState<RelativeTimeString>(() => {
-        try {
-            return formatRelativeTime(timestamp);
-        } catch (error) {
-            console.error('Error initializing relative time:', error);
+    return useMemo(() => {
+        if (!isValidTimestamp(timestamp)) {
+            // Return a stable string for invalid inputs to prevent errors downstream.
             return 'Invalid time';
         }
-    });
-
-    // Use refs to track the latest values without causing re-renders
-    const timestampRef = useRef<Timestamp>(timestamp);
-    const intervalRef = useRef<number | null>(null);
-
-    // Update the ref when timestamp changes
-    useEffect(() => {
-        timestampRef.current = timestamp;
-    }, [timestamp]);
-
-    // Memoize the update function to prevent unnecessary re-renders
-    const updateRelativeTime = useCallback(() => {
-        try {
-            const newRelativeTime = formatRelativeTime(timestampRef.current);
-            setRelativeTime(prevTime => {
-                // Only update if the value actually changed
-                return prevTime !== newRelativeTime ? newRelativeTime : prevTime;
-            });
-        } catch (error) {
-            console.error('Error updating relative time:', error);
-            // Don't update the state on error to maintain the last valid value
-        }
-    }, []);
-
-    useEffect(() => {
-        // Clear any existing interval
-        if (intervalRef.current) {
-            clearInterval(intervalRef.current);
-            intervalRef.current = null;
-        }
-
-        try {
-            const updateInterval = getUpdateInterval(timestampRef.current);
-            
-            if (updateInterval === -1) {
-                // One final check ensures correctness if the component mounts much later
-                updateRelativeTime();
-                return;
-            }
-
-            intervalRef.current = window.setInterval(updateRelativeTime, updateInterval);
-        } catch (error) {
-            console.error('Error setting up update interval:', error);
-            // Still try to update once even if interval setup fails
-            updateRelativeTime();
-        }
-
-        // Cleanup function
-        return () => {
-            if (intervalRef.current) {
-                clearInterval(intervalRef.current);
-                intervalRef.current = null;
-            }
-        };
-    }, [updateRelativeTime]);
-
-    return relativeTime;
+        return formatRelativeTime(timestamp, now);
+    }, [timestamp, now]);
 };
