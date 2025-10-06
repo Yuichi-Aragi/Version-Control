@@ -6,15 +6,6 @@ So in my work flow I have to constantly modify the same version of the note. I'm
 
 A simple yet powerful versioning system for your Obsidian notes. Never lose a good idea again just because you rewrote a sentence. Create, manage, and restore different versions of your notes right inside Obsidian.
 
-### Why Choose This Plugin?
-
-This plugin is designed for writers, thinkers, and perfectionists who want a simple, intuitive, and robust way to manage the evolution of their notes. If you've ever found yourself creating multiple copies of a file just to explore a new idea, or wished you could go back to a previous version of a paragraph, this plugin is for you.
-
-*   **Per-File Version Control:** Unlike Git, which versions your entire vault, this plugin focuses on individual notes. This means you can track the history of a single piece of writing without the complexity of commits, branches, or repositories.
-*   **Simplicity and Intuition:** If you find Git's learning curve steep or its features excessive for your needs, this plugin offers a straightforward alternative. It's designed to "just work" out of the box, with a clear and accessible interface.
-*   **Mobile-Friendly:** Running a full Git client on mobile or tablets can be impractical. This plugin provides a reliable, self-contained versioning system that works seamlessly across all your devices, including mobile.
-*   **Plays Well with Others:** You can use this plugin alongside Git without any conflicts. Let Git manage your overall vault structure and synchronization, while this plugin handles the fine-grained versioning of your individual notes.
-
 ---
 
 ### The Interface
@@ -27,16 +18,16 @@ The plugin is designed to be intuitive and fit seamlessly with your Obsidian the
     <td align="center"><strong>Card View (Dark)</strong></td>
   </tr>
   <tr>
-    <td><img src="assets/Screenshot_20251004-170801.png" alt="Card View in Light Mode"></td>
-    <td><img src="assets/Screenshot_20251004-170843.png" alt="Card View in Dark Mode"></td>
+    <td><img src="assets/Screenshot_20251006-194841.png" alt="Card View in Light Mode"></td>
+    <td><img src="assets/Screenshot_20251006-194759.png" alt="Card View in Dark Mode"></td>
   </tr>
   <tr>
     <td align="center"><strong>List View (Light)</strong></td>
     <td align="center"><strong>List View (Dark)</strong></td>
   </tr>
   <tr>
-    <td><img src="assets/Screenshot_20251004-170815.png" alt="List View in Light Mode"></td>
-    <td><img src="assets/Screenshot_20251004-170828.png" alt="List View in Dark Mode"></td>
+    <td><img src="assets/Screenshot_20251006-194827.png" alt="List View in Light Mode"></td>
+    <td><img src="assets/Screenshot_20251006-194815.png" alt="List View in Dark Mode"></td>
   </tr>
 </table>
 
@@ -46,22 +37,18 @@ Have you ever been editing a note, trying to perfect it, only to realize you've 
 
 This plugin solves that. It allows you to save "snapshots" of your notes at any point in time. Think of it like a manual save point in a video game, but for your thoughts. You can create as many versions as you need, give them names, and easily jump back to any previous state.
 
-***
-
 ### Key Features
 
 *   💾 **Save Snapshots:** At any time, save the current state of your note as a new version. You can give it a custom name (e.g., "First Draft," "Added Research Links") for easy reference.
 
 *   👀 **Preview & Restore:** Quickly glance at the content of any old version without commitment. If you like what you see, restore it with a single click. Don't worry—the plugin automatically saves a backup of your current content before restoring!
 
-*   🔍 **Advanced Comparison (Diff):** See exactly what changed between any two versions. Go beyond standard line-by-line comparison with advanced modes like **Word**, **Character**, and **JSON Diff** to pinpoint every modification.
+*   🔍 **Compare Versions (Diff):** See the exact changes between any two versions of your note, highlighting what was added, removed, or modified. (Obviously!)
 
-*   🌿 **Create Deviations (New Note):** Want to turn an old version into a completely separate file? Create a "deviation" to start a brand-new note from any point in your history, perfect for major rewrites or spin-off ideas.
-
-*   🌳 **Explore with Branches (Same Note):** Need to try a different direction within the *same file*? Create a "branch" to work on parallel ideas. Each branch has its own independent history, so you can experiment freely without affecting your main draft.
-
+*   🌿 **Create Deviations:** Found an old version with a brilliant idea you want to explore separately? Create a brand-new note from any version to branch your thoughts without cluttering the original.
+  
 *   ⚙️ **Smart Cleanup:** Keep your history tidy. Set a maximum number of versions per note, or automatically clean up versions older than a certain number of days.
-
+  
 *   📤 **Export Your History:** Need to back up your work or use it elsewhere? Export the entire version history of a note to various formats, including Markdown, JSON, and plain text.
 
 *   💅 **Flexible Interface:** Choose between a detailed **Card View** that shows all actions at a glance, or a sleek, **Compact List View** for a more minimal look.
