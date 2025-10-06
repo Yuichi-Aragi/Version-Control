@@ -22,44 +22,24 @@ This plugin is designed for writers, thinkers, and perfectionists who want a sim
 
 The plugin is designed to be intuitive and fit seamlessly with your Obsidian theme, whether you prefer light or dark mode.
 
-<div class="demo-gallery">
-  <div class="demo-row">
-    <div class="demo-card">
-      <h3 class="demo-title">Card View (Light)</h3>
-      <div class="demo-image-container">
-        <img src="https://raw.githubusercontent.com/Yuichi-Aragi/Version-Control/refs/heads/main/assets/Screenshot_20251006-194841.png" 
-             alt="Card View in Light Mode" 
-             loading="lazy">
-      </div>
-    </div>
-    <div class="demo-card">
-      <h3 class="demo-title">Card View (Dark)</h3>
-      <div class="demo-image-container">
-        <img src="https://raw.githubusercontent.com/Yuichi-Aragi/Version-Control/refs/heads/main/assets/Screenshot_20251006-194759.png" 
-             alt="Card View in Dark Mode" 
-             loading="lazy">
-      </div>
-    </div>
-  </div>
-  <div class="demo-row">
-    <div class="demo-card">
-      <h3 class="demo-title">List View (Light)</h3>
-      <div class="demo-image-container">
-        <img src="https://raw.githubusercontent.com/Yuichi-Aragi/Version-Control/refs/heads/main/assets/Screenshot_20251006-194827.png" 
-             alt="List View in Light Mode" 
-             loading="lazy">
-      </div>
-    </div>
-    <div class="demo-card">
-      <h3 class="demo-title">List View (Dark)</h3>
-      <div class="demo-image-container">
-        <img src="https://raw.githubusercontent.com/Yuichi-Aragi/Version-Control/refs/heads/main/assets/Screenshot_20251006-194815.png" 
-             alt="List View in Dark Mode" 
-             loading="lazy">
-      </div>
-    </div>
-  </div>
-</div>
+<table>
+  <tr>
+    <td align="center"><strong>Card View (Light)</strong></td>
+    <td align="center"><strong>Card View (Dark)</strong></td>
+  </tr>
+  <tr>
+    <td><img src="assets/Screenshot_20251006-194841.png" alt="Card View in Light Mode"></td>
+    <td><img src="assets/Screenshot_20251006-194759.png" alt="Card View in Dark Mode"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>List View (Light)</strong></td>
+    <td align="center"><strong>List View (Dark)</strong></td>
+  </tr>
+  <tr>
+    <td><img src="assets/Screenshot_20251006-194827.png" alt="List View in Light Mode"></td>
+    <td><img src="assets/Screenshot_20251006-194815.png" alt="List View in Dark Mode"></td>
+  </tr>
+</table>
 
 ### What Can This Plugin Do For You?
 
