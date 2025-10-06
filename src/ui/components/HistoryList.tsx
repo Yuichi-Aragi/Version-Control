@@ -1,31 +1,34 @@
 import { moment } from 'obsidian';
 import { orderBy } from 'lodash-es';
 import clsx from 'clsx';
-import { type FC, useEffect, useMemo, useRef, useState, useTransition, memo, useCallback } from 'react';
+import { type FC, useEffect, useMemo, useRef, useState, useTransition, memo } from 'react';
 import { Virtuoso } from 'react-virtuoso';
-import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
+import { useAppSelector } from '../hooks/useRedux';
 import { AppStatus } from '../../state/state';
 import type { VersionHistoryEntry as VersionHistoryEntryType } from '../../types';
 import { formatFileSize } from '../utils/dom';
 import { HistoryEntry } from './HistoryEntry';
 import { Icon } from './Icon';
-import { thunks } from '../../state/thunks';
 
 /** Layout constants — kept local and immutable. */
-const LIST_ITEM_HEIGHT = 44;
+const LIST_ITEM_HEIGHT = 64;
+const LIST_ITEM_GAP = 4;
 const CARD_ITEM_HEIGHT = 110;
 const CARD_ITEM_GAP = 8;
 
 const SkeletonEntry: FC<{ isListView: boolean }> = memo(({ isListView }) => (
     <div className={clsx('v-history-entry', 'is-skeleton', { 'is-list-view': isListView })} aria-hidden>
         {isListView ? (
-            <div className="v-entry-header">
-                <div className="v-version-id v-skeleton-item" />
-                <div className="v-entry-main-info">
-                    <div className="v-version-name v-skeleton-item" />
+            <>
+                <div className="v-entry-header">
+                    <div className="v-version-id v-skeleton-item" />
+                    <div className="v-entry-main-info">
+                        <div className="v-version-name v-skeleton-item" />
+                    </div>
+                    <div className="v-version-timestamp v-skeleton-item" />
                 </div>
-                <div className="v-version-timestamp v-skeleton-item" />
-            </div>
+                <div className="v-version-content v-skeleton-item" />
+            </>
         ) : (
             <>
                 <div className="v-entry-header">
@@ -66,10 +69,14 @@ function safeFormatTimestamp(raw: unknown, formatStr = 'LLLL'): string {
     }
 }
 
+interface HistoryListProps {
+    setScrollerRef: (element: HTMLElement | Window | null) => void;
+    onCountChange: (filteredCount: number, totalCount: number) => void;
+}
+
 /** Main list component */
-export const HistoryList: FC = () => {
-    const dispatch = useAppDispatch();
-    const { status, history, searchQuery, isSearchCaseSensitive, sortOrder, isListView, panel, settings, currentBranch } = useAppSelector(state => ({
+export const HistoryList: FC<HistoryListProps> = ({ setScrollerRef, onCountChange }) => {
+    const { status, history, searchQuery, isSearchCaseSensitive, sortOrder, isListView, panel, settings } = useAppSelector(state => ({
         status: state.status,
         history: state.history ?? [],
         searchQuery: state.searchQuery ?? '',
@@ -78,7 +85,6 @@ export const HistoryList: FC = () => {
         isListView: state.settings?.isListView ?? true,
         panel: state.panel,
         settings: state.settings ?? { isListView: true, useRelativeTimestamps: true },
-        currentBranch: state.currentBranch,
     }));
 
     const [processedHistory, setProcessedHistory] = useState<VersionHistoryEntryType[]>([]);
@@ -95,6 +101,7 @@ export const HistoryList: FC = () => {
     useEffect(() => {
         if (status !== AppStatus.READY) {
             setProcessedHistory([]);
+            onCountChange(0, history.length);
             return;
         }
 
@@ -158,42 +165,29 @@ export const HistoryList: FC = () => {
 
                 if (isMountedRef.current) {
                     setProcessedHistory(result);
+                    onCountChange(result.length, src.length);
                 }
             } catch (err) {
                 console.error('HistoryList: failed to process history:', err);
                 if (isMountedRef.current) {
                     setProcessedHistory([]);
+                    onCountChange(0, history.length);
                 }
             }
         });
-    }, [status, history, searchQuery, isSearchCaseSensitive, sortOrder, startTransition]);
+    }, [status, history, searchQuery, isSearchCaseSensitive, sortOrder, startTransition, onCountChange]);
 
-    const itemHeight = useMemo(() => (isListView ? LIST_ITEM_HEIGHT : (CARD_ITEM_HEIGHT + CARD_ITEM_GAP)), [isListView]);
-
-    const getCountText = useMemo(() => {
-        if (status === AppStatus.LOADING) return 'Loading...';
-        const total = Array.isArray(history) ? history.length : 0;
-        const filtered = Array.isArray(processedHistory) ? processedHistory.length : 0;
-        if (filtered !== total) {
-            return `${filtered} of ${total} versions`;
-        }
-        return `${total} ${total === 1 ? 'version' : 'versions'}`;
-    }, [status, history, processedHistory]);
-
-    const handleBranchClick = useCallback(() => {
-        dispatch(thunks.showBranchSwitcher());
-    }, [dispatch]);
+    const itemHeight = useMemo(() => (isListView ? (LIST_ITEM_HEIGHT + LIST_ITEM_GAP) : (CARD_ITEM_HEIGHT + CARD_ITEM_GAP)), [isListView]);
 
     if (status === AppStatus.LOADING) {
         return (
             <div className="v-history-list-container">
-                <div className="v-history-header" aria-hidden>
-                    <Icon name="history" />
-                    <span> Version history</span>
-                    <span className="v-history-count">{getCountText}</span>
-                </div>
                 <div className={clsx('v-history-list', { 'is-list-view': settings.isListView })}>
-                    {Array.from({ length: 8 }).map((_, i) => <SkeletonEntry key={i} isListView={settings.isListView} />)}
+                    {Array.from({ length: 8 }).map((_, i) => (
+                        <div key={i} className={settings.isListView ? 'v-history-item-list-wrapper' : 'v-history-item-card-wrapper'}>
+                            <SkeletonEntry isListView={settings.isListView} />
+                        </div>
+                    ))}
                 </div>
             </div>
         );
@@ -204,7 +198,7 @@ export const HistoryList: FC = () => {
     const renderContent = () => {
         const total = Array.isArray(history) ? history.length : 0;
         if (total === 0) {
-            return <EmptyState icon="inbox" title="No versions saved yet." subtitle="Click the 'Save new version' button to start tracking history for this note." />;
+            return <EmptyState icon="inbox" title="No versions saved yet." subtitle="Click the '+' button to start tracking history for this note." />;
         }
         if ((Array.isArray(processedHistory) ? processedHistory.length : 0) === 0 && String(searchQuery ?? '').trim()) {
             return <EmptyState icon="search-x" title="No matching versions found." subtitle="Try a different search query or change sort options." />;
@@ -214,12 +208,13 @@ export const HistoryList: FC = () => {
             <Virtuoso
                 key={isListView ? 'list' : 'card'}
                 className="v-virtuoso-container"
+                scrollerRef={setScrollerRef}
                 data={processedHistory ?? []}
                 fixedItemHeight={Number(itemHeight) || LIST_ITEM_HEIGHT}
                 itemContent={(_index, version) => {
                     if (!version) return null;
                     return (
-                        <div className={isListView ? undefined : 'v-history-item-card-wrapper'} data-version-id={String(version.id)}>
+                        <div className={isListView ? 'v-history-item-list-wrapper' : 'v-history-item-card-wrapper'} data-version-id={String(version.id)}>
                             <HistoryEntry version={version} />
                         </div>
                     );
@@ -235,11 +230,6 @@ export const HistoryList: FC = () => {
 
     return (
         <div className={clsx('v-history-list-container', { 'is-panel-active': panel !== null })}>
-            <div className="v-history-header is-clickable" onClick={handleBranchClick}>
-                <Icon name="history" />
-                <span>{currentBranch || 'Version History'}</span>
-                <span className="v-history-count">{getCountText}</span>
-            </div>
             <div className={clsx('v-history-list', { 'is-list-view': isListView, 'is-searching-bg': isPending })}>
                 {renderContent()}
             </div>

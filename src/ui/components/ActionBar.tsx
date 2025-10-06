@@ -20,7 +20,7 @@ export const ActionBar: FC = () => {
         settings, 
         watchModeCountdown, 
         history, 
-        panel 
+        panel,
     } = useAppSelector(state => ({
         status: state.status,
         isSearchActive: state.isSearchActive,
@@ -43,11 +43,6 @@ export const ActionBar: FC = () => {
     }, [globalSearchQuery]);
 
     const isBusy = isProcessing || isRenaming;
-
-    const handleSaveVersionClick = useCallback(() => {
-        if (status !== AppStatus.READY || isBusy) return;
-        dispatch(thunks.saveNewVersion());
-    }, [dispatch, status, isBusy]);
 
     const handleDiffIndicatorClick = useCallback(() => {
         if (diffRequest?.status === 'ready') {
@@ -106,10 +101,21 @@ export const ActionBar: FC = () => {
         dispatch(thunks.showSortMenu());
     }, [dispatch]);
 
+    const handleBranchClick = useCallback(() => {
+        if (status !== AppStatus.READY || isBusy) return;
+        dispatch(thunks.showBranchSwitcher());
+    }, [dispatch, status, isBusy]);
+
     useEffect(() => {
-        if (isSearchActive && document.activeElement !== searchInputRef.current) {
-            const timer = setTimeout(() => searchInputRef.current?.focus(), 100);
-            return () => clearTimeout(timer);
+        if (isSearchActive) {
+            if (document.activeElement !== searchInputRef.current) {
+                const timer = setTimeout(() => searchInputRef.current?.focus(), 100);
+                return () => clearTimeout(timer);
+            }
+        } else {
+            if (document.activeElement === searchInputRef.current) {
+                searchInputRef.current?.blur();
+            }
         }
         return; // Explicitly return for all code paths.
     }, [isSearchActive]);
@@ -132,13 +138,13 @@ export const ActionBar: FC = () => {
         <div className={clsx('v-actions-container', { 'is-searching': isSearchActive })}>
             <div className="v-top-actions">
                 <div className="v-top-actions-left-group">
-                    <button 
-                        className="v-save-button" 
-                        aria-label="Save a new version of the current note"
-                        onClick={handleSaveVersionClick}
+                    <button
+                        className="clickable-icon"
+                        aria-label="Switch branch"
+                        onClick={handleBranchClick}
                         disabled={isBusy}
                     >
-                        Save new version
+                        <Icon name="menu" />
                     </button>
                     {settings.enableWatchMode && watchModeCountdown !== null && !isProcessing && (
                         <div className="v-watch-mode-timer">({watchModeCountdown}s)</div>

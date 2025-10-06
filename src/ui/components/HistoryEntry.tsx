@@ -237,7 +237,7 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
                         onClick={(e) => e.stopPropagation()}
                         maxLength={MAX_NAME_LENGTH}
                     />
-                ) : settings?.isListView ? (
+                ) : (
                     <div className="v-entry-main-info">
                         {version.name ? (
                             <div className="v-version-name">{version.name}</div>
@@ -245,8 +245,6 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
                             <div className="v-version-name is-empty" />
                         )}
                     </div>
-                ) : (
-                    version.name && <div className="v-version-name">{version.name}</div>
                 )}
 
                 <span className="v-version-timestamp" title={formatAbsoluteTimestamp(version.timestamp, 'LLLL')}>
@@ -254,52 +252,50 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
                 </span>
             </div>
 
+            <div className="v-version-content" aria-hidden>Size: {formatFileSize(typeof version.size === 'number' ? version.size : 0)}</div>
+
             {!settings?.isListView && (
-                <>
-                    <div className="v-version-content" aria-hidden>Size: {formatFileSize(typeof version.size === 'number' ? version.size : 0)}</div>
+                <div className="v-entry-footer">
+                    <button
+                        className="v-action-btn"
+                        aria-label="Preview in panel"
+                        onClick={(e) => { e.stopPropagation(); dispatch(thunks.viewVersionInPanel(version)); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); dispatch(thunks.viewVersionInPanel(version)); } }}
+                    >
+                        <Icon name="eye" />
+                    </button>
 
-                    <div className="v-entry-footer">
-                        <button
-                            className="v-action-btn"
-                            aria-label="Preview in panel"
-                            onClick={(e) => { e.stopPropagation(); dispatch(thunks.viewVersionInPanel(version)); }}
-                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); dispatch(thunks.viewVersionInPanel(version)); } }}
-                        >
-                            <Icon name="eye" />
-                        </button>
-
-                        {safeActions.map(action => {
-                            const handleAction = (e: React.SyntheticEvent) => {
-                                e.stopPropagation();
-                                try {
-                                    if (typeof action.actionHandler === 'function') {
-                                        // Be defensive about the handler signature
-                                        action.actionHandler(version, { dispatch } as unknown as AppStore);
-                                    } else {
-                                        // eslint-disable-next-line no-console
-                                        console.warn('HistoryEntry: action missing handler', action);
-                                    }
-                                } catch (err) {
-                                    // don't let action exceptions bubble to our UI
+                    {safeActions.map(action => {
+                        const handleAction = (e: React.SyntheticEvent) => {
+                            e.stopPropagation();
+                            try {
+                                if (typeof action.actionHandler === 'function') {
+                                    // Be defensive about the handler signature
+                                    action.actionHandler(version, { dispatch } as unknown as AppStore);
+                                } else {
                                     // eslint-disable-next-line no-console
-                                    console.error('HistoryEntry: action handler threw', err);
+                                    console.warn('HistoryEntry: action missing handler', action);
                                 }
-                            };
+                            } catch (err) {
+                                // don't let action exceptions bubble to our UI
+                                // eslint-disable-next-line no-console
+                                console.error('HistoryEntry: action handler threw', err);
+                            }
+                        };
 
-                            return (
-                                <button
-                                    key={String(action.id)}
-                                    className={clsx('v-action-btn', { 'danger': Boolean(action.isDanger) })}
-                                    aria-label={String(action.tooltip ?? '')}
-                                    onClick={handleAction}
-                                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAction(e); } }}
-                                >
-                                    <Icon name={String(action.icon ?? '')} />
-                                </button>
-                            );
-                        })}
-                    </div>
-                </>
+                        return (
+                            <button
+                                key={String(action.id)}
+                                className={clsx('v-action-btn', { 'danger': Boolean(action.isDanger) })}
+                                aria-label={String(action.tooltip ?? '')}
+                                onClick={handleAction}
+                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAction(e); } }}
+                            >
+                                <Icon name={String(action.icon ?? '')} />
+                            </button>
+                        );
+                    })}
+                </div>
             )}
         </div>
     );

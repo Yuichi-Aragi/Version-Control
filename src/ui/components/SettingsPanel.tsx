@@ -4,6 +4,8 @@ import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
 import { thunks } from '../../state/thunks';
 import { GlobalSettings } from './settings/GlobalSettings';
 import { NoteSpecificSettings } from './settings/NoteSpecificSettings';
+import { Icon } from './Icon';
+import { actions } from '../../state/appSlice';
 
 const AUTO_CLOSE_DELAY_MS = 30000;
 
@@ -55,6 +57,16 @@ const SettingsPanelComponent: FC = () => {
             role="dialog"
             aria-modal={isActive}
         >
+            <div className="v-settings-panel-header">
+                <h3>Settings</h3>
+                <button 
+                    className="clickable-icon v-panel-close" 
+                    aria-label="Close settings" 
+                    onClick={() => dispatch(actions.closePanel())}
+                >
+                    <Icon name="x" />
+                </button>
+            </div>
             <div ref={panelRef} className="v-settings-panel-content-wrapper">
                 <GlobalSettings />
                 <NoteSpecificSettings />
