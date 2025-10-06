@@ -1,4 +1,5 @@
-![GitHub Release](https://img.shields.io/github/v/release/Yuichi-Aragi/Version-Control) [![Obsidian Downloads](https://img.shields.io/badge/dynamic/json?logo=obsidian&color=%23483699&label=downloads&query=%24%5B%22version-control%22%5D.downloads&url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json)](https://obsidian.md/plugins?id=version-control) ![GitHub stars](https://img.shields.io/github/stars/Yuichi-Aragi/Version-Control) ![GitHub open issues](https://img.shields.io/github/issues/Yuichi-Aragi/Version-Control) ![GitHub closed issues](https://img.shields.io/github/issues-closed/Yuichi-Aragi/Version-Control) ![GitHub last commit](https://img.shields.io/github/last-commit/Yuichi-Aragi/Version-Control) ![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Yuichi-Aragi/Version-Control/main.yml)
+![GitHub Release](https://img.shields.io/github/v/release/Yuichi-Aragi/Version-Control) [![Obsidian Downloads](https://img.shields.io/badge/dynamic/json?logo=obsidian&color=%23483699&label=downloads&query=%24%5B%22version-control%22%5D.downloads&url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json)](https://obsidian.md/plugins?id=version-control) ![GitHub stars](https://img.shields.io/github/stars/Yuichi-Aragi/Version-Control) ![GitHub open issues](https://img.shields.io/github/issues/Yuichi-Aragi/Version-Control) ![GitHub closed issues](https://img.shields.io/github/issues-closed/Yuichi-Aragi/Version-Control) ![GitHub last commit](https://img.shields.io/github/last-commit/Yuichi-Aragi/Version-Control) 
+
 ***
 So in my work flow I have to constantly modify the same version of the note. I'm a perfectionist at core, that's why I always have to create many variations of the same content until I'm satisfied. But this introduces a problem, and i wanted a solution, so I made one myself. This plugin lets you create a finite number of versions of any note.
 
@@ -21,24 +22,44 @@ This plugin is designed for writers, thinkers, and perfectionists who want a sim
 
 The plugin is designed to be intuitive and fit seamlessly with your Obsidian theme, whether you prefer light or dark mode.
 
-<table>
-  <tr>
-    <td align="center"><strong>Card View (Light)</strong></td>
-    <td align="center"><strong>Card View (Dark)</strong></td>
-  </tr>
-  <tr>
-    <td><img src="assets/Screenshot_20251006-194841.png" alt="Card View in Light Mode"></td>
-    <td><img src="assets/Screenshot_20251006-194759.png" alt="Card View in Dark Mode"></td>
-  </tr>
-  <tr>
-    <td align="center"><strong>List View (Light)</strong></td>
-    <td align="center"><strong>List View (Dark)</strong></td>
-  </tr>
-  <tr>
-    <td><img src="assets/Screenshot_20251006-194827.png" alt="List View in Light Mode"></td>
-    <td><img src="assets/Screenshot_20251006-194815.png" alt="List View in Dark Mode"></td>
-  </tr>
-</table>
+<div class="demo-gallery">
+  <div class="demo-row">
+    <div class="demo-card">
+      <h3 class="demo-title">Card View (Light)</h3>
+      <div class="demo-image-container">
+        <img src="https://raw.githubusercontent.com/Yuichi-Aragi/Version-Control/refs/heads/main/assets/Screenshot_20251006-194841.png" 
+             alt="Card View in Light Mode" 
+             loading="lazy">
+      </div>
+    </div>
+    <div class="demo-card">
+      <h3 class="demo-title">Card View (Dark)</h3>
+      <div class="demo-image-container">
+        <img src="https://raw.githubusercontent.com/Yuichi-Aragi/Version-Control/refs/heads/main/assets/Screenshot_20251006-194759.png" 
+             alt="Card View in Dark Mode" 
+             loading="lazy">
+      </div>
+    </div>
+  </div>
+  <div class="demo-row">
+    <div class="demo-card">
+      <h3 class="demo-title">List View (Light)</h3>
+      <div class="demo-image-container">
+        <img src="https://raw.githubusercontent.com/Yuichi-Aragi/Version-Control/refs/heads/main/assets/Screenshot_20251006-194827.png" 
+             alt="List View in Light Mode" 
+             loading="lazy">
+      </div>
+    </div>
+    <div class="demo-card">
+      <h3 class="demo-title">List View (Dark)</h3>
+      <div class="demo-image-container">
+        <img src="https://raw.githubusercontent.com/Yuichi-Aragi/Version-Control/refs/heads/main/assets/Screenshot_20251006-194815.png" 
+             alt="List View in Dark Mode" 
+             loading="lazy">
+      </div>
+    </div>
+  </div>
+</div>
 
 ### What Can This Plugin Do For You?
 
