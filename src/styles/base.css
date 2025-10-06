@@ -18,7 +18,7 @@
     flex-direction: column;
     height: 100%;
     overflow: hidden;
-    position: relative; /* For processing overlay */
+    position: relative; /* For processing overlay AND absolute header */
 }
 
 /* Global processing state to prevent concurrent actions */
@@ -52,12 +52,95 @@
     transition: opacity 0.3s ease-in-out;
 }
 
+/* NEW: Wrapper for auto-hiding header */
+.v-header-wrapper {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    z-index: 10;
+    /* FIX: Use secondary background for better contrast in both themes */
+    background-color: var(--background-secondary);
+    transform: translateY(0);
+    /* MODIFIED: Use a smoother easing function for a more fluid feel */
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: transform;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.v-header-wrapper.is-hidden {
+    transform: translateY(-100%);
+}
+
 .v-main {
     flex-grow: 1;
     overflow: hidden;
     display: flex;
     flex-direction: column;
     position: relative;
+    height: 100%; /* Ensure it fills parent for correct padding-top behavior */
+}
+
+/* NEW: Floating Action Button for saving versions */
+.v-fab-save-button {
+    position: absolute;
+    bottom: var(--size-4-4);
+    right: var(--size-4-4);
+    z-index: 30; /* Below panels (50) and settings (40) */
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    /* FIX: Mobile-first size for better touch interaction */
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border: none;
+    box-shadow: var(--shadow-m);
+    
+    cursor: pointer;
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), 
+                background-color 0.2s ease,
+                box-shadow 0.2s ease;
+}
+
+.v-fab-save-button .lucide {
+    /* FIX: Icon size for mobile */
+    width: 28px;
+    height: 28px;
+}
+
+/* NEW: Adjust size for desktop environments with precise pointers */
+@media (hover: hover) and (pointer: fine) {
+    .v-fab-save-button {
+        width: 48px;
+        height: 48px;
+    }
+    .v-fab-save-button .lucide {
+        width: 24px;
+        height: 24px;
+    }
+}
+
+.v-fab-save-button:hover:not(:disabled) {
+    background-color: var(--interactive-accent-hover);
+    transform: scale(1.05);
+    box-shadow: var(--shadow-l);
+}
+
+.v-fab-save-button:active:not(:disabled) {
+    transform: scale(0.98);
+}
+
+.v-fab-save-button:disabled {
+    background-color: var(--background-modifier-border);
+    color: var(--text-muted);
+    cursor: not-allowed;
+    box-shadow: none;
 }
 
 .v-ready-state-container {

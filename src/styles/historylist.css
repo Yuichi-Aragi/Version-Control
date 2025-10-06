@@ -4,7 +4,7 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    padding: 0 0 var(--size-4-2);
+    height: 100%; /* Ensure it fills its container for scrolling */
 }
 
 /* Disable interactions when a panel is active */
@@ -22,18 +22,10 @@
     gap: var(--size-4-2);
     font-size: var(--font-ui-medium);
     padding-bottom: var(--size-4-2);
-    border-bottom: 1px solid var(--background-modifier-border);
+    padding-top: 0;
+    border-bottom: none;
     padding-left: var(--size-4-2);
     padding-right: var(--size-4-2);
-}
-
-.v-history-header.is-clickable {
-    cursor: pointer;
-    transition: background-color 0.2s ease;
-    border-radius: var(--radius-s) var(--radius-s) 0 0;
-}
-.v-history-header.is-clickable:hover {
-    background-color: var(--background-modifier-hover);
 }
 
 .v-history-count {
@@ -47,15 +39,21 @@
     flex-grow: 1;
     overflow-y: auto;
     min-height: 0;
-    padding-top: var(--size-4-2);
     position: relative;
     padding-left: 0;
     padding-right: 0;
+    height: 100%; /* Needed for Virtuoso */
+    padding-top: var(--size-4-2);
 }
 
 /* Wrapper for card-view items */
 .v-history-item-card-wrapper {
     padding-bottom: 8px;
+}
+
+/* NEW: Wrapper for list-view items to provide gap */
+.v-history-item-list-wrapper {
+    padding-bottom: 4px;
 }
 
 .v-history-list-sizer {
@@ -112,6 +110,8 @@
 }
 .v-history-entry.is-list-view:active {
     background-color: var(--background-modifier-active);
+    /* FIX: Add outline on active state for consistent click feedback */
+    box-shadow: 0 0 0 1.5px var(--interactive-accent);
 }
 
 .v-history-entry.is-error {
@@ -149,6 +149,7 @@
     text-overflow: ellipsis;
     flex-shrink: 1;
     min-width: 0;
+    flex-grow: 1; /* Allow name to take up space */
 }
 .v-version-name.is-empty {
     visibility: hidden;
@@ -200,20 +201,22 @@
 
 /* List View Mode */
 .v-history-entry.is-list-view {
-    flex-direction: row;
-    align-items: center;
+    flex-direction: column;
+    align-items: normal;
     padding: var(--size-4-2);
     cursor: pointer;
 }
 .is-list-view .v-entry-header {
-    flex-grow: 1;
-    margin-bottom: 0;
+    flex-grow: 0;
+    margin-bottom: var(--size-4-1);
     min-width: 0;
     overflow: hidden;
     flex-wrap: nowrap;
     gap: var(--size-4-2);
 }
-.is-list-view .v-version-content,
+.is-list-view .v-version-content {
+    display: block;
+}
 .is-list-view .v-entry-footer {
     display: none;
 }
@@ -275,7 +278,6 @@
 .v-history-list .v-history-entry.is-skeleton {
     position: static;
     transform: none;
-    margin-bottom: var(--size-4-2);
 }
 
 .v-history-entry.is-skeleton {
@@ -298,11 +300,12 @@
 .v-history-entry.is-skeleton:not(.is-list-view) .v-version-content { width: 40%; height: 16px; margin-top: var(--size-4-1); }
 
 /* List View Skeleton Layout */
-.v-history-entry.is-skeleton.is-list-view { height: 44px; }
+.v-history-entry.is-skeleton.is-list-view { height: 64px; }
 .v-history-entry.is-skeleton.is-list-view .v-version-id { width: 40px; height: 24px; flex-shrink: 0; }
 .v-history-entry.is-skeleton.is-list-view .v-entry-main-info { flex-basis: 0; flex-grow: 1; }
 .v-history-entry.is-skeleton.is-list-view .v-version-name { width: 70%; height: 18px; }
 .v-history-entry.is-skeleton.is-list-view .v-version-timestamp { width: 80px; height: 16px; flex-shrink: 0; }
+.v-history-entry.is-skeleton.is-list-view .v-version-content { width: 40%; height: 16px; margin-top: var(--size-4-1); }
 
 /* Keyframes for item entrance */
 @keyframes v-item-enter {

@@ -6,32 +6,46 @@
 /* Settings Panel (unchanged purpose) */
 .v-settings-panel {
     position: absolute;
-    top: var(--input-height);
+    top: 0;
     left: 0;
     width: 100%;
-    height: calc(100% - var(--input-height));
+    height: 100%;
     z-index: 40;
     padding: 0;
-    padding-bottom: var(--size-4-2);
     box-sizing: border-box;
     display: none;
     opacity: 0;
     transition: opacity 0.25s ease-out;
+    background-color: var(--background-secondary);
+    flex-direction: column;
 }
 
 .v-settings-panel.is-active {
-    display: block;
+    display: flex;
     opacity: 1;
 }
 
+/* NEW: Settings Panel Header */
+.v-settings-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--size-4-3) var(--size-4-4);
+    border-bottom: 1px solid var(--background-modifier-border);
+    flex-shrink: 0;
+}
+.v-settings-panel-header h3 {
+    margin: 0;
+    font-size: var(--font-ui-medium);
+    font-weight: var(--font-semibold);
+}
+
 .v-settings-panel-content-wrapper {
+    flex-grow: 1;
     width: 100%;
-    height: 100%;
+    height: auto;
     box-sizing: border-box;
     overflow-y: auto;
-    background-color: var(--background-secondary);
-    border-radius: var(--radius-m);
-    border: 1px solid var(--background-modifier-border);
     padding: var(--size-4-2) var(--size-4-3);
 }
 

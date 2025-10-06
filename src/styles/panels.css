@@ -32,8 +32,8 @@
     animation: v-fade-in 0.2s ease;
 }
 
-/* NEW: Styles for modal-like panels (Confirmation, Action) */
-.v-panel-container.is-modal-like {
+/* FIX: Add :not(.is-drawer-like) to make modal and drawer styles mutually exclusive. */
+.v-panel-container.is-modal-like:not(.is-drawer-like) {
     /* Semi-transparent backdrop */
     background-color: rgba(var(--background-primary-rgb), 0.7);
     /* Center the inline panel. Display is handled by .is-active to prevent blocking. */
@@ -57,6 +57,51 @@
     flex-direction: column;
 }
 
+
+/* FIX: Consolidate drawer styles into a single rule that overrides the .is-active defaults. */
+.v-panel-container.is-drawer-like {
+    background-color: rgba(var(--background-primary-rgb), 0.7);
+    animation: v-fade-in 0.25s ease;
+    flex-direction: row;
+    justify-content: flex-start;
+    align-items: stretch;
+    padding: 0;
+    /* NEW: Add a gap between the drawer and the left edge of the view. */
+    padding-left: var(--size-4-4);
+}
+
+.v-panel-container.is-drawer-like > .v-inline-panel.is-drawer {
+    /* NEW: Mobile-first width */
+    width: 60%;
+    max-width: 400px; /* Max width for large screens */
+    height: 100%;
+    min-width: auto;
+    max-height: none;
+    animation: v-slide-in-left 0.25s ease-out;
+    box-shadow: var(--shadow-l);
+    border-radius: 0;
+    background-color: var(--background-secondary);
+    display: flex;
+    flex-direction: column;
+}
+
+/* NEW: Media query for desktop width */
+@media (min-width: 768px) {
+    .v-panel-container.is-drawer-like > .v-inline-panel.is-drawer {
+        width: 50%;
+    }
+}
+
+
+/* NEW: Animation for drawer panel */
+@keyframes v-slide-in-left {
+    from {
+        transform: translateX(-100%);
+    }
+    to {
+        transform: translateX(0);
+    }
+}
 
 .v-inline-panel {
     padding: 0;
@@ -103,6 +148,16 @@
     gap: var(--size-4-1);
 }
 
+/* NEW: Adjustments for list inside a drawer */
+.is-drawer .v-action-panel-list {
+    gap: 0; /* Remove gap for virtuoso */
+}
+
+/* NEW: Wrapper for virtualized items to provide spacing */
+.v-action-panel-list-item-wrapper {
+    padding-bottom: var(--size-4-2);
+}
+
 .v-action-panel-item {
     display: flex;
     align-items: center;
@@ -112,11 +167,33 @@
     cursor: pointer;
     transition: background-color 0.15s ease;
     outline: none;
+    min-height: 44px; /* Ensure consistent minimum height for card-like appearance */
+}
+
+/* NEW: Card style for items in a drawer */
+.is-drawer .v-action-panel-item {
+    /* FIX: Use a transparent background */
+    background-color: transparent;
+    /* FIX: Use a consistent border for the outline effect */
+    border: 1px solid var(--background-modifier-border);
 }
 
 .v-action-panel-item:hover,
 .v-action-panel-item:focus {
     background-color: var(--background-modifier-hover);
+}
+
+/* NEW: Hover/focus for drawer cards */
+.is-drawer .v-action-panel-item:hover,
+.is-drawer .v-action-panel-item:focus {
+    border-color: var(--interactive-accent);
+    background-color: var(--background-modifier-hover);
+}
+
+/* FIX: Add active state for consistent click feedback on drawer items */
+.is-drawer .v-action-panel-item:active {
+    border-color: var(--interactive-accent-hover);
+    background-color: var(--background-modifier-active);
 }
 
 .v-action-panel-item:focus {

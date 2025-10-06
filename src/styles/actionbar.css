@@ -4,7 +4,7 @@
 }
 .v-actions-container {
     flex-shrink: 0;
-    padding: var(--size-4-2);
+    padding: var(--size-4-2) var(--size-4-2) 0;
     position: relative;
     height: var(--input-height);
 }
@@ -51,6 +51,47 @@
     gap: var(--size-4-2);
 }
 
+/* NEW: Container for branch switcher and watch timer */
+.v-branch-switcher-container {
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-2);
+}
+
+/* NEW: Branch switcher button styles */
+.v-branch-switcher-button {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--size-4-2);
+    background-color: transparent;
+    border: none;
+    padding: var(--size-4-1) var(--size-4-3);
+    border-radius: var(--radius-m);
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-semibold);
+    color: var(--text-normal);
+    cursor: pointer;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.v-branch-switcher-button:hover:not(:disabled) {
+    background-color: var(--background-modifier-hover);
+}
+
+.v-branch-switcher-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.v-branch-switcher-button .lucide {
+    color: var(--text-muted);
+    transition: color 0.2s ease;
+}
+
+.v-branch-switcher-button:hover:not(:disabled) .lucide {
+    color: var(--text-normal);
+}
+
 .v-watch-mode-timer {
     font-size: var(--font-ui-small);
     color: var(--text-muted);
@@ -62,24 +103,6 @@
     display: flex;
     align-items: center;
     gap: var(--size-4-1);
-}
-
-.v-top-actions .v-save-button {
-    background-color: transparent;
-    border: 1px solid var(--interactive-accent);
-    color: var(--text-normal);
-    padding: var(--size-4-1) var(--size-4-3);
-    height: auto;
-    box-shadow: none;
-    font-weight: var(--font-semibold);
-    transition: transform 0.2s ease-out, border-color 0.2s ease-out, background-color 0.2s ease-out;
-    flex-shrink: 0;
-}
-.v-top-actions .v-save-button:hover {
-    background-color: var(--background-modifier-hover);
-    border-color: var(--interactive-accent-hover);
-    color: var(--text-normal);
-    transform: translateY(-1px);
 }
 
 .v-search-input-wrapper {
