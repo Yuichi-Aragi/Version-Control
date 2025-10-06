@@ -80,18 +80,6 @@ This structure ensures data persistence and privacy:
 *   **Data Stays:** Your version history and all associated data will remain in your vault even if you uninstall or remove the plugin.
 *   **Accessible Format:** Because it is stored as standard Markdown files, your data is always accessible and readable, even without the plugin.
 
-### How To Get Started
-
-1.  **Open the View:** Click the **History** icon (`⟲`) in the ribbon sidebar to open the Version Control panel.
-
-2.  **Select a Note:** Click on any note in your vault. The panel will now show the context for that note.
-
-3.  **Save Your First Version:** Click the **"Save New Version"** button. If you have version naming enabled, you can give it a name and hit save. That's it! Your first version is saved.
-
-4.  **Interact with History:** As you create more versions, they will appear in the list.
-    *   In **Card View**, use the buttons on each version to `View`, `Restore`, or `Delete`.
-    *   In **Compact View**, right-click on any version to see all available actions in a context menu.
-
 ### Supports
 
 * **Mobile**
