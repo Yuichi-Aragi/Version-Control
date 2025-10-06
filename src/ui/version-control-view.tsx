@@ -7,6 +7,7 @@ import type { AppStore } from "../state/store";
 import { actions } from "../state/appSlice";
 import { VersionControlRoot } from "./components/VersionControlRoot";
 import { AppContext } from "./AppContext";
+import { TimeProvider } from "./contexts/TimeContext";
 
 export class VersionControlView extends ItemView {
     store: AppStore;
@@ -36,7 +37,9 @@ export class VersionControlView extends ItemView {
             <StrictMode>
                 <Provider store={this.store}>
                     <AppContext.Provider value={this.app}>
-                        <VersionControlRoot />
+                        <TimeProvider>
+                            <VersionControlRoot />
+                        </TimeProvider>
                     </AppContext.Provider>
                 </Provider>
             </StrictMode>
