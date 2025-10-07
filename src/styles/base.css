@@ -1,3 +1,4 @@
+/* src/styles/base.css */
 /* Global utility class to hide elements without using inline styles */
 .is-hidden {
     display: none;
@@ -52,24 +53,15 @@
     transition: opacity 0.3s ease-in-out;
 }
 
-/* NEW: Wrapper for auto-hiding header */
+/* Wrapper for the fixed header */
 .v-header-wrapper {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
     z-index: 10;
-    /* FIX: Use secondary background for better contrast in both themes */
     background-color: var(--background-secondary);
-    transform: translateY(0);
-    /* MODIFIED: Use a smoother easing function for a more fluid feel */
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    will-change: transform;
     border-bottom: 1px solid var(--background-modifier-border);
-}
-
-.v-header-wrapper.is-hidden {
-    transform: translateY(-100%);
 }
 
 .v-main {
