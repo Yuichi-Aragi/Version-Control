@@ -1,3 +1,4 @@
+// src/ui/components/HistoryList.tsx
 import { moment } from 'obsidian';
 import { orderBy } from 'lodash-es';
 import clsx from 'clsx';
@@ -70,12 +71,11 @@ function safeFormatTimestamp(raw: unknown, formatStr = 'LLLL'): string {
 }
 
 interface HistoryListProps {
-    setScrollerRef: (element: HTMLElement | Window | null) => void;
     onCountChange: (filteredCount: number, totalCount: number) => void;
 }
 
 /** Main list component */
-export const HistoryList: FC<HistoryListProps> = ({ setScrollerRef, onCountChange }) => {
+export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
     const { status, history, searchQuery, isSearchCaseSensitive, sortOrder, isListView, panel, settings } = useAppSelector(state => ({
         status: state.status,
         history: state.history ?? [],
@@ -208,7 +208,6 @@ export const HistoryList: FC<HistoryListProps> = ({ setScrollerRef, onCountChang
             <Virtuoso
                 key={isListView ? 'list' : 'card'}
                 className="v-virtuoso-container"
-                scrollerRef={setScrollerRef}
                 data={processedHistory ?? []}
                 fixedItemHeight={Number(itemHeight) || LIST_ITEM_HEIGHT}
                 itemContent={(_index, version) => {

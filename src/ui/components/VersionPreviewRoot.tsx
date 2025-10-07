@@ -1,8 +1,11 @@
+// src/ui/components/VersionPreviewRoot.tsx
 import { MarkdownRenderer, App, moment, Component } from 'obsidian';
 import { type FC, useState, useCallback, useLayoutEffect, useRef } from 'react';
 import type { VersionPreviewViewDisplayState } from '../version-preview-view';
 import { useAppSelector } from '../hooks/useRedux';
 import { Icon } from './Icon';
+import clsx from 'clsx';
+import { VirtualizedPlaintext } from './shared/VirtualizedPlaintext';
 
 interface VersionPreviewRootProps {
     app: App;
@@ -39,6 +42,7 @@ export const VersionPreviewRoot: FC<VersionPreviewRootProps> = ({ app, displaySt
     const versionDisplayLabel = version.name || `Version ${version.versionNumber}`;
     const shouldRenderMarkdown = settings.renderMarkdownInPreview || localRenderMarkdown;
     const isStale = content.startsWith("This preview is potentially stale.");
+    const isPlaintext = !isStale && !shouldRenderMarkdown;
 
     return (
         <div className="v-tab-view-content">
@@ -56,9 +60,11 @@ export const VersionPreviewRoot: FC<VersionPreviewRootProps> = ({ app, displaySt
                 <div className="v-meta-label">Preview of a version from note: "{noteName}"</div>
                 <div className="v-meta-label">Original path: {notePath}</div>
             </div>
-            <div className="v-version-content-preview">
-                {isStale || !shouldRenderMarkdown ? (
-                    <pre className="is-plaintext">{content}</pre>
+            <div className={clsx("v-version-content-preview", { 'is-plaintext': isPlaintext })}>
+                {isStale ? (
+                    <pre>{content}</pre>
+                ) : isPlaintext ? (
+                    <VirtualizedPlaintext content={content} />
                 ) : (
                     <div ref={markdownRef} />
                 )}
