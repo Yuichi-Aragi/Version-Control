@@ -15,6 +15,19 @@ interface UpdateResult {
     error?: string;
 }
 
+// Define a type for file filters to improve type safety
+interface FileFilters {
+    keyUpdateFilters: string[];
+    globalPathFilters: string[];
+}
+
+// Define a type for file operation context
+interface FileOperationContext {
+    isHidden: boolean;
+    isEditorActive: boolean;
+    file?: TFile;
+}
+
 @injectable()
 export class KeyUpdateManager {
     // Base per-file timeout for read/write ops
@@ -22,13 +35,17 @@ export class KeyUpdateManager {
     // Max concurrency thresholds (desktop vs mobile)
     private static readonly DESKTOP_CONCURRENCY = 15;
     private static readonly MOBILE_CONCURRENCY = 10;
+    // Cache for regex patterns to avoid recreation
+    private static readonly REGEX_CACHE = new Map<string, RegExp>();
+    // Cache for frontmatter end indices to avoid recalculation
+    private static readonly FRONTMATTER_CACHE = new Map<string, number>();
 
     constructor(
         @inject(TYPES.Plugin) private readonly plugin: VersionControlPlugin,
         @inject(TYPES.App) private readonly app: App,
         @inject(TYPES.Store) private readonly store: AppStore,
         @inject(TYPES.PathService) private readonly pathService: PathService,
-        @inject(TYPES.CentralManifestRepo) private readonly centralManifestRepo: CentralManifestRepository,
+        @inject(TYPES.CentralManifestRepo) private readonly centralManifestRepository: CentralManifestRepository,
         @inject(TYPES.QueueService) private readonly queueService: QueueService
     ) {
         // Defensive injection checks
@@ -36,7 +53,7 @@ export class KeyUpdateManager {
         if (!this.app) throw new Error('KeyUpdateManager: app missing');
         if (!this.store) throw new Error('KeyUpdateManager: store missing');
         if (!this.pathService) throw new Error('KeyUpdateManager: pathService missing');
-        if (!this.centralManifestRepo) throw new Error('KeyUpdateManager: centralManifestRepo missing');
+        if (!this.centralManifestRepository) throw new Error('KeyUpdateManager: centralManifestRepository missing');
         if (!this.queueService) throw new Error('KeyUpdateManager: queueService missing');
     }
 
@@ -53,80 +70,25 @@ export class KeyUpdateManager {
             }
 
             const dbPath = this.safeGetSetting(() => this.plugin.settings.databasePath, '');
-            const keyUpdateFilters = this.safeGetSetting(() => this.plugin.settings.keyUpdatePathFilters, []);
-            const globalPathFilters = this.safeGetSetting(() => this.plugin.settings.pathFilters, []);
-
-            const vaultFiles = this.findVaultFilesToUpdate(oldKey, dbPath, keyUpdateFilters, globalPathFilters);
+            const filters = this.getFileFilters();
+            const vaultFiles = this.findVaultFilesToUpdate(oldKey, dbPath, filters);
 
             const dbNotes = await this.safeGetAllNotesFromRepo();
             const dbNoteIds = Object.keys(dbNotes ?? {});
 
-            let totalDbFiles = 0;
-            for (const noteId of dbNoteIds) {
-                try {
-                    const notePath = this.pathService.getNoteVersionsPath(noteId);
-                    const listResult = await this.safeAdapterList(notePath);
-                    totalDbFiles += (listResult?.files ?? []).filter((f): f is string => typeof f === 'string' && f.endsWith('.md')).length;
-                } catch (e) {
-                    // tolerate missing folder
-                    console.info(`No versions for noteId=${noteId}`, e);
-                }
-            }
-
+            // Calculate total files for progress tracking
+            const totalDbFiles = await this.calculateTotalDbFiles(dbNoteIds);
             const totalFiles = vaultFiles.length + totalDbFiles;
+            
             this.store.dispatch(actions.startKeyUpdate({ total: totalFiles }));
 
-            const results: UpdateResult[] = [];
-            let processedCount = 0;
-            const updateProgress = (filePath: string): void => {
-                processedCount++;
-                try {
-                    this.store.dispatch(actions.updateKeyUpdateProgress({
-                        processed: processedCount,
-                        message: `Processing: ${filePath}`,
-                    }));
-                } catch (e) {
-                    console.error('Failed to dispatch progress update', e);
-                }
-            };
-
-            // Build tasks for concurrency runner. Each task must be a function returning a Promise.
-            const tasks: Array<() => Promise<void>> = [];
-
-            // Vault files from vault (TFile)
-            for (const file of vaultFiles) {
-                if (!file || !file.path) continue;
-                tasks.push(async () => {
-                    const res = await this.updateVaultFile(file, oldKey, newKey);
-                    results.push(res);
-                    updateProgress(file.path);
-                });
-            }
-
-            // DB version files (paths)
-            for (const noteId of dbNoteIds) {
-                if (!noteId) continue;
-                tasks.push(async () => {
-                    const dbResults = await this.updateDbFilesForNote(noteId, oldKey, newKey);
-                    for (const r of dbResults) {
-                        results.push(r);
-                        updateProgress(r.path);
-                    }
-                });
-            }
-
-            const concurrency = this.determineConcurrency();
-            await this.runTasksWithConcurrency(tasks, concurrency);
+            // Process files with optimized concurrency
+            const results = await this.processFilesWithConcurrency(vaultFiles, dbNoteIds, oldKey, newKey);
 
             this.store.dispatch(actions.endKeyUpdate());
 
-            const failures = results.filter(r => !r.success);
-            if (failures.length > 0) {
-                console.error("Key Update Failures:", failures);
-                new Notice(`Frontmatter key update completed with ${failures.length} error(s). See console.`, 0);
-            } else {
-                new Notice("Frontmatter key update completed successfully.", 5000);
-            }
+            // Report results
+            this.reportUpdateResults(results);
         } catch (outerErr) {
             try { this.store.dispatch(actions.endKeyUpdate()); } catch (_) { /* best effort */ }
             const msg = outerErr instanceof Error ? outerErr.message : String(outerErr);
@@ -139,11 +101,17 @@ export class KeyUpdateManager {
     // Discovery helpers
     // -------------------------
 
+    private getFileFilters(): FileFilters {
+        return {
+            keyUpdateFilters: this.safeGetSetting(() => this.plugin.settings.keyUpdatePathFilters, []),
+            globalPathFilters: this.safeGetSetting(() => this.plugin.settings.pathFilters, [])
+        };
+    }
+
     private findVaultFilesToUpdate(
         oldKey: string,
         dbPath: string,
-        keyUpdateFilters: string[] | undefined,
-        globalPathFilters: string[] | undefined
+        filters: FileFilters
     ): TFile[] {
         const allMarkdownFiles = this.safeGetMarkdownFiles();
         const normalizedDbPathPrefix = (typeof dbPath === 'string' && dbPath.length > 0) ? (dbPath + '/') : '';
@@ -151,19 +119,110 @@ export class KeyUpdateManager {
         return allMarkdownFiles.filter(file => {
             if (!file || !file.path) return false;
 
-            // skip files inside plugin database folder
+            // Skip files inside plugin database folder
             if (normalizedDbPathPrefix && file.path.startsWith(normalizedDbPathPrefix)) return false;
 
-            // honor per-key-update filters
-            if (!isPathAllowed(file.path, { pathFilters: keyUpdateFilters ?? [] })) return false;
+            // Honor per-key-update filters
+            if (!isPathAllowed(file.path, { pathFilters: filters.keyUpdateFilters })) return false;
 
-            // honor global path filters
-            if (!isPathAllowed(file.path, { pathFilters: globalPathFilters ?? [] })) return false;
+            // Honor global path filters
+            if (!isPathAllowed(file.path, { pathFilters: filters.globalPathFilters })) return false;
 
-            // quick frontmatter check in metadata cache
+            // Quick frontmatter check in metadata cache
             const cache = this.app.metadataCache.getFileCache(file);
             return !!(cache?.frontmatter && Object.prototype.hasOwnProperty.call(cache.frontmatter, oldKey));
         });
+    }
+
+    private async calculateTotalDbFiles(dbNoteIds: string[]): Promise<number> {
+        let totalDbFiles = 0;
+        
+        // Process in batches to avoid overwhelming the system
+        const batchSize = 50;
+        for (let i = 0; i < dbNoteIds.length; i += batchSize) {
+            const batch = dbNoteIds.slice(i, i + batchSize);
+            const batchPromises = batch.map(async (noteId) => {
+                try {
+                    const notePath = this.pathService.getNoteVersionsPath(noteId);
+                    const listResult = await this.safeAdapterList(notePath);
+                    return (listResult?.files ?? []).filter((f): f is string => 
+                        typeof f === 'string' && f.endsWith('.md')
+                    ).length;
+                } catch (e) {
+                    // Tolerate missing folder
+                    console.info(`No versions for noteId=${noteId}`, e);
+                    return 0;
+                }
+            });
+            
+            const batchResults = await Promise.all(batchPromises);
+            totalDbFiles += batchResults.reduce((sum, count) => sum + count, 0);
+        }
+        
+        return totalDbFiles;
+    }
+
+    private async processFilesWithConcurrency(
+        vaultFiles: TFile[],
+        dbNoteIds: string[],
+        oldKey: string,
+        newKey: string
+    ): Promise<UpdateResult[]> {
+        const results: UpdateResult[] = [];
+        let processedCount = 0;
+        
+        const updateProgress = (filePath: string): void => {
+            processedCount++;
+            try {
+                this.store.dispatch(actions.updateKeyUpdateProgress({
+                    processed: processedCount,
+                    message: `Processing: ${filePath}`,
+                }));
+            } catch (e) {
+                console.error('Failed to dispatch progress update', e);
+            }
+        };
+
+        // Build tasks for concurrency runner
+        const tasks: Array<() => Promise<void>> = [];
+
+        // Add vault file tasks
+        for (const file of vaultFiles) {
+            if (!file || !file.path) continue;
+            tasks.push(async () => {
+                const res = await this.updateVaultFile(file, oldKey, newKey);
+                results.push(res);
+                updateProgress(file.path);
+            });
+        }
+
+        // Add DB file tasks
+        for (const noteId of dbNoteIds) {
+            if (!noteId) continue;
+            tasks.push(async () => {
+                const dbResults = await this.updateDbFilesForNote(noteId, oldKey, newKey);
+                for (const r of dbResults) {
+                    results.push(r);
+                    updateProgress(r.path);
+                }
+            });
+        }
+
+        // Execute with appropriate concurrency
+        const concurrency = this.determineConcurrency();
+        await this.runTasksWithConcurrency(tasks, concurrency);
+
+        return results;
+    }
+
+    private reportUpdateResults(results: UpdateResult[]): void {
+        const failures = results.filter(r => !r.success);
+        if (failures.length > 0) {
+            console.error("Key Update Failures:", failures);
+            new Notice(`Frontmatter key update completed with ${failures.length} error(s). See console.`, 0);
+        } else {
+            new Notice("Frontmatter key update completed successfully.", 5000);
+        }
     }
 
     // -------------------------
@@ -184,29 +243,25 @@ export class KeyUpdateManager {
 
         const op = async (): Promise<UpdateResult> => {
             try {
-                const isHidden = this.isPathHidden(file.path);
-
-                // Read via editor if active and not hidden (user requested editor instance for active file).
-                const content = await this.readContent(file.path, isHidden);
+                const context = this.getFileOperationContext(file.path);
+                
+                // Read content
+                const content = await this.readContent(file.path, context);
                 if (typeof content !== 'string') {
                     return { success: false, path: file.path, error: 'Read returned non-string content' };
                 }
 
-                // If newKey already present in frontmatter, skip edits
-                if (this.frontMatterHasTopLevelKey(content, newKey)) {
+                // Check if update is needed
+                const updateNeeded = this.isUpdateNeeded(content, oldKey, newKey);
+                if (!updateNeeded) {
                     return { success: true, path: file.path };
                 }
 
-                // If oldKey not present in frontmatter, nothing to do
-                if (!this.frontMatterHasTopLevelKey(content, oldKey)) {
-                    return { success: true, path: file.path };
-                }
-
-                // Replace oldKey -> newKey inside frontmatter preserving whole content (only key token changes)
+                // Replace oldKey -> newKey inside frontmatter
                 const newContent = this.replaceKeyInYamlFrontmatterPreservingEverything(content, oldKey, newKey);
 
                 if (newContent !== content) {
-                    await this.writeContent(file.path, newContent, isHidden);
+                    await this.writeContent(file.path, newContent, context);
                 }
 
                 return { success: true, path: file.path };
@@ -241,55 +296,59 @@ export class KeyUpdateManager {
             const listResult = await this.safeAdapterList(versionsPath);
             versionFiles = (listResult?.files ?? []).filter((f): f is string => typeof f === 'string' && f.endsWith('.md'));
         } catch (e) {
-            // no versions folder or unreadable: nothing to do
+            // No versions folder or unreadable: nothing to do
             return results;
         }
 
-        for (const filePath of versionFiles) {
-            if (!filePath || typeof filePath !== 'string') {
-                results.push({ success: false, path: String(filePath), error: 'Invalid file path' });
-                continue;
-            }
+        // Process files in batches to improve performance
+        const batchSize = 10;
+        for (let i = 0; i < versionFiles.length; i += batchSize) {
+            const batch = versionFiles.slice(i, i + batchSize);
+            const batchPromises = batch.map(async (filePath) => {
+                if (!filePath || typeof filePath !== 'string') {
+                    return { success: false, path: String(filePath), error: 'Invalid file path' } as UpdateResult;
+                }
 
-            const op = async (): Promise<UpdateResult> => {
+                const op = async (): Promise<UpdateResult> => {
+                    try {
+                        const context = this.getFileOperationContext(filePath);
+                        const content = await this.readContent(filePath, context);
+                        
+                        if (typeof content !== 'string') {
+                            return { success: false, path: filePath, error: 'Read returned non-string content' };
+                        }
+
+                        // Check if update is needed
+                        const updateNeeded = this.isUpdateNeeded(content, oldKey, newKey);
+                        if (!updateNeeded) {
+                            return { success: true, path: filePath };
+                        }
+
+                        const newContent = this.replaceKeyInYamlFrontmatterPreservingEverything(content, oldKey, newKey);
+
+                        if (newContent !== content) {
+                            await this.writeContent(filePath, newContent, context);
+                        }
+                        return { success: true, path: filePath };
+                    } catch (err) {
+                        const message = err instanceof Error ? err.message : String(err);
+                        return { success: false, path: filePath, error: message };
+                    }
+                };
+
                 try {
-                    const isHidden = this.isPathHidden(filePath);
-                    const content = await this.readContent(filePath, isHidden);
-                    if (typeof content !== 'string') {
-                        return { success: false, path: filePath, error: 'Read returned non-string content' };
-                    }
-
-                    if (this.frontMatterHasTopLevelKey(content, newKey)) {
-                        return { success: true, path: filePath };
-                    }
-
-                    if (!this.frontMatterHasTopLevelKey(content, oldKey)) {
-                        return { success: true, path: filePath };
-                    }
-
-                    const newContent = this.replaceKeyInYamlFrontmatterPreservingEverything(content, oldKey, newKey);
-
-                    if (newContent !== content) {
-                        // For version files (often in plugin storage / hidden), prefer adapter write,
-                        // but behavior depends on isHidden; the higher-level rule: hidden -> adapter; otherwise vault API or editor
-                        await this.writeContent(filePath, newContent, isHidden);
-                    }
-                    return { success: true, path: filePath };
+                    // Enqueue by filePath to ensure per-file single op
+                    const queued = this.queueService.enqueue(filePath, op);
+                    const res = await this.wrapWithTimeout(queued, KeyUpdateManager.FILE_OP_TIMEOUT_MS, `Timeout updating DB file ${filePath}`);
+                    return res;
                 } catch (err) {
                     const message = err instanceof Error ? err.message : String(err);
                     return { success: false, path: filePath, error: message };
                 }
-            };
-
-            try {
-                // Enqueue by filePath to ensure per-file single op
-                const queued = this.queueService.enqueue(filePath, op);
-                const res = await this.wrapWithTimeout(queued, KeyUpdateManager.FILE_OP_TIMEOUT_MS, `Timeout updating DB file ${filePath}`);
-                results.push(res);
-            } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
-                results.push({ success: false, path: filePath, error: message });
-            }
+            });
+            
+            const batchResults = await Promise.all(batchPromises);
+            results.push(...batchResults);
         }
 
         return results;
@@ -300,44 +359,69 @@ export class KeyUpdateManager {
     // -------------------------
 
     /**
+     * Get the operation context for a file path
+     */
+    private getFileOperationContext(filePath: string): FileOperationContext {
+        const isHidden = this.isPathHidden(filePath);
+        const activeFile = this.app.workspace.getActiveFile();
+        const isEditorActive = !isHidden && activeFile && activeFile.path === filePath;
+        const file = isEditorActive ? activeFile : this.app.vault.getAbstractFileByPath(filePath) as TFile | undefined;
+        
+        return { isHidden, isEditorActive, file };
+    }
+
+    /**
+     * Check if a file needs to be updated
+     */
+    private isUpdateNeeded(content: string, oldKey: string, newKey: string): boolean {
+        // If newKey already present in frontmatter, skip edits
+        if (this.frontMatterHasTopLevelKey(content, newKey)) {
+            return false;
+        }
+
+        // If oldKey not present in frontmatter, nothing to do
+        if (!this.frontMatterHasTopLevelKey(content, oldKey)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Read content for a path. Preference order:
      *  - If not hidden and file is active in workspace -> read from editor buffer
      *  - If not hidden and file exists as TFile in vault -> app.vault.read(TFile)
      *  - Else fall back to adapter.read(path)
      */
-    private async readContent(filePath: string, isHidden: boolean): Promise<string> {
+    private async readContent(filePath: string, context: FileOperationContext): Promise<string> {
         // Validate inputs
         if (!filePath || typeof filePath !== 'string') {
             throw new Error('Invalid filePath provided to readContent');
         }
 
         // Editor read when active and not hidden
-        if (!isHidden) {
-            const activeFile = this.app.workspace.getActiveFile();
-            if (activeFile && activeFile.path === filePath) {
-                const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-                if (view && view.file && view.file.path === filePath) {
-                    const ed: Editor | undefined = view.editor;
-                    if (ed && typeof ed.getValue === 'function') {
-                        const content = ed.getValue();
-                        if (typeof content === 'string') {
-                            return content;
-                        }
-                    }
-                }
-            }
-
-            // Try to read via Vault API if TFile exists
-            const maybeFile = this.app.vault.getAbstractFileByPath(filePath);
-            if (maybeFile instanceof TFile) {
-                try {
-                    const content = await this.app.vault.read(maybeFile);
+        if (context.isEditorActive) {
+            const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+            if (view && view.file && view.file.path === filePath) {
+                const ed: Editor | undefined = view.editor;
+                if (ed && typeof ed.getValue === 'function') {
+                    const content = ed.getValue();
                     if (typeof content === 'string') {
                         return content;
                     }
-                } catch {
-                    // fall through to adapter.read
                 }
+            }
+        }
+
+        // Try to read via Vault API if TFile exists
+        if (context.file && !context.isHidden) {
+            try {
+                const content = await this.app.vault.read(context.file);
+                if (typeof content === 'string') {
+                    return content;
+                }
+            } catch {
+                // Fall through to adapter.read
             }
         }
 
@@ -355,7 +439,7 @@ export class KeyUpdateManager {
      *  - If not hidden and file exists as TFile -> app.vault.modify(TFile, content)
      *  - Else fall back to adapter.write(path, content)
      */
-    private async writeContent(filePath: string, content: string, isHidden: boolean): Promise<void> {
+    private async writeContent(filePath: string, content: string, context: FileOperationContext): Promise<void> {
         // Validate inputs
         if (!filePath || typeof filePath !== 'string') {
             throw new Error('Invalid filePath provided to writeContent');
@@ -365,32 +449,33 @@ export class KeyUpdateManager {
         }
 
         // Editor path when active and not hidden
-        if (!isHidden) {
+        if (context.isEditorActive) {
             try {
-                const activeFile = this.app.workspace.getActiveFile();
-                if (activeFile && activeFile.path === filePath) {
-                    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-                    if (view && view.file && view.file.path === filePath) {
-                        const ed = view.editor;
-                        if (ed && typeof ed.setValue === 'function') {
-                            // Update editor buffer
-                            ed.setValue(content);
-                            // Save via the view's built-in save method (guaranteed to exist in MarkdownView)
-                            await view.save();
-                            return;
-                        }
+                const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+                if (view && view.file && view.file.path === filePath) {
+                    const ed = view.editor;
+                    if (ed && typeof ed.setValue === 'function') {
+                        // Update editor buffer
+                        ed.setValue(content);
+                        // Save via the view's built-in save method
+                        await view.save();
+                        return;
                     }
                 }
-
-                // If file exists in vault as TFile, use vault.modify
-                const maybeFile = this.app.vault.getAbstractFileByPath(filePath);
-                if (maybeFile instanceof TFile) {
-                    await this.app.vault.modify(maybeFile, content);
-                    return;
-                }
             } catch (e) {
-                console.warn('Editor/vault write failed, falling back to adapter.write', e);
-                // fallthrough to adapter.write
+                console.warn('Editor write failed, falling back to vault/adapter', e);
+                // Fallthrough to vault/adapter
+            }
+        }
+
+        // If file exists in vault as TFile, use vault.modify
+        if (context.file && !context.isHidden) {
+            try {
+                await this.app.vault.modify(context.file, content);
+                return;
+            } catch (e) {
+                console.warn('Vault modify failed, falling back to adapter', e);
+                // Fallthrough to adapter
             }
         }
 
@@ -423,7 +508,11 @@ export class KeyUpdateManager {
         try {
             const files = this.app.vault.getMarkdownFiles();
             if (!Array.isArray(files)) return [];
-            return files.filter((file): file is TFile => file instanceof TFile && typeof file.path === 'string' && file.path.length > 0);
+            return files.filter((file): file is TFile => 
+                file instanceof TFile && 
+                typeof file.path === 'string' && 
+                file.path.length > 0
+            );
         } catch (e) {
             console.error('safeGetMarkdownFiles failed', e);
             return [];
@@ -432,7 +521,7 @@ export class KeyUpdateManager {
 
     private async safeGetAllNotesFromRepo(): Promise<Record<string, any>> {
         try {
-            const notes = await this.centralManifestRepo.getAllNotes();
+            const notes = await this.centralManifestRepository.getAllNotes();
             return notes ?? {};
         } catch (e) {
             console.error('safeGetAllNotesFromRepo failed', e);
@@ -511,7 +600,7 @@ export class KeyUpdateManager {
                 return KeyUpdateManager.MOBILE_CONCURRENCY;
             }
         } catch {
-            // ignore and fall through to desktop default
+            // Ignore and fall through to desktop default
         }
         return KeyUpdateManager.DESKTOP_CONCURRENCY;
     }
@@ -528,7 +617,7 @@ export class KeyUpdateManager {
 
         const fm = content.substring(0, endIdx);
         const escapedKey = this.escapeRegExp(key);
-        const lineRegex = new RegExp(`^\\s*${escapedKey}\\s*:`, 'm');
+        const lineRegex = this.getOrCreateRegex(`^\\s*${escapedKey}\\s*:`, 'm');
         return lineRegex.test(fm);
     }
 
@@ -553,7 +642,7 @@ export class KeyUpdateManager {
 
         const lines = fmBlock.split(/\r?\n/);
         const escapedOldKey = this.escapeRegExp(oldKey);
-        const keyLineRegex = new RegExp(`^(\\s*)(${escapedOldKey})(\\s*:\\s*)([\\s\\S]*)$`);
+        const keyLineRegex = this.getOrCreateRegex(`^(\\s*)(${escapedOldKey})(\\s*:\\s*)([\\s\\S]*)$`);
 
         let changed = false;
         for (let i = 0; i < lines.length; i++) {
@@ -583,9 +672,20 @@ export class KeyUpdateManager {
     private findFrontMatterEndIndex(content: string): number {
         if (!content || typeof content !== 'string') return -1;
         
+        // Check cache first
+        if (KeyUpdateManager.FRONTMATTER_CACHE.has(content)) {
+            return KeyUpdateManager.FRONTMATTER_CACHE.get(content)!;
+        }
+        
         const lines = content.split(/\r?\n/);
-        if (lines.length < 2) return -1;
-        if (!lines[0]?.startsWith('---')) return -1;
+        if (lines.length < 2) {
+            KeyUpdateManager.FRONTMATTER_CACHE.set(content, -1);
+            return -1;
+        }
+        if (!lines[0]?.startsWith('---')) {
+            KeyUpdateManager.FRONTMATTER_CACHE.set(content, -1);
+            return -1;
+        }
 
         let charIdx = lines[0].length + 1; // Start after first line and its newline
 
@@ -593,11 +693,26 @@ export class KeyUpdateManager {
             const line = lines[i];
             if (typeof line !== 'string') continue;
             if (line.trim() === '---') {
-                return charIdx + line.length;
+                const result = charIdx + line.length;
+                KeyUpdateManager.FRONTMATTER_CACHE.set(content, result);
+                return result;
             }
             charIdx += line.length + 1; // Add length of current line and its newline
         }
+        
+        KeyUpdateManager.FRONTMATTER_CACHE.set(content, -1);
         return -1;
+    }
+
+    /**
+     * Get or create a regex pattern from cache to improve performance
+     */
+    private getOrCreateRegex(pattern: string, flags?: string): RegExp {
+        const key = `${pattern}|${flags ?? ''}`;
+        if (!KeyUpdateManager.REGEX_CACHE.has(key)) {
+            KeyUpdateManager.REGEX_CACHE.set(key, new RegExp(pattern, flags));
+        }
+        return KeyUpdateManager.REGEX_CACHE.get(key)!;
     }
 
     private escapeRegExp(value: string): string {
