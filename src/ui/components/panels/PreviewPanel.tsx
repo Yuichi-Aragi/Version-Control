@@ -1,3 +1,4 @@
+// src/ui/components/panels/PreviewPanel.tsx
 import { MarkdownRenderer, moment, Component } from 'obsidian';
 import { type FC, useCallback, useState, useRef, useLayoutEffect } from 'react';
 import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
@@ -6,6 +7,7 @@ import type { PreviewPanel as PreviewPanelState } from '../../../state/state';
 import { Icon } from '../Icon';
 import { VirtualizedPlaintext } from '../shared/VirtualizedPlaintext';
 import { useApp } from '../../AppContext';
+import clsx from 'clsx';
 
 interface PreviewPanelProps {
     panelState: PreviewPanelState;
@@ -61,13 +63,11 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
                             </button>
                         </div>
                     </div>
-                    <div className="v-version-content-preview">
+                    <div className={clsx("v-version-content-preview", { 'is-plaintext': !shouldRenderMarkdown })}>
                         {shouldRenderMarkdown ? (
                             <div ref={markdownRef} />
                         ) : (
-                            <div className="is-plaintext">
-                                <VirtualizedPlaintext content={content} />
-                            </div>
+                            <VirtualizedPlaintext content={content} />
                         )}
                     </div>
                 </div>
