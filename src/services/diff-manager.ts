@@ -491,8 +491,10 @@ export class DiffManager extends Component {
     }
 
     private sanitizeInput(input: string): string {
-        // Replace null bytes and other potentially problematic characters
-        return input.replace(/\0/g, '').replace(/[\x00-\x1F\x7F]/g, '');
+        // Replace problematic control characters, but preserve essential whitespace
+        // like tab (\x09), newline (\x0A), and carriage return (\x0D).
+        // The regex targets characters in the ranges \x00-\x08, \x0B, \x0C, \x0E-\x1F, and \x7F.
+        return input.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
     }
     
     private validateDiffOutput(changes: unknown): asserts changes is Change[] {
