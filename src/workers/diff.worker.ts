@@ -21,8 +21,10 @@ const diffEngine = {
     computeDiff(type: DiffType, content1: string, content2: string): Change[] {
         switch (type) {
             case 'lines':
+                // Using standard line diffing. The result is an array of Change objects where
+                // each object can represent multiple lines. The processing logic in the main
+                // thread is responsible for splitting these into individual lines for display.
                 return diffLines(content1, content2, { 
-                    newlineIsToken: true,
                     ignoreWhitespace: false,
                 });
             case 'words':
