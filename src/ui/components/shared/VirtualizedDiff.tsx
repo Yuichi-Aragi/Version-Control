@@ -12,6 +12,14 @@ interface DiffLineData {
     content: string;
 }
 
+/**
+ * Processes an array of `Change` objects from the `diff` library into a
+ * line-by-line structure suitable for rendering in a virtualized list.
+ * This function handles `Change` objects that may contain multiple lines.
+ *
+ * @param changes An array of `Change` objects from `diffLines`.
+ * @returns An array of `DiffLineData` objects, where each object represents a single display line.
+ */
 const processLineChanges = (changes: Change[]): DiffLineData[] => {
     const lines: DiffLineData[] = [];
     let oldLineNum = 1;
@@ -19,21 +27,38 @@ const processLineChanges = (changes: Change[]): DiffLineData[] => {
     let keyCounter = 0;
 
     for (const part of changes) {
+        const type = part.added ? 'add' : part.removed ? 'remove' : 'context';
+        // The `value` from `diffLines` can contain multiple lines. We split by newline
+        // to process each one individually.
         const partLines = part.value.split('\n');
-        if (partLines.length > 0 && partLines[partLines.length - 1] === '') {
-            partLines.pop();
-        }
+        const lastIndex = partLines.length - 1;
 
-        for (const line of partLines) {
-            const key = `${keyCounter++}`;
-            if (part.added) {
-                lines.push({ key, type: 'add', newLineNum: newLineNum++, content: line });
-            } else if (part.removed) {
-                lines.push({ key, type: 'remove', oldLineNum: oldLineNum++, content: line });
-            } else {
-                lines.push({ key, type: 'context', oldLineNum: oldLineNum++, newLineNum: newLineNum++, content: line });
+        partLines.forEach((line, i) => {
+            // The `diff` library's behavior with `split('\n')`:
+            // - "a\nb\n" -> ["a", "b", ""]
+            // - "a\nb"   -> ["a", "b"]
+            // The trailing empty string indicates that the original string ended with a newline.
+            // We must skip this trailing empty string, as the newline it represents has already
+            // been accounted for by the line before it.
+            if (i === lastIndex && line === '') {
+                return;
             }
-        }
+
+            const lineData: DiffLineData = {
+                key: `${keyCounter++}`,
+                type,
+                content: line,
+            };
+
+            if (type !== 'add') {
+                lineData.oldLineNum = oldLineNum++;
+            }
+            if (type !== 'remove') {
+                lineData.newLineNum = newLineNum++;
+            }
+
+            lines.push(lineData);
+        });
     }
     return lines;
 };
