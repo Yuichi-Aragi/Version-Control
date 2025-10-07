@@ -1,5 +1,13 @@
 ***
 
+**Version: 1.9.18**
+
+#### 🎨 Improvements & UX
+
+*   **General Stability:** Squashed many bugs and implemented various UI/UX enhancements for a more reliable experience.
+
+***
+
 **Version: 1.9.17**
 
 #### 🎨 Improvements & UX
