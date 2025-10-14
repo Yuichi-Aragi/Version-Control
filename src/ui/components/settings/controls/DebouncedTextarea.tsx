@@ -5,6 +5,7 @@ import { validateString } from '../settingsUtils';
 interface DebouncedTextareaProps {
     initialValue: string; 
     onFinalChange: (value: string) => void;
+    onLiveChange?: (value: string) => void;
     placeholder?: string; 
     rows?: number;
     maxLength?: number;
@@ -13,6 +14,7 @@ interface DebouncedTextareaProps {
 export const DebouncedTextarea: FC<DebouncedTextareaProps> = memo(({ 
     initialValue, 
     onFinalChange, 
+    onLiveChange,
     placeholder, 
     rows,
     maxLength = 10000
@@ -55,9 +57,10 @@ export const DebouncedTextarea: FC<DebouncedTextareaProps> = memo(({
     }, [onFinalChange, maxLength]);
 
     useEffect(() => {
-        return () => {
+        const cleanup = (): void => {
             debouncedOnFinalChange.cancel?.();
         };
+        return cleanup;
     }, [debouncedOnFinalChange]);
 
     const adjustTextareaHeight = useCallback(() => {
@@ -79,11 +82,26 @@ export const DebouncedTextarea: FC<DebouncedTextareaProps> = memo(({
         try {
             const newValue = validateString(e.target.value, maxLength);
             setValue(newValue);
+            onLiveChange?.(newValue);
             (debouncedOnFinalChange as unknown as ((s: string) => void))?.(newValue);
         } catch (error) {
             console.error('Invalid textarea input:', error);
         }
-    }, [debouncedOnFinalChange, maxLength]);
+    }, [debouncedOnFinalChange, onLiveChange, maxLength]);
+
+    const handleBlur = useCallback(() => {
+        debouncedOnFinalChange.cancel?.();
+        try {
+            const validatedValue = validateString(value, maxLength);
+            if (validatedValue !== lastCommittedValue.current) {
+                onFinalChange(validatedValue);
+                lastCommittedValue.current = validatedValue;
+            }
+        } catch (error) {
+            console.error('Error validating textarea on blur:', error);
+            setValue(lastCommittedValue.current);
+        }
+    }, [debouncedOnFinalChange, value, onFinalChange, maxLength]);
 
     return (
         <textarea 
@@ -93,6 +111,7 @@ export const DebouncedTextarea: FC<DebouncedTextareaProps> = memo(({
             placeholder={placeholder} 
             value={value} 
             onChange={handleChange} 
+            onBlur={handleBlur}
             onFocus={adjustTextareaHeight}
             maxLength={maxLength}
             aria-label="Settings textarea"

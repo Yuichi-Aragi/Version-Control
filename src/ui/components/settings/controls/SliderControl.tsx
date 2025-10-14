@@ -289,14 +289,14 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
     setIsDragging(false);
 
     // remove native handlers added on start (guarded)
-    const handlers = pendingNativeHandlersRef.current;
-    if (handlers) {
-      document.removeEventListener('pointermove', handlers.move);
-      document.removeEventListener('pointerup', handlers.up);
-      document.removeEventListener('mousemove', handlers.move);
-      document.removeEventListener('mouseup', handlers.up);
-      document.removeEventListener('touchmove', handlers.move);
-      document.removeEventListener('touchend', handlers.up);
+    if (pendingNativeHandlersRef.current) {
+      const { move, up } = pendingNativeHandlersRef.current;
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      document.removeEventListener('touchmove', move);
+      document.removeEventListener('touchend', up);
       pendingNativeHandlersRef.current = null;
     }
 
@@ -421,14 +421,14 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
   useEffect(() => {
     return () => {
       debouncerRef.current?.cancel();
-      const handlers = pendingNativeHandlersRef.current;
-      if (handlers) {
-        document.removeEventListener('pointermove', handlers.move);
-        document.removeEventListener('pointerup', handlers.up);
-        document.removeEventListener('mousemove', handlers.move);
-        document.removeEventListener('mouseup', handlers.up);
-        document.removeEventListener('touchmove', handlers.move);
-        document.removeEventListener('touchend', handlers.up);
+      if (pendingNativeHandlersRef.current) {
+        const { move, up } = pendingNativeHandlersRef.current;
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', up);
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+        document.removeEventListener('touchmove', move);
+        document.removeEventListener('touchend', up);
         pendingNativeHandlersRef.current = null;
       }
       if (rafScheduledRef.current != null) {
@@ -467,8 +467,6 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
         disabled={disabled}
         onInput={handleInput}
         onPointerDown={onPointerStart}
-        onMouseDown={(e) => onPointerStart(e as any)}
-        onTouchStart={(e) => onPointerStart(e as any)}
         onBlur={handleBlur}
         className="v-slider-input"
         aria-valuemin={effectiveMin}
