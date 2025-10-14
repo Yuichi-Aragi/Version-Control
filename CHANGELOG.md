@@ -1,5 +1,17 @@
 ***
 
+**Version: 1.9.19**
+
+#### ✨ New Features
+
+*   **Search in Panels:** You can now search preview and diff contents directly in the preview and diff panels.
+
+#### 🎨 Improvements & UX
+
+*   **General Stability:** Squashed some bugs and improved UI/UX for a more reliable experience.
+
+***
+
 **Version: 1.9.18**
 
 #### 🎨 Improvements & UX
