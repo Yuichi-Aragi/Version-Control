@@ -4,7 +4,7 @@ import { useAppDispatch, useAppSelector } from '../../../hooks/useRedux';
 import { thunks } from '../../../../state/thunks';
 import { SettingComponent } from '../../SettingComponent';
 import { SliderControl } from '../controls/SliderControl';
-import { validateNumber } from '../settingsUtils';
+import { validateNumber, formatInterval } from '../settingsUtils';
 import { MinLinesControl } from './MinLinesControl';
 
 export const AutoSaveSettings: React.FC<{ disabled: boolean }> = memo(({ disabled }) => {
@@ -20,14 +20,14 @@ export const AutoSaveSettings: React.FC<{ disabled: boolean }> = memo(({ disable
     
     const handleSliderChange = useCallback((v: number) => {
         try {
-            const validatedValue = validateNumber(v, 1, 10);
+            const validatedValue = validateNumber(v, 1, 300);
             dispatch(thunks.updateSettings({ autoSaveOnSaveInterval: validatedValue }));
         } catch (error) {
             console.error('Invalid auto-save interval:', error);
         }
     }, [dispatch]);
     
-    const formatter = useCallback((val: number) => `${val} sec`, []);
+    const formatter = useCallback((val: number) => formatInterval(val), []);
 
     return (
         <>
@@ -47,11 +47,11 @@ export const AutoSaveSettings: React.FC<{ disabled: boolean }> = memo(({ disable
                 <>
                     <SettingComponent 
                         name="Auto-save delay" 
-                        desc={`Time to wait after last change before auto-saving. Current: ${interval} sec.`}
+                        desc={`Time to wait after last change before auto-saving. Current: ${formatInterval(interval)}.`}
                     >
                         <SliderControl 
                             min={1} 
-                            max={10} 
+                            max={300} 
                             step={1} 
                             value={interval} 
                             onFinalChange={handleSliderChange} 
