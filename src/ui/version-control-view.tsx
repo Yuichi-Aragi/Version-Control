@@ -13,6 +13,7 @@ export class VersionControlView extends ItemView {
     store: AppStore;
     override app: App;
     private reactRoot: Root | null = null;
+    private reactRootContainer: HTMLDivElement | null = null;
 
     constructor(leaf: WorkspaceLeaf, store: AppStore, app: App) {
         super(leaf);
@@ -32,7 +33,14 @@ export class VersionControlView extends ItemView {
     override async onOpen() {
         this.containerEl.addClass("version-control-view");
         
-        this.reactRoot = createRoot(this.contentEl);
+        // FIX: Create a wrapper for the React root that we can style reliably
+        // to ensure a stable 100% height for the React layout engine. This is
+        // critical for mobile viewport resizing with virtual keyboards, as it
+        // provides a non-collapsing parent for the flexbox/height-based UI.
+        this.reactRootContainer = this.contentEl.createDiv();
+        this.reactRootContainer.style.height = '100%';
+        
+        this.reactRoot = createRoot(this.reactRootContainer);
         this.reactRoot.render(
             <StrictMode>
                 <Provider store={this.store}>
@@ -49,7 +57,14 @@ export class VersionControlView extends ItemView {
     override async onClose() {
         this.reactRoot?.unmount();
         
-        this.store.dispatch(actions.closePanel());
+        const state = this.store.getState();
+        // The changelog is a global notification. It should persist even if the view
+        // is temporarily closed (e.g., by Obsidian on mobile to save resources).
+        // Other panels are context-specific and should be cleared.
+        if (state.panel?.type !== 'changelog') {
+            this.store.dispatch(actions.closePanel());
+        }
+        
         this.store.dispatch(actions.clearDiffRequest());
         this.store.dispatch(actions.toggleSearch(false));
     }
