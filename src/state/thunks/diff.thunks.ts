@@ -1,10 +1,8 @@
-import { App, moment } from 'obsidian';
-import type { Change } from 'diff';
+import { moment, App, MarkdownView, type Editor } from 'obsidian';
 import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
 import type { VersionHistoryEntry, DiffTarget, DiffType } from '../../types';
 import { AppStatus, type ActionItem } from '../state';
-import { VIEW_TYPE_VERSION_DIFF } from '../../constants';
 import { UIService } from '../../services/ui-service';
 import { DiffManager } from '../../services/diff-manager';
 import { TYPES } from '../../types/inversify.types';
@@ -13,31 +11,6 @@ import { isPluginUnloading } from './ThunkUtils';
 /**
  * Thunks for generating and displaying diffs between versions.
  */
-
-/**
- * Handles the second step of the diff workflow: choosing the display mode.
- * @param version1 The base version for comparison.
- * @param version2 The target version for comparison.
- */
-const _handleDiffVersionSelected = (version1: VersionHistoryEntry, version2: DiffTarget): AppThunk => (dispatch) => {
-    const items: ActionItem<'panel' | 'tab'>[] = [
-        { id: 'panel', data: 'panel', text: 'Show diff in panel', icon: 'sidebar-right' },
-        { id: 'tab', data: 'tab', text: 'Show diff in new tab', icon: 'file-diff' },
-    ];
-
-    const onChooseAction = (mode: 'panel' | 'tab'): AppThunk => (dispatch) => {
-        dispatch(generateAndShowDiff(version1, version2, mode));
-    };
-
-    dispatch(actions.openPanel({
-        type: 'action',
-        title: 'How to display diff?',
-        items,
-        onChooseAction,
-        showFilter: false,
-    }));
-};
-
 
 export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
@@ -79,7 +52,7 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
     });
 
     const onChooseAction = (selectedTarget: DiffTarget): AppThunk => (dispatch) => {
-        dispatch(_handleDiffVersionSelected(version1, selectedTarget));
+        dispatch(generateAndShowDiffInPanel(version1, selectedTarget));
     };
 
     dispatch(actions.openPanel({
@@ -91,14 +64,13 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
     }));
 };
 
-export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: DiffTarget, mode: 'panel' | 'tab'): AppThunk => async (dispatch, getState, container) => {
+export const generateAndShowDiffInPanel = (version1: VersionHistoryEntry, version2: DiffTarget): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
 
     dispatch(actions.closePanel());
 
     const uiService = container.get<UIService>(TYPES.UIService);
     const diffManager = container.get<DiffManager>(TYPES.DiffManager);
-    const app = container.get<App>(TYPES.App);
     
     const initialState = getState();
     if (initialState.status !== AppStatus.READY || !initialState.noteId || !initialState.file) return;
@@ -113,26 +85,6 @@ export const generateAndShowDiff = (version1: VersionHistoryEntry, version2: Dif
         const stateAfterContentFetch = getState();
         if (isPluginUnloading(container) || stateAfterContentFetch.status !== AppStatus.READY || stateAfterContentFetch.noteId !== noteId || !stateAfterContentFetch.file) {
             uiService.showNotice("View context changed while fetching content. Diff cancelled.", 4000);
-            return;
-        }
-
-        if (mode === 'tab') {
-            const diffChanges = await diffManager.computeDiff(noteId, version1.id, version2.id, content1, content2, 'lines');
-            const leaf = app.workspace.getLeaf('tab');
-            await leaf.setViewState({
-                type: VIEW_TYPE_VERSION_DIFF,
-                active: true,
-                state: {
-                    version1,
-                    version2,
-                    diffChanges,
-                    noteName: stateAfterContentFetch.file.basename,
-                    notePath: stateAfterContentFetch.file.path,
-                    content1,
-                    content2,
-                }
-            });
-            app.workspace.revealLeaf(leaf);
             return;
         }
 
@@ -202,7 +154,62 @@ export const recomputeDiff = (newDiffType: DiffType): AppThunk => async (dispatc
     }
 };
 
-export const computeDiffOnly = (diffType: DiffType, noteId: string, version1: VersionHistoryEntry, version2: DiffTarget, content1: string, content2: string): AppThunk<Promise<Change[]>> => async (_dispatch, _getState, container) => {
-    const diffManager = container.get<DiffManager>(TYPES.DiffManager);
-    return await diffManager.computeDiff(noteId, version1.id, version2.id, content1, content2, diffType);
+/**
+ * Scrolls the editor of the active note to a specific line.
+ * This is primarily used for navigating from the diff view to the editor.
+ * @param line The 1-based line number to scroll to.
+ */
+export const scrollToLineInEditor = (line: number): AppThunk => (_dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
+    const state = getState();
+    const uiService = container.get<UIService>(TYPES.UIService);
+    const app = container.get<App>(TYPES.App);
+
+    if (state.status !== AppStatus.READY || !state.file) {
+        uiService.showNotice("Cannot scroll: no active note in version control view.", 4000);
+        return;
+    }
+    
+    const panelState = state.panel;
+    if (panelState?.type !== 'diff') {
+        // This is a defensive check. This thunk should only be called from the diff panel.
+        return;
+    }
+
+    const filePath = state.file.path;
+
+    const markdownLeaves = app.workspace.getLeavesOfType('markdown');
+    const targetLeaf = markdownLeaves.find(leaf => {
+        return leaf.view instanceof MarkdownView && leaf.view.file?.path === filePath;
+    });
+
+    if (!targetLeaf) {
+        const fileName = filePath.split('/').pop() ?? filePath;
+        uiService.showNotice(`Note "${fileName}" is not currently open. Cannot scroll.`, 4000);
+        return;
+    }
+
+    // Since we found it via getLeavesOfType('markdown') and checked instanceof, this cast is safe.
+    const view = targetLeaf.view as MarkdownView;
+    const editor = view.editor;
+
+    // Bring the editor into focus for better user experience.
+    app.workspace.setActiveLeaf(targetLeaf, { focus: true });
+
+    // Editor line numbers are 0-indexed.
+    const requestedLine = Math.max(0, line - 1);
+
+    // Clamp the target line to be within the valid range of the editor.
+    const targetLine = Math.min(requestedLine, Math.max(0, editor.lineCount() - 1));
+
+    const lineContent = editor.getLine(targetLine) ?? '';
+    const endOfLineCh = lineContent.length;
+
+    // Set cursor and scroll. The API handles both.
+    // Setting the cursor first and then scrolling provides a more reliable experience.
+    editor.setCursor({ line: targetLine, ch: endOfLineCh });
+    editor.scrollIntoView({
+        from: { line: targetLine, ch: 0 },
+        to: { line: targetLine, ch: 0 }
+    }, true); // `true` centers the line in the viewport.
 };

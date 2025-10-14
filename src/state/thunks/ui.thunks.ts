@@ -4,7 +4,7 @@ import type { AppThunk, AppStore } from '../store';
 import { actions } from '../appSlice';
 import type { VersionHistoryEntry } from '../../types';
 import { AppStatus, type ActionItem, type SortOrder, type SortProperty, type SortDirection } from '../state';
-import { VIEW_TYPE_VERSION_PREVIEW, CHANGELOG_URL } from '../../constants';
+import { CHANGELOG_URL } from '../../constants';
 import { initializeView } from './core.thunks';
 import { UIService } from '../../services/ui-service';
 import { VersionManager } from '../../core/version-manager';
@@ -42,38 +42,62 @@ const updateVersionInSettings = async (container: Container): Promise<void> => {
     }
 };
 
-export const showChangelogPanel = (options: { forceRefresh?: boolean } = {}): AppThunk => async (dispatch, getState, container) => {
+export const showChangelogPanel = (options: { forceRefresh?: boolean; isManualRequest?: boolean } = {}): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     
-    const { forceRefresh = false } = options;
+    const { forceRefresh = false, isManualRequest = true } = options;
+    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
     const uiService = container.get<UIService>(TYPES.UIService);
+    const currentState = getState();
 
-    // If a manual view is requested, we should always update the version upon success.
-    // If we have a cache and it's not a forced refresh, just show it.
-    if (!forceRefresh && changelogCache) {
-        dispatch(actions.openPanel({ type: 'changelog', content: changelogCache }));
-        return;
+    // --- Gatekeeper for Automatic Requests ---
+    // For an automatic request, if the view state isn't stable or another panel is open,
+    // we queue the request and wait for a better opportunity. This is the primary
+    // entry point into the queuing system.
+    if (!isManualRequest) {
+        const isViewStable = currentState.status === AppStatus.INITIALIZING || currentState.status === AppStatus.READY || currentState.status === AppStatus.PLACEHOLDER || currentState.status === AppStatus.LOADING;
+        const isPanelAvailable = !currentState.panel || currentState.panel.type === 'changelog';
+        if (!isViewStable || !isPanelAvailable) {
+            plugin.queuedChangelogRequest = { forceRefresh, isManualRequest: false };
+            return; // Queue and exit
+        }
     }
 
+    // --- Proceed for Manual or Ready Automatic Requests ---
+    
+    // We are now processing the request, so clear the queue to prevent re-processing.
+    plugin.queuedChangelogRequest = null;
+
+    // For manual requests, forcefully close any existing panel to ensure the changelog is visible.
+    if (isManualRequest && currentState.panel) {
+        dispatch(actions.closePanel());
+    }
+    
     if (isFetchingChangelog) {
-        // If a fetch is already in progress, don't start another one.
-        // If it was a manual request, let the user know.
-        if (forceRefresh) {
+        if (isManualRequest) {
             uiService.showNotice("Already fetching changelog...", 2000);
         }
         return;
     }
 
+    if (!forceRefresh && changelogCache) {
+        dispatch(actions.openPanel({ type: 'changelog', content: changelogCache }));
+        // If showing from cache, it's a successful display, so update version.
+        await updateVersionInSettings(container);
+        return;
+    }
+
     if (!navigator.onLine) {
-        if (forceRefresh) { // Only show notice on manual attempts
+        if (isManualRequest) {
             uiService.showNotice("No internet connection available.", 4000);
         }
+        // For automatic requests, we fail silently and don't queue if offline.
         return;
     }
 
     isFetchingChangelog = true;
     dispatch(actions.openPanel({ type: 'changelog', content: null })); // Show loading state
-    if (forceRefresh) {
+    if (isManualRequest) {
         uiService.showNotice("Fetching latest changelog...", 2000);
     }
 
@@ -81,20 +105,25 @@ export const showChangelogPanel = (options: { forceRefresh?: boolean } = {}): Ap
         const response = await requestWithRetry(CHANGELOG_URL);
         changelogCache = response.text;
         
-        const currentState = getState();
-        // The view is considered stable if it's in a state that can show a panel.
-        const canOpenPanel = currentState.status === AppStatus.READY || currentState.status === AppStatus.PLACEHOLDER || currentState.status === AppStatus.LOADING;
-        // We open it if there's no panel, or if the changelog loading panel is still visible.
-        // This prevents overwriting a confirmation dialog or other important UI.
-        const isPanelSafeToOverwrite = !currentState.panel || currentState.panel.type === 'changelog';
-        
-        if (canOpenPanel && isPanelSafeToOverwrite) {
-            dispatch(actions.openPanel({ type: 'changelog', content: changelogCache }));
-        }
+        const stateAfterFetch = getState();
+        // This is the final check before displaying the content and updating the version.
+        // For a manual request, we always show it.
+        // For an automatic request, we only show it if our loading panel is still the active one.
+        // This prevents showing the changelog if the user has navigated away or opened another panel
+        // during the fetch, which would be intrusive.
+        const canShowPanelNow = isManualRequest || stateAfterFetch.panel?.type === 'changelog';
 
-        // On successful fetch and display, update the stored version.
-        // This covers both initial load and manual refresh from a button.
-        await updateVersionInSettings(container);
+        if (canShowPanelNow) {
+            dispatch(actions.openPanel({ type: 'changelog', content: changelogCache }));
+            // The version is updated ONLY after we have successfully committed to showing the panel.
+            // This is the key to preventing the "version updated but panel not shown" bug.
+            await updateVersionInSettings(container);
+        } else {
+            // Another panel opened during the fetch of an automatic request.
+            // We must re-queue the request to try again later.
+            // Crucially, we DO NOT update the version in this case.
+            plugin.queuedChangelogRequest = { forceRefresh, isManualRequest: false };
+        }
 
     } catch (error) {
         console.error("Version Control: Failed to fetch changelog.", error);
@@ -106,16 +135,31 @@ export const showChangelogPanel = (options: { forceRefresh?: boolean } = {}): Ap
             errorMessage = "Could not fetch changelog: The server could not be reached.";
         }
 
-        uiService.showNotice(errorMessage, 5000);
+        if (isManualRequest) {
+            uiService.showNotice(errorMessage, 5000);
+        }
         
+        // If the loading panel is still open, close it on failure.
         if (getState().panel?.type === 'changelog') {
             dispatch(actions.closePanel());
         }
-        // Do not update settings on failure.
     } finally {
         if (!isPluginUnloading(container)) {
             isFetchingChangelog = false;
         }
+    }
+};
+
+export const processQueuedChangelogRequest = (): AppThunk => (dispatch, _getState, container) => {
+    if (isPluginUnloading(container)) return;
+    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
+
+    const request = plugin.queuedChangelogRequest;
+    if (request) {
+        // Clear the queue BEFORE dispatching to prevent potential infinite loops.
+        // The thunk itself will re-queue if necessary.
+        plugin.queuedChangelogRequest = null; 
+        dispatch(showChangelogPanel(request));
     }
 };
 
@@ -154,52 +198,6 @@ export const viewVersionInPanel = (version: VersionHistoryEntry): AppThunk => as
         if (finalState.status === AppStatus.READY) {
              dispatch(actions.setProcessing(false));
         }
-    }
-};
-
-export const viewVersionInNewTab = (version: VersionHistoryEntry): AppThunk => async (_dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
-    const uiService = container.get<UIService>(TYPES.UIService);
-    const app = container.get<App>(TYPES.App);
-    const state = getState();
-
-    if (state.status !== AppStatus.READY || !state.noteId || !state.file) return;
-    
-    try {
-        if (state.noteId !== version.noteId) {
-            uiService.showNotice("VC: Cannot open this version in a new tab because the note context changed.");
-            return;
-        }
-        const content = await versionManager.getVersionContent(state.noteId, version.id);
-
-        const stateAfterFetch = getState();
-        if (isPluginUnloading(container) || stateAfterFetch.status !== AppStatus.READY || stateAfterFetch.noteId !== state.noteId || !stateAfterFetch.file) {
-            return;
-        }
-
-        if (content === null) {
-            uiService.showNotice("VC: Error: Could not load version content for new tab.");
-            return;
-        }
-        const { file, noteId: currentNoteId } = stateAfterFetch; 
-        
-        const leaf = app.workspace.getLeaf('tab'); 
-        await leaf.setViewState({
-            type: VIEW_TYPE_VERSION_PREVIEW,
-            active: true,
-            state: { 
-                version,
-                content,
-                notePath: file.path,
-                noteName: file.basename,
-                noteId: currentNoteId,
-            }
-        });
-        app.workspace.revealLeaf(leaf);
-    } catch (error) {
-        console.error("Version Control: Error opening version in new tab.", error);
-        uiService.showNotice("VC: Failed to open version in a new tab. Check the console for details.");
     }
 };
 
