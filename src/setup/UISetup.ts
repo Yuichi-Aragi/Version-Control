@@ -1,10 +1,8 @@
 import { Plugin, WorkspaceLeaf, MarkdownView } from 'obsidian';
 import type { AppStore } from '../state/store';
 import { thunks } from '../state/thunks';
-import { VIEW_TYPE_VERSION_CONTROL, VIEW_TYPE_VERSION_PREVIEW, VIEW_TYPE_VERSION_DIFF } from '../constants';
+import { VIEW_TYPE_VERSION_CONTROL } from '../constants';
 import { VersionControlView } from '../ui/version-control-view';
-import { VersionPreviewView } from '../ui/version-preview-view';
-import { VersionDiffView } from '../ui/version-diff-view';
 
 /**
  * Registers all custom views with Obsidian.
@@ -15,14 +13,6 @@ export function registerViews(plugin: Plugin, store: AppStore): void {
     plugin.registerView(
         VIEW_TYPE_VERSION_CONTROL,
         (leaf) => new VersionControlView(leaf, store, plugin.app)
-    );
-    plugin.registerView(
-        VIEW_TYPE_VERSION_PREVIEW,
-        (leaf) => new VersionPreviewView(leaf, store, plugin.app)
-    );
-    plugin.registerView(
-        VIEW_TYPE_VERSION_DIFF,
-        (leaf) => new VersionDiffView(leaf, store, plugin.app)
     );
 }
 
