@@ -106,7 +106,7 @@ export const appSlice = createSlice({
             // Changelog is special: it's not note-dependent and can be shown
             // as soon as the view is available, even in a placeholder or loading state.
             if (panelToOpen.type === 'changelog') {
-                if (state.status === AppStatus.READY || state.status === AppStatus.PLACEHOLDER || state.status === AppStatus.LOADING) {
+                if (state.status === AppStatus.INITIALIZING || state.status === AppStatus.READY || state.status === AppStatus.PLACEHOLDER || state.status === AppStatus.LOADING) {
                     state.panel = panelToOpen;
                 }
                 // We don't reset other state fields here, as the changelog is an overlay.
@@ -124,7 +124,7 @@ export const appSlice = createSlice({
         },
         closePanel(state) {
             // A panel can be closed in any state where it could be open.
-            if (state.status === AppStatus.READY || state.status === AppStatus.PLACEHOLDER || state.status === AppStatus.LOADING) {
+            if (state.status === AppStatus.INITIALIZING || state.status === AppStatus.READY || state.status === AppStatus.PLACEHOLDER || state.status === AppStatus.LOADING) {
                 state.panel = null;
             }
         },
