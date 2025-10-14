@@ -179,7 +179,6 @@
  * TARGETS:
  * - The main virtualized history list (via a stable `data-virtuoso-scroller` attribute).
  * - All panel content areas within the main view.
- * - All content areas in the dedicated tab views.
  * - Nested scrollable elements like code blocks and tables.
  */
 
@@ -194,13 +193,7 @@ body .version-control-view.version-control-view .v-inline-panel,
 body .version-control-view.version-control-view .v-version-content-preview,
 body .version-control-view.version-control-view .v-diff-content-wrapper,
 body .version-control-view.version-control-view .v-version-content-preview pre,
-body .version-control-view.version-control-view .v-version-content-preview .table-wrapper,
-body .version-preview-view.version-preview-view .v-tab-view-content,
-body .version-preview-view.version-preview-view .v-version-content-preview,
-body .version-preview-view.version-preview-view .v-version-content-preview pre,
-body .version-preview-view.version-preview-view .v-version-content-preview .table-wrapper,
-body .version-diff-view.version-diff-view .v-tab-view-content,
-body .version-diff-view.version-diff-view .v-diff-content-wrapper {
+body .version-control-view.version-control-view .v-version-content-preview .table-wrapper {
     scrollbar-width: none;
     -ms-overflow-style: none;
 }
@@ -216,13 +209,7 @@ body .version-control-view.version-control-view .v-inline-panel::-webkit-scrollb
 body .version-control-view.version-control-view .v-version-content-preview::-webkit-scrollbar,
 body .version-control-view.version-control-view .v-diff-content-wrapper::-webkit-scrollbar,
 body .version-control-view.version-control-view .v-version-content-preview pre::-webkit-scrollbar,
-body .version-control-view.version-control-view .v-version-content-preview .table-wrapper::-webkit-scrollbar,
-body .version-preview-view.version-preview-view .v-tab-view-content::-webkit-scrollbar,
-body .version-preview-view.version-preview-view .v-version-content-preview::-webkit-scrollbar,
-body .version-preview-view.version-preview-view .v-version-content-preview pre::-webkit-scrollbar,
-body .version-preview-view.version-preview-view .v-version-content-preview .table-wrapper::-webkit-scrollbar,
-body .version-diff-view.version-diff-view .v-tab-view-content::-webkit-scrollbar,
-body .version-diff-view.version-diff-view .v-diff-content-wrapper::-webkit-scrollbar {
+body .version-control-view.version-control-view .v-version-content-preview .table-wrapper::-webkit-scrollbar {
     display: none;
 }
 
@@ -238,14 +225,6 @@ body .version-control-view.version-control-view button,
 body .version-control-view.version-control-view .clickable-icon,
 body .version-control-view.version-control-view .is-clickable,
 body .version-control-view.version-control-view [role="button"],
-body .version-control-view.version-control-view .v-history-entry,
-body .version-preview-view.version-preview-view button,
-body .version-preview-view.version-preview-view .clickable-icon,
-body .version-preview-view.version-preview-view .is-clickable,
-body .version-preview-view.version-preview-view [role="button"],
-body .version-diff-view.version-diff-view button,
-body .version-diff-view.version-diff-view .clickable-icon,
-body .version-diff-view.version-diff-view .is-clickable,
-body .version-diff-view.version-diff-view [role="button"] {
+body .version-control-view.version-control-view .v-history-entry {
     -webkit-tap-highlight-color: transparent;
 }

@@ -1,3 +1,5 @@
+/* src/styles/panels.css */
+
 /* Panel Overlay System */
 .v-panel-container {
     position: absolute;
@@ -239,10 +241,12 @@
     display: flex;
     align-items: center;
     gap: var(--size-4-3);
-    padding: var(--size-4-3) var(--size-4-4) var(--size-4-2);
+    padding: var(--size-4-3) var(--size-4-2) var(--size-4-2);
     border-bottom: 1px solid var(--background-modifier-border);
     flex-shrink: 0;
     position: relative;
+    min-height: var(--input-height);
+    box-sizing: border-box;
 }
 .v-panel-header h3 {
     margin: 0;
@@ -272,6 +276,114 @@
 .v-panel-close:hover {
     transform: scale(1.1);
 }
+
+/* --- Panel Search Bar --- */
+.v-panel-header-content,
+.v-panel-search-bar-container {
+    position: absolute;
+    width: calc(100% - var(--size-4-2) * 2);
+    top: 50%;
+    left: var(--size-4-2);
+    display: flex;
+    align-items: center;
+    transform: translateY(-50%);
+    transition: opacity 0.2s ease-in-out;
+}
+.v-panel-header-content {
+    justify-content: space-between;
+    opacity: 1;
+    pointer-events: auto;
+    z-index: 1;
+}
+.v-panel-search-bar-container {
+    gap: var(--size-4-2);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 2;
+}
+.v-panel-header.is-searching .v-panel-header-content {
+    opacity: 0;
+    pointer-events: none;
+}
+.v-panel-header.is-searching .v-panel-search-bar-container {
+    opacity: 1;
+    pointer-events: auto;
+}
+.v-panel-search-bar-container .v-search-input-wrapper {
+    flex-grow: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+.v-panel-search-bar-container .v-search-icon {
+    position: absolute;
+    left: var(--size-4-2);
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    z-index: 2;
+    cursor: pointer;
+    padding: var(--size-4-1);
+    border-radius: var(--radius-s);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+.v-panel-search-bar-container .v-search-icon:hover {
+    background-color: var(--background-modifier-hover);
+    color: var(--text-error);
+}
+.v-panel-search-bar-container input[type="search"] {
+    width: 100%;
+    padding-left: calc(var(--size-4-2) + var(--icon-size) + var(--size-4-2));
+    padding-right: calc(var(--size-4-2) * 2 + var(--icon-size) * 2);
+    background-color: transparent;
+    border: none;
+    border-bottom: 1px solid var(--background-modifier-border);
+    border-radius: 0;
+    box-shadow: none;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+.v-panel-search-bar-container input[type="search"]:focus {
+    border-color: var(--interactive-accent);
+    box-shadow: none;
+}
+.v-panel-search-bar-container .v-search-input-buttons {
+    position: absolute;
+    right: var(--size-4-2);
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-1);
+}
+.v-panel-search-bar-container .clickable-icon {
+    color: var(--text-muted);
+}
+.v-panel-search-bar-container .clickable-icon:hover {
+    background-color: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+.v-panel-search-bar-container .clickable-icon.is-active {
+    background-color: var(--color-purple-alpha);
+    color: var(--color-purple);
+}
+
+/* NEW: Styles for search navigation */
+.v-search-match-count {
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+    padding: 0 var(--size-4-1);
+    user-select: none;
+}
+.v-panel-search-bar-container .v-search-nav-button:disabled {
+    color: var(--text-faint);
+    cursor: not-allowed;
+    background-color: transparent;
+}
+
 
 .v-confirmation-panel { 
     text-align: center;
@@ -320,6 +432,25 @@
     font-size: var(--font-ui-smaller);
     line-height: 1.5;
     min-height: 1.5em; /* For empty lines */
+}
+
+/* NEW: Styles for search result highlighting */
+.v-version-content-preview mark,
+.v-diff-content-wrapper mark {
+    background-color: var(--text-highlight-bg);
+    color: inherit;
+    border-radius: var(--radius-s);
+    box-shadow: 0 0 0 1px var(--text-highlight-bg);
+    transition: background-color 0.3s ease, box-shadow 0.3s ease;
+    will-change: background-color, box-shadow;
+}
+
+/* NEW: Style for the currently active search match */
+.v-version-content-preview mark.is-active-match,
+.v-diff-content-wrapper mark.is-active-match {
+    background-color: var(--color-purple-alpha);
+    color: var(--color-purple);
+    box-shadow: 0 0 0 2px var(--color-purple-alpha);
 }
 
 
