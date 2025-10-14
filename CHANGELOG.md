@@ -1,6 +1,6 @@
 ***
 
-**Version: 1.9.19**
+**Version: 1.9.20**
 
 #### ✨ New Features
 
