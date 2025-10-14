@@ -135,17 +135,6 @@ export interface DiffRequest {
     content2: string;
 }
 
-/** State for displaying a diff in a new tab view. */
-export interface DiffViewDisplayState {
-    version1: VersionHistoryEntry;
-    version2: DiffTarget;
-    diffChanges: Change[];
-    noteName: string;
-    notePath: string;
-    content1: string;
-    content2: string;
-}
-
 // --- Comlink Worker API ---
 /**
  * Defines the API exposed by the diff web worker.

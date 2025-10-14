@@ -20,7 +20,7 @@ import type { QueueService } from './services/queue-service';
 import { DEFAULT_SETTINGS } from './constants';
 import type { CentralManifest, VersionControlSettings } from './types';
 import type { PluginEvents } from './core/plugin-events';
-import { AppStatus } from './state/state';
+import { AppStatus, type AppState } from './state/state';
 import { compareVersions } from './utils/versions';
 import { VersionControlSettingTab } from './ui/settings-tab';
 
@@ -61,6 +61,10 @@ export default class VersionControlPlugin extends Plugin {
     private _initialized: boolean = false;
     private _unloadPromise: Promise<void> | null = null;
 
+    // --- Changelog Queue ---
+    /** Holds a request to show the changelog panel if the UI is not ready. */
+    public queuedChangelogRequest: { forceRefresh: boolean; isManualRequest: boolean } | null = null;
+
     // Getter for isUnloading with type safety
     public get isUnloading(): boolean {
         return this._isUnloading;
@@ -87,6 +91,8 @@ export default class VersionControlPlugin extends Plugin {
         }
 
         this.isUnloading = false; // Reset the guard flag on every load
+        this.queuedChangelogRequest = null; // Reset queue on every load
+
         try {
             // Load settings with enhanced error handling
             await this.loadSettings();
@@ -105,6 +111,8 @@ export default class VersionControlPlugin extends Plugin {
             }
 
             this.store = this.container.get<AppStore>(TYPES.Store);
+            this.register(this.store.subscribe(this.handleStoreChange.bind(this)));
+
             this.cleanupManager = this.container.get<CleanupManager>(TYPES.CleanupManager);
             const uiService = this.container.get<UIService>(TYPES.UIService);
             const manifestManager = this.container.get<ManifestManager>(TYPES.ManifestManager);
@@ -180,6 +188,7 @@ export default class VersionControlPlugin extends Plugin {
         try {
             // 1. Cancel any pending debounced operations to prevent them from firing during or after unload.
             this.cancelDebouncedOperations();
+            this.queuedChangelogRequest = null;
 
             // 2. Ensure any critical, queued file operations are completed before shutdown.
             await this.completePendingOperations();
@@ -219,6 +228,7 @@ export default class VersionControlPlugin extends Plugin {
             }
 
             // Merge defaults with loaded data. This handles migrations and new settings gracefully.
+            // The version from loadedData is preserved here, as `...settingsData` overwrites `...DEFAULT_SETTINGS`.
             this.settings = {
                 ...DEFAULT_SETTINGS,
                 ...settingsData,
@@ -229,10 +239,10 @@ export default class VersionControlPlugin extends Plugin {
                 },
             };
             
-            // Stamp the settings file with the current plugin version for future migrations.
-            this.settings.version = this.manifest.version;
+            // The plugin version should only be updated after the changelog is successfully shown.
+            // Stamping it here would prevent the update check from working correctly.
 
-            // Save back immediately to ensure the data on disk is in the latest format.
+            // Save back immediately to ensure the data on disk is in the latest format (e.g., new settings are added).
             await this.saveSettings();
         } catch (error) {
             console.error("Version Control: Failed to load settings", error);
@@ -344,13 +354,36 @@ export default class VersionControlPlugin extends Plugin {
             const savedVersion = this.settings.version || '0.0.0';
 
             if (compareVersions(currentPluginVersion, savedVersion) > 0) {
-                // This is a new install or an update.
-                // The thunk is now responsible for updating the version upon successful display.
-                this.store.dispatch(thunks.showChangelogPanel({ forceRefresh: true }));
+                // This is an automatic request on startup.
+                this.store.dispatch(thunks.showChangelogPanel({ forceRefresh: true, isManualRequest: false }));
             }
         } catch (error) {
             console.error("Version Control: Update check failed", error);
             // Don't throw here as this is not critical
+        }
+    }
+
+    private handleStoreChange(): void {
+        if (this.isUnloading || !this.queuedChangelogRequest) {
+            return;
+        }
+    
+        const currentState = this.store.getState();
+    
+        const isChangelogReady = (state: AppState): boolean => {
+            if (!state) return false;
+            const isViewStable = state.status === AppStatus.INITIALIZING || state.status === AppStatus.READY || state.status === AppStatus.PLACEHOLDER || state.status === AppStatus.LOADING;
+            const isPanelAvailable = !state.panel || state.panel.type === 'changelog';
+            return isViewStable && isPanelAvailable;
+        };
+    
+        if (isChangelogReady(currentState)) {
+            // Use a timeout to avoid dispatching during a dispatch cycle.
+            setTimeout(() => {
+                if (this.isUnloading) return;
+                // processQueuedChangelogRequest will clear the queue, so this only runs once per queued item.
+                this.store.dispatch(thunks.processQueuedChangelogRequest());
+            }, 0);
         }
     }
 

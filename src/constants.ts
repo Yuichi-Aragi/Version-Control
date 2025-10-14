@@ -1,8 +1,6 @@
 import type { VersionControlSettings } from "./types";
 
 export const VIEW_TYPE_VERSION_CONTROL = "version-control-view";
-export const VIEW_TYPE_VERSION_PREVIEW = "version-preview-view";
-export const VIEW_TYPE_VERSION_DIFF = "version-diff-view";
 export const DEFAULT_DB_PATH = ".versiondb";
 export const CHANGELOG_URL = "https://raw.githubusercontent.com/Yuichi-Aragi/Version-Control/main/CHANGELOG.md";
 export const DEFAULT_BRANCH_NAME = "main";
