@@ -1,5 +1,17 @@
 ***
 
+**Version: 1.9.21**
+
+#### ✨ New Features
+
+*   **Bases Support:** Added support for bases.
+
+#### 🎨 Improvements & UX
+
+*   **UI/UX Polish:** Improved various UI/UX elements for a better user experience.
+
+***
+
 **Version: 1.9.20**
 
 #### ✨ New Features
