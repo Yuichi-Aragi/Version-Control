@@ -1,4 +1,4 @@
-import { moment, App, MarkdownView, type Editor } from 'obsidian';
+import { moment, App, MarkdownView } from 'obsidian';
 import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
 import type { VersionHistoryEntry, DiffTarget, DiffType } from '../../types';

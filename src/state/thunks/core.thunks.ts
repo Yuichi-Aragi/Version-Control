@@ -38,7 +38,10 @@ export const loadEffectiveSettingsForNote = (noteId: string | null): AppThunk =>
             if (isUnderGlobalInfluence) {
                 effectiveSettings = { ...globalSettings, isGlobal: true };
             } else {
-                effectiveSettings = { ...globalSettings, ...perBranchSettings, isGlobal: false };
+                const definedBranchSettings = Object.fromEntries(
+                    Object.entries(perBranchSettings ?? {}).filter(([, v]) => v !== undefined)
+                );
+                effectiveSettings = { ...globalSettings, ...definedBranchSettings, isGlobal: false };
             }
         } catch (error) {
             console.error(`VC: Could not load per-note settings for note ${noteId}. Using global settings.`, error);
@@ -229,7 +232,7 @@ export const handleMetadataChange = (file: TFile, cache: CachedMetadata): AppThu
 
 export const handleFileRename = (file: TFile, oldPath: string): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
-    if (file.extension !== 'md') return;
+    if (file.extension !== 'md' && file.extension !== 'base') return;
 
     const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);
@@ -252,7 +255,7 @@ export const handleFileRename = (file: TFile, oldPath: string): AppThunk => asyn
 
 export const handleFileDelete = (file: TFile): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
-    if (file.extension !== 'md') return;
+    if (file.extension !== 'md' && file.extension !== 'base') return;
     
     const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);

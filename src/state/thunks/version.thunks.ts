@@ -250,7 +250,10 @@ export const restoreVersion = (versionId: string): AppThunk => async (dispatch, 
             const perBranchSettings = currentBranch?.settings;
             const isUnderGlobalInfluence = perBranchSettings?.isGlobal === true || perBranchSettings === undefined;
             if (!isUnderGlobalInfluence) {
-                effectiveSettings = { ...globalSettings, ...perBranchSettings };
+                const definedBranchSettings = Object.fromEntries(
+                    Object.entries(perBranchSettings ?? {}).filter(([, v]) => v !== undefined)
+                );
+                effectiveSettings = { ...globalSettings, ...definedBranchSettings };
             }
         } catch (e) { /* use global on error */ }
 
@@ -467,7 +470,10 @@ export const performAutoSave = (file: TFile): AppThunk => async (dispatch, getSt
         const perBranchSettings = currentBranch?.settings;
         const isUnderGlobalInfluence = perBranchSettings?.isGlobal === true || perBranchSettings === undefined;
         if (!isUnderGlobalInfluence) {
-            effectiveSettings = { ...globalSettings, ...perBranchSettings };
+            const definedBranchSettings = Object.fromEntries(
+                Object.entries(perBranchSettings ?? {}).filter(([, v]) => v !== undefined)
+            );
+            effectiveSettings = { ...globalSettings, ...definedBranchSettings };
         }
     } catch (e) { /* use global on error */ }
 
@@ -507,7 +513,10 @@ export const handleVaultSave = (file: TFile): AppThunk => async (dispatch, _getS
             const perBranchSettings = currentBranch?.settings;
             const isUnderGlobalInfluence = perBranchSettings?.isGlobal === true || perBranchSettings === undefined;
             if (!isUnderGlobalInfluence) {
-                effectiveSettings = { ...globalSettings, ...perBranchSettings };
+                const definedBranchSettings = Object.fromEntries(
+                    Object.entries(perBranchSettings ?? {}).filter(([, v]) => v !== undefined)
+                );
+                effectiveSettings = { ...globalSettings, ...definedBranchSettings };
             }
         }
     } catch (e) {

@@ -15,12 +15,13 @@ import { TYPES } from '../../types/inversify.types';
 import { isPluginUnloading } from './ThunkUtils';
 import type VersionControlPlugin from '../../main';
 import { initializeView, loadEffectiveSettingsForNote } from './core.thunks';
+import { VersionControlSettingsSchema } from '../../schemas';
 
 /**
  * Thunks for updating settings and handling export functionality.
  */
 
-export const updateGlobalSettings = (settingsUpdate: Partial<Pick<VersionControlSettings, 'autoRegisterNotes' | 'pathFilters' | 'noteIdFrontmatterKey' | 'keyUpdatePathFilters'>>): AppThunk => async (dispatch, _getState, container) => {
+export const updateGlobalSettings = (settingsUpdate: Partial<VersionControlSettings>): AppThunk => async (dispatch, _getState, container) => {
     if (isPluginUnloading(container)) return;
     const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
     const uiService = container.get<UIService>(TYPES.UIService);
@@ -28,6 +29,10 @@ export const updateGlobalSettings = (settingsUpdate: Partial<Pick<VersionControl
 
     try {
         const newGlobalSettings = { ...plugin.settings, ...settingsUpdate };
+        
+        // Validate before saving
+        VersionControlSettingsSchema.parse(newGlobalSettings);
+
         plugin.settings = newGlobalSettings;
         await plugin.saveSettings();
 
@@ -36,7 +41,7 @@ export const updateGlobalSettings = (settingsUpdate: Partial<Pick<VersionControl
         backgroundTaskManager.syncWatchMode();
     } catch (error) {
         console.error(`VC: Failed to update global settings.`, error);
-        uiService.showNotice("Failed to save global settings.", 5000);
+        uiService.showNotice("Failed to save global settings due to validation error.", 5000);
     }
 };
 
@@ -47,14 +52,12 @@ export const requestKeyUpdate = (newKeyRaw: string): AppThunk => (dispatch, _get
     const oldKey = plugin.settings.noteIdFrontmatterKey;
     const newKey = newKeyRaw.trim();
 
-    if (!newKey) {
-        uiService.showNotice("Frontmatter key cannot be empty.", 3000);
+    const validation = VersionControlSettingsSchema.shape.noteIdFrontmatterKey.safeParse(newKey);
+    if (!validation.success) {
+        uiService.showNotice(validation.error.issues[0]?.message ?? "Invalid frontmatter key.", 3000);
         return;
     }
-    if (newKey.includes(':')) {
-        uiService.showNotice("Frontmatter key cannot contain a colon.", 3000);
-        return;
-    }
+
     if (newKey === oldKey) {
         return;
     }
@@ -123,7 +126,7 @@ export const toggleGlobalSettings = (applyGlobally: boolean): AppThunk => async 
     }
 };
 
-export const updateSettings = (settingsUpdate: Partial<Omit<VersionControlSettings, 'databasePath' | 'centralManifest'>>): AppThunk => async (dispatch, getState, container) => {
+export const updateSettings = (settingsUpdate: Partial<VersionControlSettings>): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     const stateBeforeUpdate = getState();
     const uiService = container.get<UIService>(TYPES.UIService);
@@ -139,6 +142,14 @@ export const updateSettings = (settingsUpdate: Partial<Omit<VersionControlSettin
     const { noteId, file } = stateBeforeUpdate;
     const isUnderGlobalInfluence = stateBeforeUpdate.settings.isGlobal;
 
+    // Validate the proposed update against the schema
+    const validationResult = VersionControlSettingsSchema.partial().safeParse(settingsUpdate);
+    if (!validationResult.success) {
+        console.error("VC: Invalid settings update.", validationResult.error);
+        uiService.showNotice("Failed to save settings: Invalid data.", 5000);
+        return;
+    }
+
     if (file && (settingsUpdate.hasOwnProperty('autoSaveOnSaveInterval') || settingsUpdate.hasOwnProperty('autoSaveOnSave'))) {
         const debouncerInfo = plugin.autoSaveDebouncers.get(file.path);
         debouncerInfo?.debouncer.cancel();
@@ -149,18 +160,7 @@ export const updateSettings = (settingsUpdate: Partial<Omit<VersionControlSettin
 
     try {
         if (isUnderGlobalInfluence) {
-            const newGlobalSettings = { ...plugin.settings, ...settingsUpdate };
-            plugin.settings = newGlobalSettings;
-            await plugin.saveSettings();
-            if (noteId) {
-                await manifestManager.updateNoteManifest(noteId, (manifest) => {
-                    const branch = manifest.branches[manifest.currentBranch];
-                    if (branch) {
-                        if (!branch.settings) branch.settings = {};
-                        branch.settings.isGlobal = true;
-                    }
-                });
-            }
+            dispatch(updateGlobalSettings(settingsUpdate));
         } else {
             if (!noteId) {
                 throw new Error("Cannot save per-note settings without an active note ID.");
@@ -196,11 +196,13 @@ export const renameDatabasePath = (newPathRaw: string): AppThunk => async (dispa
 
     const oldPath = plugin.settings.databasePath;
     const newPath = normalizePath(newPathRaw.trim());
-
-    if (!newPath) {
-        uiService.showNotice("Database path cannot be empty.");
+    
+    const validation = VersionControlSettingsSchema.shape.databasePath.safeParse(newPath);
+    if (!validation.success) {
+        uiService.showNotice(validation.error.issues[0]?.message ?? "Invalid database path.", 3000);
         return;
     }
+
     if (oldPath === newPath) {
         return;
     }
@@ -445,6 +447,7 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: '
         const versionData: VersionData = {
             id: versionEntry.id,
             noteId: versionEntry.noteId,
+            notePath: versionEntry.notePath,
             branchName: versionEntry.branchName,
             versionNumber: versionEntry.versionNumber,
             timestamp: versionEntry.timestamp,
