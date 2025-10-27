@@ -61,7 +61,11 @@ export class PathService {
 
         try {
             const dbRoot = this.getDbRoot();
-            const rawPath = `${dbRoot}/${this.sanitizePathComponent(noteId)}`;
+            let sanitizedNoteId = this.sanitizePathComponent(noteId);
+            if (sanitizedNoteId.endsWith('.base')) {
+                sanitizedNoteId = sanitizedNoteId.slice(0, -5);
+            }
+            const rawPath = `${dbRoot}/${sanitizedNoteId}`;
             const normalized = normalizePath(rawPath);
 
             if (!normalized || typeof normalized !== 'string') {
