@@ -21,6 +21,7 @@ export const ActionBar: FC = () => {
         watchModeCountdown, 
         history, 
         panel,
+        file,
     } = useAppSelector(state => ({
         status: state.status,
         isSearchActive: state.isSearchActive,
@@ -33,6 +34,7 @@ export const ActionBar: FC = () => {
         watchModeCountdown: state.watchModeCountdown,
         history: state.history,
         panel: state.panel,
+        file: state.file,
     }));
 
     const [localQuery, setLocalQuery] = useState(globalSearchQuery);
@@ -102,9 +104,9 @@ export const ActionBar: FC = () => {
     }, [dispatch]);
 
     const handleBranchClick = useCallback(() => {
-        if (status !== AppStatus.READY || isBusy) return;
+        if (status !== AppStatus.READY || isBusy || file?.extension === 'base') return;
         dispatch(thunks.showBranchSwitcher());
-    }, [dispatch, status, isBusy]);
+    }, [dispatch, status, isBusy, file]);
 
     useEffect(() => {
         if (isSearchActive) {
@@ -142,7 +144,7 @@ export const ActionBar: FC = () => {
                         className="clickable-icon"
                         aria-label="Switch branch"
                         onClick={handleBranchClick}
-                        disabled={isBusy}
+                        disabled={isBusy || file?.extension === 'base'}
                     >
                         <Icon name="menu" />
                     </button>

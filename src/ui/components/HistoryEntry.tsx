@@ -9,63 +9,7 @@ import { actions } from '../../state/appSlice';
 import { versionActions } from '../VersionActions';
 import { Icon } from './Icon';
 import type { AppStore } from '../../state/store';
-import { useRelativeTime } from '../hooks/useRelativeTime';
-
-/** Defensive timestamp formatter for display text */
-function formatTimestampSafe(raw: unknown, useRelative: boolean, relativeText: string): string {
-    if (useRelative && relativeText) return relativeText;
-    try {
-        // Justification for `as any`: The 'moment' object from Obsidian's API is a callable
-        // function, but its type definition is not always correctly inferred as such by TypeScript.
-        // This assertion bypasses the static check. The surrounding try/catch block and explicit
-        // validation provide runtime safety against unexpected failures or invalid moment objects.
-        const m = (moment as any)(raw);
-        if (m && typeof m.format === 'function' && m.isValid()) {
-            return m.format('YYYY-MM-DD HH:mm');
-        }
-    } catch {
-        // Fallthrough on moment error
-    }
-    try {
-        const d = new Date(String(raw));
-        if (!Number.isNaN(d.getTime())) return d.toISOString();
-    } catch {
-        /* swallow */
-    }
-    return '';
-}
-
-/** Defensive timestamp formatter for tooltips (always absolute) */
-function formatAbsoluteTimestamp(raw: unknown, formatStr: string): string {
-    if (raw === null || typeof raw === 'undefined') {
-        return '';
-    }
-    try {
-        // Justification for `as any`: The 'moment' object from Obsidian's API is a callable
-        // function, but its type definition is not always correctly inferred as such by TypeScript.
-        // This assertion bypasses the static check. The surrounding try/catch block and explicit
-        // validation provide runtime safety against unexpected failures or invalid moment objects.
-        const m = (moment as any)(raw);
-        if (m && typeof m.format === 'function' && m.isValid()) {
-            return m.format(formatStr);
-        }
-    } catch {
-        // Fallthrough on moment error
-    }
-    // Fallback for non-moment-compatible formats
-    try {
-        const d = new Date(String(raw));
-        if (!Number.isNaN(d.getTime())) {
-            // Provide a reasonable fallback if moment fails
-            return d.toLocaleString();
-        }
-    } catch {
-        // Fallthrough on Date error
-    }
-    // Last resort, return the raw value as a string
-    return String(raw);
-}
-
+import { useTime } from '../contexts/TimeContext';
 
 interface HistoryEntryProps {
     version: VersionHistoryEntryType;
@@ -80,6 +24,7 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
         namingVersionId: state.namingVersionId,
         highlightedVersionId: state.highlightedVersionId,
     }));
+    const { now } = useTime();
 
     const nameInputRef = useRef<HTMLInputElement | null>(null);
     const blurSaveTimerRef = useRef<number | null>(null);
@@ -98,7 +43,6 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
     }, []);
 
     const handleEntryClick = useCallback((e: MouseEvent<HTMLDivElement>) => {
-        // Keep click behavior minimal and defensive
         try {
             e.preventDefault();
             e.stopPropagation();
@@ -107,7 +51,6 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
     }, [dispatch, version]);
 
     const handleContextMenu = useCallback((e: MouseEvent<HTMLDivElement>) => {
-        // Allow normal input behavior when interacting with the name input
         if (e.target instanceof HTMLInputElement && e.target.classList.contains('v-version-name-input')) return;
 
         try {
@@ -118,7 +61,6 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
     }, [dispatch, version]);
 
     const handleKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
-        // Accessible keyboard support: Enter/Space opens context menu
         if (e.key === 'Enter' || e.key === ' ') {
             try {
                 e.preventDefault();
@@ -138,24 +80,18 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
             const rawValue = String(el.value ?? '').trim().slice(0, MAX_NAME_LENGTH);
             const currentName = String(version.name ?? '');
             if (rawValue !== currentName) {
-                // Only dispatch if changed
                 dispatch(thunks.updateVersionDetails(version.id, rawValue));
             } else {
                 dispatch(actions.stopVersionEditing());
             }
         } catch (err) {
-            // swallow to avoid bubbling to React
-            // eslint-disable-next-line no-console
             console.error('HistoryEntry.saveName error:', err);
             dispatch(actions.stopVersionEditing());
         }
     }, [dispatch, version]);
 
     const handleNameInputBlur = useCallback(() => {
-        // Use a short delay to allow click events on surrounding controls to be handled first.
-        // Timer is cleared on unmount to avoid setting state when unmounted.
         if (blurSaveTimerRef.current !== null) clearTimeout(blurSaveTimerRef.current);
-        // Using window.setTimeout so we can clear with window.clearTimeout in cleanup
         blurSaveTimerRef.current = window.setTimeout(() => {
             blurSaveTimerRef.current = null;
             if (isMountedRef.current) saveName();
@@ -166,7 +102,6 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
         e.stopPropagation();
         if (e.key === 'Enter') {
             e.preventDefault();
-            // blur will call saveName via timer
             nameInputRef.current?.blur();
         } else if (e.key === 'Escape') {
             e.preventDefault();
@@ -176,7 +111,6 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
 
     useEffect(() => {
         if (isNamingThisVersion && nameInputRef.current) {
-            // Defer focus to next event loop for safety
             const input = nameInputRef.current;
             const id = window.setTimeout(() => {
                 try {
@@ -190,20 +124,23 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
                 window.clearTimeout(id);
             };
         }
-        return; // explicit return
+        return;
     }, [isNamingThisVersion]);
 
-    // compute timestamp text defensively
-    const timestampValue = useMemo(() => {
-        const t = new Date(String(version.timestamp)).getTime();
-        // The hook validates, but providing a stable invalid value is good practice.
-        // 0 is a safe invalid value that isValidTimestamp will reject.
-        return Number.isFinite(t) ? t : 0;
-    }, [version.timestamp]);
-    const relativeTimestamp = useRelativeTime(timestampValue);
-    const timestampText = formatTimestampSafe(version.timestamp, Boolean(settings?.useRelativeTimestamps), relativeTimestamp);
+    const { timestampText, tooltipTimestamp } = useMemo(() => {
+        const m = (moment as any)(version.timestamp);
+        if (!m.isValid()) {
+            return { timestampText: 'Invalid date', tooltipTimestamp: 'Invalid date' };
+        }
 
-    // Guard versionActions usage: it's an array of action descriptors (defensive)
+        // The `now` dependency from useTime() ensures this memo re-evaluates periodically
+        // for live relative timestamp updates.
+        const text = settings?.useRelativeTimestamps ? m.fromNow() : m.format('YYYY-MM-DD HH:mm');
+        const tooltip = m.format('LLLL');
+        
+        return { timestampText: text, tooltipTimestamp: tooltip };
+    }, [version.timestamp, settings?.useRelativeTimestamps, now]);
+
     const safeActions = Array.isArray(versionActions) ? versionActions : [];
 
     return (
@@ -247,7 +184,7 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
                     </div>
                 )}
 
-                <span className="v-version-timestamp" title={formatAbsoluteTimestamp(version.timestamp, 'LLLL')}>
+                <span className="v-version-timestamp" title={tooltipTimestamp}>
                     {timestampText}
                 </span>
             </div>
@@ -270,15 +207,11 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
                             e.stopPropagation();
                             try {
                                 if (typeof action.actionHandler === 'function') {
-                                    // Be defensive about the handler signature
                                     action.actionHandler(version, { dispatch } as unknown as AppStore);
                                 } else {
-                                    // eslint-disable-next-line no-console
                                     console.warn('HistoryEntry: action missing handler', action);
                                 }
                             } catch (err) {
-                                // don't let action exceptions bubble to our UI
-                                // eslint-disable-next-line no-console
                                 console.error('HistoryEntry: action handler threw', err);
                             }
                         };
