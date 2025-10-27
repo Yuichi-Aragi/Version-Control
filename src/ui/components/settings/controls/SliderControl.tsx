@@ -8,50 +8,11 @@ import {
   useMemo,
   type ChangeEvent,
 } from 'react';
+import { debounce, type Debouncer } from 'obsidian';
+import { clamp } from 'lodash-es';
 import { validateNumber } from '../settingsUtils';
 
-/**
- * Small self-contained debouncer that guarantees `.cancel()` exists and
- * that only the last scheduled call actually runs (last-wins).
- */
-type SimpleDebouncer<F extends (...args: any[]) => void> = F & { cancel: () => void };
-
-function createDebouncer<F extends (...args: any[]) => void>(fn: F, wait = 150): SimpleDebouncer<F> {
-  let timer: number | null = null;
-  let lastArgs: any[] | null = null;
-
-  const debounced = ((...args: any[]) => {
-    lastArgs = args;
-    if (timer !== null) window.clearTimeout(timer);
-    timer = window.setTimeout(() => {
-      timer = null;
-      if (lastArgs) {
-        try {
-          fn(...(lastArgs as Parameters<F>));
-        } catch (err) {
-          // defensive logging only
-          // eslint-disable-next-line no-console
-          console.error('Debounced function threw:', err);
-        } finally {
-          lastArgs = null;
-        }
-      }
-    }, wait) as unknown as number;
-  }) as SimpleDebouncer<F>;
-
-  debounced.cancel = () => {
-    if (timer !== null) {
-      window.clearTimeout(timer);
-      timer = null;
-    }
-    lastArgs = null;
-  };
-
-  return debounced;
-}
-
 /* Helpers */
-const clamp = (v: number, a: number, b: number) => Math.min(Math.max(v, a), b);
 const safeNumber = (v: unknown, fallback = 0) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
@@ -93,7 +54,6 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
 
   const [effectiveMin, effectiveMax] = useMemo(() => {
     if (propMin <= propMax) return [propMin, propMax];
-    // eslint-disable-next-line no-console
     console.warn(`SliderControl: received min > max (${propMin} > ${propMax}). Swapping for safety.`);
     return [propMax, propMin];
   }, [propMin, propMax]);
@@ -109,7 +69,6 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
     try {
       return validateNumber(propValue, effectiveMin, effectiveMax);
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error('Invalid initial slider value, falling back to min:', err);
       return effectiveMin;
     }
@@ -131,22 +90,21 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
   const pendingNativeHandlersRef = useRef<{ move: EventListener; up: EventListener } | null>(null);
   const pointerIdRef = useRef<number | null>(null);
 
-  // Debouncer for live updates (last-wins). We keep one stable instance.
-  const debouncerRef = useRef<SimpleDebouncer<(v: number) => void> | null>(null);
-  if (!debouncerRef.current) {
-    debouncerRef.current = createDebouncer((v: number) => {
-      try {
-        const validated = validateNumber(v, effectiveMin, effectiveMax);
-        if (validated !== lastCommittedValueRef.current) {
-          latestOnFinalRef.current(validated);
-          lastCommittedValueRef.current = validated;
+  // Debouncer for live updates (last-wins).
+  const debouncer = useMemo(() => {
+    const debouncedFn: Debouncer<[number], void> = debounce((v: number) => {
+        try {
+            const validated = validateNumber(v, effectiveMin, effectiveMax);
+            if (validated !== lastCommittedValueRef.current) {
+                latestOnFinalRef.current(validated);
+                lastCommittedValueRef.current = validated;
+            }
+        } catch (err) {
+            console.error('Debounced commit error:', err);
         }
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error('Debounced commit error:', err);
-      }
-    }, 120); // slightly tighter for a snappy feel
-  }
+    }, 120);
+    return debouncedFn;
+  }, [effectiveMin, effectiveMax]);
 
   // Sync with external prop when not dragging
   useEffect(() => {
@@ -160,7 +118,6 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
         return validated;
       });
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error('Invalid slider prop value:', err);
     }
   }, [propValue, effectiveMin, effectiveMax]);
@@ -187,7 +144,7 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
       localValueRef.current = clamped;
       setLocalValue(clamped);
       // schedule a live debounced commit (last-wins)
-      debouncerRef.current?.(clamped);
+      debouncer(clamped);
     }
 
     // Update tooltip text & position via DOM for predictable 60fps
@@ -199,7 +156,6 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
           try {
             return formatter(localValueRef.current);
           } catch (err) {
-            // eslint-disable-next-line no-console
             console.error('Formatter threw:', err);
             return String(localValueRef.current);
           }
@@ -219,7 +175,6 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
         tooltip.style.left = `${offset}px`;
         tooltip.style.transform = 'translateX(-50%)';
       } catch (err) {
-        // eslint-disable-next-line no-console
         console.error('Tooltip DOM update error:', err);
       }
     }
@@ -233,7 +188,7 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
         // ignore
       }
     }
-  }, [effectiveMin, effectiveMax, propStep, formatter]);
+  }, [effectiveMin, effectiveMax, propStep, formatter, debouncer]);
 
   const scheduleRaf = useCallback(() => {
     if (rafScheduledRef.current == null) {
@@ -271,7 +226,7 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
     }
 
     // commit latest value immediately (cancel any pending debounced live update)
-    debouncerRef.current?.cancel();
+    debouncer.cancel?.();
     const final = localValueRef.current;
     try {
       const validated = validateNumber(final, effectiveMin, effectiveMax);
@@ -280,7 +235,6 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
         lastCommittedValueRef.current = validated;
       }
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error('Error onFinalChange at pointer up:', err);
     }
 
@@ -318,13 +272,12 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
 
     // Sync React state with final value (keeps component controlled)
     setLocalValue(localValueRef.current);
-  }, [effectiveMin, effectiveMax]);
+  }, [effectiveMin, effectiveMax, debouncer]);
 
   // Start dragging / pointerdown react handler
   const onPointerStart = useCallback((e: React.PointerEvent | React.MouseEvent | React.TouchEvent) => {
     if (disabled) return;
 
-    // unify: prevent default behaviors
     try {
       (e as any).preventDefault?.();
       (e as any).stopPropagation?.();
@@ -335,10 +288,8 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
     const slider = sliderRef.current;
     if (!slider) return;
 
-    // set dragging flags
     isDraggingRef.current = true;
     setIsDragging(true);
-    // capture pointer if available so user can pause without release
     if ('pointerId' in e) {
       try {
         pointerIdRef.current = (e as React.PointerEvent).pointerId;
@@ -350,7 +301,6 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
       pointerIdRef.current = null;
     }
 
-    // Determine starting clientX
     let clientX: number | null = null;
     if ('touches' in e) {
       const te = e as React.TouchEvent;
@@ -361,21 +311,16 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
 
     if (clientX != null) {
       lastClientXRef.current = clientX;
-      // compute initial frame synchronously for immediate feedback
       scheduleRaf();
     }
 
-    // Add native listeners (pointer preferred, fallback to mouse/touch)
     const move: EventListener = (ev: Event) => onPointerMoveNative(ev);
     const up: EventListener = (ev?: Event) => onPointerUpNative(ev);
 
     pendingNativeHandlersRef.current = { move, up };
 
-    // pointer events
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', up);
-
-    // fallback
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', up);
     document.addEventListener('touchmove', move, { passive: false } as AddEventListenerOptions);
@@ -389,22 +334,20 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
         const parsed = parseFloat(e.target.value);
         let value = validateNumber(parsed, effectiveMin, effectiveMax);
         value = snapToStep(value, propStep, effectiveMin);
-        // immediate updates for keyboard; we update state so the controlled input stays in sync
-        debouncerRef.current?.(value);
+        debouncer(value);
         setLocalValue(value);
         localValueRef.current = value;
       } catch (err) {
-        // eslint-disable-next-line no-console
         console.error('Invalid slider input (keyboard):', err);
       }
     },
-    [effectiveMin, effectiveMax, propStep]
+    [effectiveMin, effectiveMax, propStep, debouncer]
   );
 
   // Commit on blur (immediate final commit)
   const handleBlur = useCallback(() => {
     try {
-      debouncerRef.current?.cancel();
+      debouncer.cancel?.();
       const validated = validateNumber(localValueRef.current, effectiveMin, effectiveMax);
       if (validated !== lastCommittedValueRef.current) {
         latestOnFinalRef.current(validated);
@@ -412,15 +355,14 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
       }
       setLocalValue(localValueRef.current);
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error('Error committing on blur:', err);
     }
-  }, [effectiveMin, effectiveMax]);
+  }, [effectiveMin, effectiveMax, debouncer]);
 
   // Cleanup all listeners / timers on unmount
   useEffect(() => {
     return () => {
-      debouncerRef.current?.cancel();
+      debouncer.cancel?.();
       if (pendingNativeHandlersRef.current) {
         const { move, up } = pendingNativeHandlersRef.current;
         document.removeEventListener('pointermove', move);
@@ -436,20 +378,17 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
         rafScheduledRef.current = null;
       }
     };
-  }, []);
+  }, [debouncer]);
 
   const displayValue = useMemo(() => {
     try {
       return formatter ? formatter(localValue) : String(localValue);
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error('Error in formatter:', err);
       return String(localValue);
     }
   }, [formatter, localValue]);
 
-  // Render: tooltip mounted only while dragging (keeps DOM minimal otherwise).
-  // ARIA attributes kept on the input for compatibility with earlier version.
   return (
     <div
       className="v-slider-container"
@@ -473,7 +412,6 @@ export const SliderControl: FC<SliderControlProps> = memo(function SliderControl
         aria-valuemax={effectiveMax}
         aria-valuenow={localValue}
         aria-label={`Slider control, current value: ${displayValue}`}
-        // tiny optimization: while dragging we keep pointer events enabled (native)
         style={{ touchAction: 'pan-y' }}
       />
       {isDragging && (
