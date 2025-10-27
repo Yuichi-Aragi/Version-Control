@@ -5,11 +5,11 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import * as Progress from '@radix-ui/react-progress';
 import type { VirtuosoHandle } from 'react-virtuoso';
 import clsx from 'clsx';
-import { useAppDispatch } from '../../hooks/useRedux';
+import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
 import { actions } from '../../../state/appSlice';
 import { thunks } from '../../../state/thunks';
 import type { DiffPanel as DiffPanelState } from '../../../state/state';
-import type { DiffType } from '../../../types';
+import type { Change, DiffType } from '../../../types';
 import { Icon } from '../Icon';
 import { VirtualizedDiff, processLineChanges, type DiffLineData } from '../shared/VirtualizedDiff';
 import { escapeRegExp } from '../../utils/strings';
@@ -18,23 +18,29 @@ interface DiffPanelProps {
     panelState: DiffPanelState;
 }
 
-const DIFF_OPTIONS: { type: DiffType; label: string }[] = [
-    { type: 'lines', label: 'Line Diff' },
-    { type: 'words', label: 'Word Diff' },
-    { type: 'chars', label: 'Character Diff' },
-    { type: 'json', label: 'JSON Diff' },
-];
+const getDiffOptions = (fileExtension: string | undefined) => {
+    const options = [
+        { type: 'lines' as DiffType, label: 'Line Diff' },
+        { type: 'words' as DiffType, label: 'Word Diff' },
+        { type: 'chars' as DiffType, label: 'Character Diff' },
+    ];
+    if (fileExtension === 'md') {
+        options.push({ type: 'json' as DiffType, label: 'JSON Diff' });
+    }
+    return options;
+};
 
 const DiffDropdown: FC<{
     currentType: DiffType;
     onSelect: (type: DiffType) => void;
     children: ReactNode;
-}> = ({ currentType, onSelect, children }) => (
+    fileExtension: string | undefined;
+}> = ({ currentType, onSelect, children, fileExtension }) => (
     <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>{children}</DropdownMenu.Trigger>
         <DropdownMenu.Portal>
             <DropdownMenu.Content className="v-diff-dropdown-content" sideOffset={5} collisionPadding={10}>
-                {DIFF_OPTIONS.map(({ type, label }) => (
+                {getDiffOptions(fileExtension).map(({ type, label }) => (
                     <DropdownMenu.Item key={type} className="v-diff-dropdown-item" onSelect={() => onSelect(type)}>
                         {label}
                         {currentType === type && <Icon name="check" />}
@@ -47,12 +53,17 @@ const DiffDropdown: FC<{
 
 export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
     const dispatch = useAppDispatch();
+    const { file } = useAppSelector(state => ({ file: state.file }));
     const { version1, version2, diffChanges, diffType, isReDiffing } = panelState;
 
     const virtuosoRef = useRef<VirtuosoHandle>(null);
+    const virtuosoScrollerRef = useRef<HTMLElement | null>(null);
     const headerRef = useRef<HTMLDivElement>(null);
     const highlightTimeoutRef = useRef<number | null>(null);
-    const unifiedViewRef = useRef<HTMLPreElement>(null);
+    const unifiedViewContainerRef = useRef<HTMLPreElement>(null);
+    const containerScrollerRef = useRef<HTMLDivElement>(null);
+    const lastScrollRatioRef = useRef<number | null>(null);
+    const isInitialLoadRef = useRef(true);
 
     const [isMetaCollapsed, setIsMetaCollapsed] = useState(true);
 
@@ -68,11 +79,21 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
     const [lines, setLines] = useState<DiffLineData[]>([]);
     useEffect(() => {
         if (diffChanges) {
-            setLines(processLineChanges(diffChanges));
+            setLines(processLineChanges(diffChanges as Change[]));
         } else {
             setLines([]);
         }
     }, [diffChanges]);
+
+    // When the versions being compared change, reset initial load flag.
+    useEffect(() => {
+        isInitialLoadRef.current = true;
+        lastScrollRatioRef.current = null;
+    }, [version1.id, version2.id]);
+
+    const handleSetVirtuosoScrollerRef = useCallback((scroller: HTMLElement | null) => {
+        virtuosoScrollerRef.current = scroller;
+    }, []);
 
     const handleLineClick = useCallback((clickedLineData: DiffLineData) => {
         let targetLineNum: number | undefined;
@@ -82,18 +103,14 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
         } else if (clickedLineData.type === 'remove') {
             const clickedLineIndex = lines.findIndex(l => l.key === clickedLineData.key);
             if (clickedLineIndex !== -1) {
-                // Find the line number of the last non-removed line *before* this one.
                 for (let i = clickedLineIndex - 1; i >= 0; i--) {
                     const prevLine = lines[i];
                     if (prevLine?.newLineNum !== undefined) {
-                        // The target is the line *after* the last known good line.
                         targetLineNum = prevLine.newLineNum + 1;
                         break;
                     }
                 }
             }
-            // If the removed block is at the very top, there's no preceding line.
-            // In this case, we scroll to the first line of the document.
             if (targetLineNum === undefined) {
                 targetLineNum = 1;
             }
@@ -120,8 +137,8 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
     }, [searchQuery, isCaseSensitive, diffChanges, diffType, lines]);
 
     useEffect(() => {
-        if (diffType !== 'lines' && searchQuery && unifiedViewRef.current) {
-            const marks = Array.from(unifiedViewRef.current.querySelectorAll('mark'));
+        if (diffType !== 'lines' && searchQuery && unifiedViewContainerRef.current) {
+            const marks = Array.from(unifiedViewContainerRef.current.querySelectorAll('mark'));
             setUnifiedMatches(marks);
         } else {
             setUnifiedMatches([]);
@@ -261,10 +278,75 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
     }, [dispatch]);
 
     const handleDiffTypeChange = useCallback((newType: DiffType) => {
-        if (newType !== diffType) {
-            dispatch(thunks.recomputeDiff(newType));
+        if (newType === diffType) return;
+
+        let scroller: HTMLElement | null = null;
+        if (diffType === 'lines') {
+            scroller = virtuosoScrollerRef.current;
+        } else {
+            scroller = containerScrollerRef.current;
         }
+
+        if (scroller && scroller.scrollHeight > 0) {
+            const ratio = scroller.scrollTop / (scroller.scrollHeight - scroller.clientHeight);
+            lastScrollRatioRef.current = Math.max(0, Math.min(1, ratio)); // Clamp between 0 and 1
+        } else {
+            lastScrollRatioRef.current = 0;
+        }
+
+        isInitialLoadRef.current = false;
+        dispatch(thunks.recomputeDiff(newType));
     }, [dispatch, diffType]);
+
+    useEffect(() => {
+        if (!diffChanges) return;
+
+        const timer = setTimeout(() => {
+            if (isInitialLoadRef.current) {
+                // This is the very first load of the diff panel. Scroll to the first change.
+                if (diffType === 'lines') {
+                    if (virtuosoRef.current && changedLineIndices.length > 0) {
+                        const firstChangeIndex = changedLineIndices[0];
+                        if (firstChangeIndex !== undefined) {
+                            virtuosoRef.current.scrollToIndex({ index: firstChangeIndex, align: 'start', behavior: 'auto' });
+                            setHighlightedIndex(firstChangeIndex);
+                            if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+                            highlightTimeoutRef.current = window.setTimeout(() => setHighlightedIndex(null), 1500);
+                        }
+                    }
+                } else {
+                    if (containerScrollerRef.current) {
+                        const firstChangeEl = containerScrollerRef.current.querySelector('.diff-add, .diff-remove');
+                        if (firstChangeEl) {
+                            firstChangeEl.scrollIntoView({ behavior: 'auto', block: 'center' });
+                        }
+                    }
+                }
+                isInitialLoadRef.current = false;
+            } else {
+                const savedRatio = lastScrollRatioRef.current;
+                if (savedRatio !== null) {
+                    let scroller: HTMLElement | null = null;
+                    if (diffType === 'lines') {
+                        scroller = virtuosoScrollerRef.current;
+                    } else {
+                        scroller = containerScrollerRef.current;
+                    }
+
+                    if (scroller) {
+                        const newScrollTop = savedRatio * (scroller.scrollHeight - scroller.clientHeight);
+                        if (diffType === 'lines' && virtuosoRef.current) {
+                            virtuosoRef.current.scrollTo({ top: newScrollTop, behavior: 'auto' });
+                        } else {
+                            scroller.scrollTop = newScrollTop;
+                        }
+                    }
+                }
+            }
+        }, 100);
+
+        return () => clearTimeout(timer);
+    }, [diffChanges, diffType, changedLineIndices]);
 
     const v1Label = version1.name ? `"${version1.name}" (V${version1.versionNumber})` : `Version ${version1.versionNumber}`;
     const v2Label = version2.id === 'current'
@@ -296,7 +378,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                             <button className="clickable-icon" aria-label="Search diff" title="Search diff" onClick={handleToggleSearch}>
                                 <Icon name="search" />
                             </button>
-                            <DiffDropdown currentType={diffType} onSelect={handleDiffTypeChange}>
+                            <DiffDropdown currentType={diffType} onSelect={handleDiffTypeChange} fileExtension={file?.extension}>
                                 <button className="clickable-icon v-diff-dropdown-trigger" aria-label="Change diff type" title="Change diff type" onClick={e => e.stopPropagation()}>
                                     <Icon name="git-commit-horizontal" />
                                 </button>
@@ -354,7 +436,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                                     <div className="v-meta-label">Compared (green, +): {v2Label} - {'versionNumber' in version2 ? (moment as any)(version2.timestamp).format('LLL') : 'Now'}</div>
                                 </div>
                             </div>
-                            <div className="v-diff-content-wrapper">
+                            <div className="v-diff-content-wrapper" ref={containerScrollerRef}>
                                 {isReDiffing && (
                                     <div className="v-diff-progress-overlay">
                                         <p>Calculating {diffType} diff...</p>
@@ -364,10 +446,11 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                                     </div>
                                 )}
                                 <VirtualizedDiff
-                                    changes={diffChanges}
+                                    changes={diffChanges as Change[]}
                                     diffType={diffType}
-                                    scrollerRef={virtuosoRef}
-                                    unifiedViewRef={unifiedViewRef}
+                                    virtuosoHandleRef={virtuosoRef}
+                                    setVirtuosoScrollerRef={handleSetVirtuosoScrollerRef}
+                                    unifiedViewContainerRef={unifiedViewContainerRef}
                                     highlightedIndex={highlightedIndex}
                                     searchQuery={searchQuery}
                                     isCaseSensitive={isCaseSensitive}

@@ -112,7 +112,7 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
         return;
     }, [isSearchActive]);
 
-    const shouldRenderMarkdown = (settings.renderMarkdownInPreview || localRenderMarkdown) && !isSearchActive;
+    const shouldRenderMarkdown = notePath.endsWith('.md') && (settings.renderMarkdownInPreview || localRenderMarkdown) && !isSearchActive;
 
     const handleClose = useCallback((e: React.MouseEvent) => {
         e.stopPropagation();
@@ -152,7 +152,7 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
                                 <button className="clickable-icon" aria-label="Search content" onClick={handleToggleSearch}>
                                     <Icon name="search" />
                                 </button>
-                                {!settings.renderMarkdownInPreview && (
+                                {notePath.endsWith('.md') && !settings.renderMarkdownInPreview && (
                                     <button className="v-action-btn v-preview-toggle-btn" aria-label="Toggle markdown rendering" onClick={toggleRenderMode}>
                                         <Icon name={localRenderMarkdown ? "code" : "book-open"} />
                                     </button>
