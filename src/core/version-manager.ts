@@ -1,4 +1,4 @@
-import { App, TFile, MarkdownView, TFolder, type FrontMatterCache } from 'obsidian';
+import { App, TFile, MarkdownView, TFolder, type FrontMatterCache, Notice, TAbstractFile } from 'obsidian';
 import { map, orderBy } from 'lodash-es';
 import { injectable, inject } from 'inversify';
 import { diffLines } from 'diff';
@@ -70,17 +70,10 @@ export class VersionManager {
         throw new Error(`Current branch "${branchName}" not found in manifest for note ${noteId}.`);
     }
 
-    const activeMarkdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-    let contentToSave: string;
-
-    if (activeMarkdownView?.file?.path === file.path) {
-        contentToSave = activeMarkdownView.editor.getValue();
-    } else {
-        if (!(await this.app.vault.adapter.exists(file.path))) {
-            throw new Error(`File to be saved does not exist at path: ${file.path}`);
-        }
-        contentToSave = await this.app.vault.adapter.read(file.path);
+    if (!(await this.app.vault.adapter.exists(file.path))) {
+        throw new Error(`File to be saved does not exist at path: ${file.path}`);
     }
+    const contentToSave = await this.app.vault.adapter.read(file.path);
 
     const latestContent = await this.versionContentRepo.getLatestVersionContent(noteId, noteManifest);
 
@@ -240,53 +233,56 @@ export class VersionManager {
 
   public async createDeviation(noteId: string, versionId: string, targetFolder: TFolder | null): Promise<TFile | null> {
     if (!noteId || !versionId) {
-      throw new Error('Invalid parameters for creating deviation.');
+        throw new Error('Invalid parameters for creating deviation.');
     }
-    
+
     const versionContent = await this.getVersionContent(noteId, versionId);
     if (versionContent === null) {
-      throw new Error('Could not load version content for deviation.');
+        throw new Error('Could not load version content for deviation.');
     }
 
     const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
     const originalFile = noteManifest ? this.app.vault.getAbstractFileByPath(noteManifest.notePath) : null;
     const originalTFile = originalFile instanceof TFile ? originalFile : null;
     const baseName = originalTFile?.basename || 'Untitled Version';
+    const extension = originalTFile?.extension || 'md';
 
     let parentPath = targetFolder?.isRoot() ? '' : targetFolder?.path ?? originalTFile?.parent?.path ?? '';
     if (parentPath === '/') {
-      parentPath = '';
+        parentPath = '';
     }
 
     const newFileNameBase = `${baseName} (from V${versionId.substring(0, 6)}...)`;
-    const newFilePath = await generateUniqueFilePath(this.app, newFileNameBase, parentPath);
+    const newFilePath = await generateUniqueFilePath(this.app, newFileNameBase, parentPath, extension);
 
     this.noteManager.addPendingDeviation(newFilePath);
 
     try {
-      const newFile = await this.app.vault.create(newFilePath, versionContent);
-      if (!newFile) {
-        throw new Error('Failed to create the new note file for deviation.');
-      }
+        const newFile = await this.app.vault.create(newFilePath, versionContent);
+        if (!newFile) {
+            throw new Error('Failed to create the new note file for deviation.');
+        }
 
-      try {
-        await this.app.fileManager.processFrontMatter(newFile, (fm: FrontMatterCache) => {
-          delete fm[this.noteIdKey];
-        });
-      } catch (fmError) {
-        console.error(`VC: Failed to remove vc-id from new deviation note "${newFilePath}". Trashing the file to prevent issues.`, fmError);
-        await this.app.vault.trash(newFile, true).catch((delErr) => {
-          console.error(`VC: CRITICAL: Failed to trash corrupted deviation file "${newFilePath}". Please delete it manually.`, delErr);
-        });
-        throw new Error(`Failed to create a clean deviation. The file could not be processed after creation.`);
-      }
+        if (extension === 'md') {
+            try {
+                await this.app.fileManager.processFrontMatter(newFile, (fm: FrontMatterCache) => {
+                    delete fm[this.noteIdKey];
+                });
+            } catch (fmError) {
+                console.error(`VC: Failed to remove vc-id from new deviation note "${newFilePath}". Trashing the file to prevent issues.`, fmError);
+                await this.app.vault.trash(newFile, true).catch((delErr) => {
+                    console.error(`VC: CRITICAL: Failed to trash corrupted deviation file "${newFilePath}". Please delete it manually.`, delErr);
+                });
+                throw new Error(`Failed to create a clean deviation. The file could not be processed after creation.`);
+            }
+        }
 
-      return newFile;
+        return newFile;
     } catch (error) {
-      console.error(`VC: Failed to create deviation for note ${noteId}, version ${versionId}.`, error);
-      throw error;
+        console.error(`VC: Failed to create deviation for note ${noteId}, version ${versionId}.`, error);
+        throw error;
     } finally {
-      this.noteManager.removePendingDeviation(newFilePath);
+        this.noteManager.removePendingDeviation(newFilePath);
     }
   }
 
@@ -351,6 +347,14 @@ export class VersionManager {
 
   // Branching logic
   public async createBranch(noteId: string, newBranchName: string): Promise<void> {
+    const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
+    if (noteManifest) {
+        const file = this.app.vault.getAbstractFileByPath(noteManifest.notePath);
+        if (file instanceof TFile && file.extension === 'base') {
+            new Notice('Branching is not supported for .base files.');
+            return;
+        }
+    }
     await this.manifestManager.updateNoteManifest(noteId, manifest => {
         if (manifest.branches[newBranchName]) {
             throw new Error(`Branch "${newBranchName}" already exists.`);
@@ -370,6 +374,11 @@ export class VersionManager {
   public async switchBranch(noteId: string, newBranchName: string): Promise<void> {
     const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
     if (!noteManifest) throw new Error('Manifest not found');
+    const file = this.app.vault.getAbstractFileByPath(noteManifest.notePath);
+    if (file instanceof TFile && file.extension === 'base') {
+        new Notice('Branching is not supported for .base files.');
+        return;
+    }
 
     const currentBranchName = noteManifest.currentBranch;
     if (currentBranchName === newBranchName) return;
@@ -444,7 +453,8 @@ export class VersionManager {
             // This is the last branch. Deleting it means deleting the entire note history.
             const liveFilePath = noteManifest.notePath;
             await this.manifestManager.deleteNoteEntry(noteId);
-            if (liveFilePath) {
+            const file = this.app.vault.getAbstractFileByPath(liveFilePath);
+            if (file instanceof TFile && file.extension === 'md') {
                 await this.cleanupFrontmatter(liveFilePath, noteId);
             }
             this.eventBus.trigger('history-deleted', noteId);

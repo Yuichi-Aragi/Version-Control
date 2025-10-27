@@ -1,4 +1,4 @@
-import { App, TFile, WorkspaceLeaf, MarkdownView, type FrontMatterCache } from "obsidian";
+import { App, TFile, WorkspaceLeaf, MarkdownView, type FrontMatterCache, FileView } from "obsidian";
 import { injectable, inject } from 'inversify';
 import { ManifestManager } from "./manifest-manager";
 import type { ActiveNoteInfo } from "../types";
@@ -25,83 +25,107 @@ export class NoteManager {
     async getActiveNoteState(leaf?: WorkspaceLeaf | null): Promise<ActiveNoteInfo> {
         const targetLeaf = leaf;
 
-        if (!targetLeaf || !(targetLeaf.view instanceof MarkdownView) || !targetLeaf.view.file) {
+        if (!targetLeaf || !(targetLeaf.view instanceof FileView) || !targetLeaf.view.file) {
             return { file: null, noteId: null, source: 'none' };
         }
 
         const file = targetLeaf.view.file;
-        if (!(file instanceof TFile && file.extension === 'md')) {
+        if (!(file instanceof TFile)) {
             return { file: null, noteId: null, source: 'none' };
         }
 
-        const fileCache = this.app.metadataCache.getFileCache(file);
-        let noteIdFromFrontmatter = fileCache?.frontmatter?.[this.noteIdKey] ?? null;
-
-        // Treat empty string vc-id as null
-        if (typeof noteIdFromFrontmatter === 'string' && noteIdFromFrontmatter.trim() === '') {
-            noteIdFromFrontmatter = null;
+        if (file.extension === 'base') {
+            return { file, noteId: file.path, source: 'filepath' };
         }
 
-
-        if (typeof noteIdFromFrontmatter === 'string') {
-            return { file, noteId: noteIdFromFrontmatter, source: 'frontmatter' };
-        }
-
-        try {
-            const recoveredNoteId = await this.manifestManager.getNoteIdByPath(file.path);
-            if (recoveredNoteId) {
-                return { file, noteId: recoveredNoteId, source: 'manifest' };
+        if (file.extension === 'md') {
+            if (!(targetLeaf.view instanceof MarkdownView)) {
+                return { file: null, noteId: null, source: 'none' };
             }
-        } catch (manifestError) {
-            console.error("Version Control: Error recovering note ID from manifest.", manifestError);
-        }
 
-        return { file, noteId: null, source: 'none' };
+            const fileCache = this.app.metadataCache.getFileCache(file);
+            let noteIdFromFrontmatter = fileCache?.frontmatter?.[this.noteIdKey] ?? null;
+
+            // Treat empty string vc-id as null
+            if (typeof noteIdFromFrontmatter === 'string' && noteIdFromFrontmatter.trim() === '') {
+                noteIdFromFrontmatter = null;
+            }
+
+
+            if (typeof noteIdFromFrontmatter === 'string') {
+                return { file, noteId: noteIdFromFrontmatter, source: 'frontmatter' };
+            }
+
+            try {
+                const recoveredNoteId = await this.manifestManager.getNoteIdByPath(file.path);
+                if (recoveredNoteId) {
+                    return { file, noteId: recoveredNoteId, source: 'manifest' };
+                }
+            } catch (manifestError) {
+                console.error("Version Control: Error recovering note ID from manifest.", manifestError);
+            }
+
+            return { file, noteId: null, source: 'none' };
+        }
+        return { file: null, noteId: null, source: 'none' };
     }
 
     async getNoteId(file: TFile): Promise<string | null> {
         if (!file) return null;
 
-        const fileCache = this.app.metadataCache.getFileCache(file);
-        let idFromCache = fileCache?.frontmatter?.[this.noteIdKey];
-
-        if (typeof idFromCache === 'string' && idFromCache.trim() !== '') {
-            return idFromCache;
+        if (file.extension === 'base') {
+            return file.path;
         }
-        if (typeof idFromCache === 'string' && idFromCache.trim() === '') {
-            // If vc-id is present but empty, treat as if it's not there for getNoteId purposes
-            // The auto-reconciliation might pick this up if manifest has an ID.
-            return null;
+
+        if (file.extension === 'md') {
+            const fileCache = this.app.metadataCache.getFileCache(file);
+            let idFromCache = fileCache?.frontmatter?.[this.noteIdKey];
+
+            if (typeof idFromCache === 'string' && idFromCache.trim() !== '') {
+                return idFromCache;
+            }
+            if (typeof idFromCache === 'string' && idFromCache.trim() === '') {
+                // If vc-id is present but empty, treat as if it's not there for getNoteId purposes
+                // The auto-reconciliation might pick this up if manifest has an ID.
+                return null;
+            }
         }
         return null;
     }
 
     /**
-     * Ensures a note has a version control ID in its frontmatter.
-     * If an ID already exists, it's returned. If not, a new ID is generated,
-     * written to the note's frontmatter, and then returned.
+     * Ensures a note has a version control ID.
+     * For .md files, it ensures the ID is in the frontmatter.
+     * For .base files, it returns the file path.
      * This method does NOT create any database entries; that is deferred until the first save.
      * @param file The TFile to get or create an ID for.
      * @returns The note's version control ID, or null if one couldn't be assigned.
      */
     async getOrCreateNoteId(file: TFile): Promise<string | null> {
-        const existingId = await this.getNoteId(file);
-        if (existingId) {
-            // The manifest existence will be checked later by the VersionManager during save.
-            // This method's only job is to ensure an ID is present in the frontmatter.
-            return existingId;
+        if (file.extension === 'base') {
+            return file.path;
         }
 
-        // If no ID, create one and write it to the file.
-        const newId = generateUniqueId();
-        try {
-            await this.writeNoteIdToFrontmatter(file, newId);
-            return newId;
-        } catch (error) {
-            console.error(`VC: Failed to write new vc-id to frontmatter for "${file.path}".`, error);
-            // If we can't write the ID, we can't proceed with versioning.
-            throw new Error(`Failed to initialize version history for "${file.basename}". Could not write to frontmatter.`);
+        if (file.extension === 'md') {
+            const existingId = await this.getNoteId(file);
+            if (existingId) {
+                // The manifest existence will be checked later by the VersionManager during save.
+                // This method's only job is to ensure an ID is present in the frontmatter.
+                return existingId;
+            }
+
+            // If no ID, create one and write it to the file.
+            const newId = generateUniqueId();
+            try {
+                await this.writeNoteIdToFrontmatter(file, newId);
+                return newId;
+            } catch (error) {
+                console.error(`VC: Failed to write new vc-id to frontmatter for "${file.path}".`, error);
+                // If we can't write the ID, we can't proceed with versioning.
+                throw new Error(`Failed to initialize version history for "${file.basename}". Could not write to frontmatter.`);
+            }
         }
+        return null;
     }
 
     async writeNoteIdToFrontmatter(file: TFile, noteId: string): Promise<boolean> {
