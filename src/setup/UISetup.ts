@@ -1,4 +1,4 @@
-import { Plugin, WorkspaceLeaf, MarkdownView } from 'obsidian';
+import { Plugin, WorkspaceLeaf, MarkdownView, BasesView } from 'obsidian';
 import type { AppStore } from '../state/store';
 import { thunks } from '../state/thunks';
 import { VIEW_TYPE_VERSION_CONTROL } from '../constants';
@@ -44,7 +44,7 @@ export function registerCommands(plugin: Plugin, store: AppStore): void {
         name: 'Save a new version of the current note',
         checkCallback: (checking: boolean) => {
             const activeFile = plugin.app.workspace.getActiveFile();
-            if (activeFile && activeFile.extension === 'md') {
+            if (activeFile && (activeFile.extension === 'md' || activeFile.extension === 'base')) {
                 if (!checking) {
                     store.dispatch(thunks.saveNewVersion());
                 }
@@ -71,13 +71,17 @@ export function registerCommands(plugin: Plugin, store: AppStore): void {
  */
 async function activateViewAndDispatch(plugin: Plugin, store: AppStore) {
     let contextLeaf: WorkspaceLeaf | null = null;
-    // Use the recommended API to find the active markdown view. This is safer
-    // than relying on `activeLeaf` which could be a non-markdown view.
-    const activeMarkdownView = plugin.app.workspace.getActiveViewOfType(MarkdownView);
+    // Use the recommended API to find the active markdown or base view. This is safer
+    // than relying on `activeLeaf` which could be a non-file view.
+    let activeView = plugin.app.workspace.getActiveViewOfType(MarkdownView);
 
-    // If there's an active markdown view with a file, its leaf is our context.
-    if (activeMarkdownView && activeMarkdownView.file) {
-        contextLeaf = activeMarkdownView.leaf;
+    if (!activeView) {
+        activeView = plugin.app.workspace.getActiveViewOfType(BasesView);
+    }
+
+    // If there's an active markdown or base view with a file, its leaf is our context.
+    if (activeView && activeView.file) {
+        contextLeaf = activeView.leaf;
     }
     
     // Dispatch the initialization thunk. It will use the provided leaf as context,
@@ -85,12 +89,6 @@ async function activateViewAndDispatch(plugin: Plugin, store: AppStore) {
     store.dispatch(thunks.initializeView(contextLeaf));
 
     const existingLeaves = plugin.app.workspace.getLeavesOfType(VIEW_TYPE_VERSION_CONTROL);
-    // The root cause of the error is that accessing an array element by index (e.g.,
-    // `existingLeaves[0]`) is typed as `T | undefined`. A simple length check is not
-    // always sufficient for the compiler to eliminate the `undefined` possibility.
-    // To fix this with 100% type safety, we get the element first and then perform
-    // a direct truthiness check on it. This explicitly proves to the compiler that
-    // the value is a valid `WorkspaceLeaf` before it's used.
     const leafToReveal = existingLeaves[0];
 
     if (leafToReveal) {

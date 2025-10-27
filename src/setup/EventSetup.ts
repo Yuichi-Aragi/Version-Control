@@ -15,7 +15,7 @@ export function registerSystemEventListeners(plugin: VersionControlPlugin, store
         store.dispatch(thunks.initializeView(leaf));
     }, 100);
 
-    plugin.registerEvent(plugin.app.workspace.on('active-leaf-change', (leaf) => {
+    plugin.registerEvent(plugin.app.workspace.on('active-leaf-change', (leaf: WorkspaceLeaf | null) => {
         const view = leaf?.view;
         // Do not re-initialize if the user is just clicking around within the plugin's own view.
         if (view?.getViewType() === VIEW_TYPE_VERSION_CONTROL) {
@@ -28,22 +28,28 @@ export function registerSystemEventListeners(plugin: VersionControlPlugin, store
         store.dispatch(thunks.handleMetadataChange(file, cache));
     }));
 
-    plugin.registerEvent(plugin.app.vault.on('rename', (file, oldPath) => {
+    plugin.registerEvent(plugin.app.vault.on('rename', (file: TAbstractFile, oldPath: string) => {
         if (file instanceof TFile) {
             store.dispatch(thunks.handleFileRename(file, oldPath));
         }
     }));
 
-    plugin.registerEvent(plugin.app.vault.on('delete', (file) => {
+    plugin.registerEvent(plugin.app.vault.on('delete', (file: TAbstractFile) => {
         if (file instanceof TFile) {
             store.dispatch(thunks.handleFileDelete(file));
+        }
+    }));
+
+    plugin.registerEvent(plugin.app.vault.on('create', (file: TAbstractFile) => {
+        if (file instanceof TFile && file.extension === 'base') {
+            store.dispatch(thunks.handleVaultSave(file));
         }
     }));
 
     // This event fires when a file is modified on disk, which is the most reliable
     // proxy for a "save" event (e.g., from Ctrl+S or external changes).
     plugin.registerEvent(plugin.app.vault.on('modify', (file: TAbstractFile) => {
-        if (file instanceof TFile && file.extension === 'md') {
+        if (file instanceof TFile && (file.extension === 'md' || file.extension === 'base')) {
             store.dispatch(thunks.handleVaultSave(file));
         }
     }));
