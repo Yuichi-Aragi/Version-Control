@@ -67,6 +67,11 @@ This plugin solves that. It allows you to save "snapshots" of your notes at any 
 
 *   💅 **Flexible Interface:** Choose between a detailed **Card View** that shows all actions at a glance, or a sleek, **Compact List View** for a more minimal look.
 
+* **Supports**
+
+* **Markdown files (notes)**
+* **Bases**
+
 ### How is this different from Obsidian's File Recovery?
 
 You might be thinking, "Doesn't Obsidian already have a File Recovery plugin?" And you're right! The built-in [File Recovery](https://help.obsidian.md/plugins/file-recovery) is pretty good and useful for most users. But I wanted more control, more features, and a more hands-on approach.
