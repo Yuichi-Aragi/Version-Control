@@ -1,6 +1,4 @@
 import { configureStore } from '@reduxjs/toolkit';
-// FIX: Use UnknownAction for better compatibility with Redux Toolkit's middleware.
-// The basic `Action` type can cause type inference issues with thunks.
 import type { ThunkAction, UnknownAction } from '@reduxjs/toolkit';
 import { Container } from 'inversify';
 import type { AppState } from './state';
@@ -41,8 +39,5 @@ export type AppThunk<ReturnType = void> = ThunkAction<
     ReturnType,
     RootState,
     Container,
-    // FIX: Use UnknownAction instead of the basic Action<string>. This resolves a cascade of
-    // type errors related to `AsyncThunkConfig` and incompatible `dispatch` types by
-    // using a type that is better aligned with the actions and middleware of Redux Toolkit.
     UnknownAction
 >;

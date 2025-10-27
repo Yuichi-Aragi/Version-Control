@@ -1,8 +1,7 @@
 import { TFile } from 'obsidian';
-import type { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, DiffRequest, DiffType } from '../types';
+import type { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, DiffRequest, DiffType, Change } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
 import type { AppThunk } from './store';
-import type { Change } from 'diff';
 
 // ===================================================================================
 // FORMAL STATE MACHINE DEFINITION

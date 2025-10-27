@@ -1,11 +1,10 @@
 import { createSlice } from '@reduxjs/toolkit';
 import type { PayloadAction } from '@reduxjs/toolkit';
 import { TFile } from 'obsidian';
-import type { Change } from 'diff';
 import { find } from 'lodash-es';
 import { AppStatus, getInitialState } from './state';
 import type { AppState, PanelState, SortOrder } from './state';
-import type { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, ActiveNoteInfo, DiffType } from '../types';
+import type { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, ActiveNoteInfo, DiffType, Change } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
 
 const initialState: AppState = getInitialState(DEFAULT_SETTINGS);
