@@ -1,8 +1,9 @@
 import { useMemo, type FC, Fragment, type Ref, useEffect } from 'react';
-import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
+import { Virtuoso, type VirtuosoHandle, type VirtuosoProps } from 'react-virtuoso';
 import type { Change } from 'diff';
 import type { DiffType } from '../../../types';
 import clsx from 'clsx';
+import { escapeRegExp } from '../../utils/strings';
 
 export interface DiffLineData {
     key: string;
@@ -11,10 +12,6 @@ export interface DiffLineData {
     newLineNum?: number;
     content: string;
 }
-
-const escapeRegExp = (str: string): string => {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-};
 
 const HighlightedText: FC<{ 
     text: string; 
@@ -136,7 +133,8 @@ DiffLine.displayName = 'DiffLine';
 
 interface LineDiffViewerProps {
     changes: Change[];
-    scrollerRef?: Ref<VirtuosoHandle>;
+    virtuosoHandleRef?: Ref<VirtuosoHandle>;
+    setVirtuosoScrollerRef?: (scroller: HTMLElement | Window | null) => void;
     highlightedIndex?: number | null;
     searchQuery?: string;
     isCaseSensitive?: boolean;
@@ -144,15 +142,10 @@ interface LineDiffViewerProps {
     onLineClick?: (lineData: DiffLineData) => void;
 }
 
-const LineDiffViewer: FC<LineDiffViewerProps> = ({ changes, scrollerRef, highlightedIndex, searchQuery, isCaseSensitive, activeMatchInfo, onLineClick }) => {
+const LineDiffViewer: FC<LineDiffViewerProps> = ({ changes, virtuosoHandleRef, setVirtuosoScrollerRef, highlightedIndex, searchQuery, isCaseSensitive, activeMatchInfo, onLineClick }) => {
     const lines = useMemo(() => processLineChanges(changes), [changes]);
     
-    // Create a props object for Virtuoso
-    const virtuosoProps: {
-        className: string;
-        data: DiffLineData[];
-        itemContent: (index: number, data: DiffLineData) => React.ReactElement;
-    } = {
+    const virtuosoProps: VirtuosoProps<DiffLineData, unknown> = {
         className: "v-virtuoso-container",
         data: lines,
         itemContent: (index, data) => {
@@ -178,27 +171,34 @@ const LineDiffViewer: FC<LineDiffViewerProps> = ({ changes, scrollerRef, highlig
             return <DiffLine {...diffLineProps} />;
         }
     };
+
+    if (setVirtuosoScrollerRef) {
+        virtuosoProps.scrollerRef = setVirtuosoScrollerRef;
+    }
     
-    // Only add ref if it's defined
-    if (scrollerRef !== undefined) {
+    if (virtuosoHandleRef) {
         return (
             <Virtuoso
-                ref={scrollerRef}
+                ref={virtuosoHandleRef}
                 {...virtuosoProps}
             />
         );
     }
     
-    return <Virtuoso {...virtuosoProps} />;
+    return (
+        <Virtuoso
+            {...virtuosoProps}
+        />
+    );
 };
 
 const UnifiedDiffViewer: FC<{ 
     changes: Change[]; 
     searchQuery?: string; 
     isCaseSensitive?: boolean;
-    unifiedViewRef?: Ref<HTMLPreElement>;
-}> = ({ changes, searchQuery, isCaseSensitive, unifiedViewRef }) => (
-    <pre className="v-unified-diff-view" ref={unifiedViewRef}>
+    unifiedViewContainerRef?: Ref<HTMLPreElement>;
+}> = ({ changes, searchQuery, isCaseSensitive, unifiedViewContainerRef }) => (
+    <pre className="v-unified-diff-view" ref={unifiedViewContainerRef}>
         <code>
             {changes.map((part, index) => (
                 <span
@@ -209,7 +209,7 @@ const UnifiedDiffViewer: FC<{
                     })}
                 >
                     {searchQuery ? (
-                        <HighlightedText text={part.value} query={searchQuery} caseSensitive={isCaseSensitive ?? false} />
+                        <HighlightedText text={part.value} query={searchQuery} caseSensitive={isCaseSensitive ?? false} isTargetLine={false} targetMatchIndexInLine={-1} />
                     ) : (
                         part.value
                     )}
@@ -222,24 +222,25 @@ const UnifiedDiffViewer: FC<{
 export const VirtualizedDiff: FC<{
     changes: Change[];
     diffType: DiffType;
-    scrollerRef?: Ref<VirtuosoHandle>;
-    unifiedViewRef?: Ref<HTMLPreElement>;
+    virtuosoHandleRef?: Ref<VirtuosoHandle>;
+    setVirtuosoScrollerRef?: (scroller: HTMLElement | Window | null) => void;
+    unifiedViewContainerRef?: Ref<HTMLPreElement>;
     highlightedIndex?: number | null;
     searchQuery?: string;
     isCaseSensitive?: boolean;
     activeMatchInfo: { lineIndex: number; matchIndexInLine: number } | null;
     activeUnifiedMatchIndex: number;
     onLineClick?: (lineData: DiffLineData) => void;
-}> = ({ changes, diffType, scrollerRef, unifiedViewRef, highlightedIndex, searchQuery, isCaseSensitive, activeMatchInfo, activeUnifiedMatchIndex, onLineClick }) => {
+}> = ({ changes, diffType, virtuosoHandleRef, setVirtuosoScrollerRef, unifiedViewContainerRef, highlightedIndex, searchQuery, isCaseSensitive, activeMatchInfo, activeUnifiedMatchIndex, onLineClick }) => {
     
     useEffect(() => {
-        if (diffType !== 'lines' && unifiedViewRef && 'current' in unifiedViewRef && unifiedViewRef.current) {
-            const marks = unifiedViewRef.current.querySelectorAll('mark');
+        if (diffType !== 'lines' && unifiedViewContainerRef && 'current' in unifiedViewContainerRef && unifiedViewContainerRef.current) {
+            const marks = unifiedViewContainerRef.current.querySelectorAll('mark');
             marks.forEach((mark, index) => {
                 mark.classList.toggle('is-active-match', index === activeUnifiedMatchIndex);
             });
         }
-    }, [activeUnifiedMatchIndex, diffType, unifiedViewRef, changes, searchQuery]);
+    }, [activeUnifiedMatchIndex, diffType, unifiedViewContainerRef, changes, searchQuery]);
 
     const commonProps: { searchQuery?: string; isCaseSensitive?: boolean } = {};
     if (searchQuery !== undefined) commonProps.searchQuery = searchQuery;
@@ -252,13 +253,16 @@ export const VirtualizedDiff: FC<{
                 activeMatchInfo,
                 ...commonProps,
             };
-            if (scrollerRef) {
-                lineViewerProps.scrollerRef = scrollerRef;
+            if (virtuosoHandleRef !== undefined) {
+                lineViewerProps.virtuosoHandleRef = virtuosoHandleRef;
+            }
+            if (setVirtuosoScrollerRef !== undefined) {
+                lineViewerProps.setVirtuosoScrollerRef = setVirtuosoScrollerRef;
             }
             if (highlightedIndex !== undefined) {
                 lineViewerProps.highlightedIndex = highlightedIndex;
             }
-            if (onLineClick) {
+            if (onLineClick !== undefined) {
                 lineViewerProps.onLineClick = onLineClick;
             }
             return <LineDiffViewer {...lineViewerProps} />;
@@ -270,8 +274,8 @@ export const VirtualizedDiff: FC<{
                 changes,
                 ...commonProps,
             };
-            if (unifiedViewRef) {
-                unifiedViewerProps.unifiedViewRef = unifiedViewRef;
+            if (unifiedViewContainerRef) {
+                unifiedViewerProps.unifiedViewContainerRef = unifiedViewContainerRef;
             }
             return <UnifiedDiffViewer {...unifiedViewerProps} />;
         }
@@ -281,13 +285,16 @@ export const VirtualizedDiff: FC<{
                 activeMatchInfo,
                 ...commonProps,
             };
-            if (scrollerRef) {
-                lineViewerProps.scrollerRef = scrollerRef;
+            if (virtuosoHandleRef !== undefined) {
+                lineViewerProps.virtuosoHandleRef = virtuosoHandleRef;
+            }
+            if (setVirtuosoScrollerRef !== undefined) {
+                lineViewerProps.setVirtuosoScrollerRef = setVirtuosoScrollerRef;
             }
             if (highlightedIndex !== undefined) {
                 lineViewerProps.highlightedIndex = highlightedIndex;
             }
-            if (onLineClick) {
+            if (onLineClick !== undefined) {
                 lineViewerProps.onLineClick = onLineClick;
             }
             return <LineDiffViewer {...lineViewerProps} />;

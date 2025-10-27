@@ -1,6 +1,7 @@
 import { useMemo, type FC, Fragment, type Ref } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import clsx from 'clsx';
+import { escapeRegExp } from '../../utils/strings';
 
 interface VirtualizedPlaintextProps {
     content: string;
@@ -9,10 +10,6 @@ interface VirtualizedPlaintextProps {
     scrollerRef?: Ref<VirtuosoHandle>;
     activeMatchInfo: { lineIndex: number; matchIndexInLine: number } | null;
 }
-
-const escapeRegExp = (str: string): string => {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-};
 
 const HighlightedText: FC<{ 
     text: string; 
