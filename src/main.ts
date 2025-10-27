@@ -18,35 +18,16 @@ import type { CentralManifestRepository } from './core/storage/central-manifest-
 import type { NoteManifestRepository } from './core/storage/note-manifest-repository';
 import type { QueueService } from './services/queue-service';
 import { DEFAULT_SETTINGS } from './constants';
-import type { CentralManifest, VersionControlSettings } from './types';
+import type { VersionControlSettings } from './types';
 import type { PluginEvents } from './core/plugin-events';
 import { AppStatus, type AppState } from './state/state';
 import { compareVersions } from './utils/versions';
 import { VersionControlSettingTab } from './ui/settings-tab';
+import { CentralManifestSchema, VersionControlSettingsSchema } from './schemas';
 
 export interface DebouncerInfo {
     debouncer: Debouncer<[TFile], void>;
     interval: number; // in milliseconds
-}
-
-// A type representing the data structure saved to data.json
-// It's the full settings object, but everything is optional for migration purposes.
-type SavedData = Partial<VersionControlSettings>;
-
-// Type guard to check if data is in old CentralManifest format
-function isCentralManifest(data: any): data is CentralManifest {
-    return data && 
-           typeof data === 'object' && 
-           'notes' in data && 
-           !('databasePath' in data) && 
-           !('maxVersionsPerNote' in data);
-}
-
-// Type guard to check if data is in new SavedData format
-function isSavedData(data: any): data is SavedData {
-    return data && 
-           typeof data === 'object' && 
-           ('databasePath' in data || 'maxVersionsPerNote' in data || 'centralManifest' in data);
 }
 
 export default class VersionControlPlugin extends Plugin {
@@ -96,11 +77,6 @@ export default class VersionControlPlugin extends Plugin {
         try {
             // Load settings with enhanced error handling
             await this.loadSettings();
-
-            // Validate settings before proceeding
-            if (!this.validateSettings()) {
-                throw new Error("Invalid settings configuration");
-            }
 
             // configureServices will use the plugin instance, which now holds the loaded settings.
             this.container = configureServices(this);
@@ -210,42 +186,44 @@ export default class VersionControlPlugin extends Plugin {
 
     private async loadSettings() {
         try {
-            const loadedData: SavedData | CentralManifest = await this.loadData() || {};
-
-            let settingsData: SavedData;
-
-            // Check if loadedData is the old manifest-only format using type guards
-            if (isCentralManifest(loadedData)) {
-                 // Old format: it's just a CentralManifest.
-                 settingsData = { centralManifest: loadedData as CentralManifest };
-            } else if (isSavedData(loadedData)) {
-                 // New format or empty: it's a settings object.
-                 settingsData = loadedData as SavedData;
+            const loadedData: unknown = await this.loadData() || {};
+            let settingsData: Partial<VersionControlSettings>;
+    
+            // Try parsing as the new full settings format first
+            const settingsParseResult = VersionControlSettingsSchema.safeParse(loadedData);
+            if (settingsParseResult.success) {
+                settingsData = settingsParseResult.data;
             } else {
-                // Unknown format, use defaults
-                console.warn("Version Control: Unknown settings format detected, using defaults");
-                settingsData = {};
+                // If that fails, try parsing as the old central manifest format for migration
+                const manifestParseResult = CentralManifestSchema.safeParse(loadedData);
+                if (manifestParseResult.success) {
+                    // Old format: it's just a CentralManifest.
+                    console.log("Version Control: Migrating settings from old format.");
+                    settingsData = { centralManifest: manifestParseResult.data };
+                } else {
+                    // Unknown format, use defaults and log the error
+                    console.warn("Version Control: Unknown or invalid settings format detected, using defaults. Validation errors:", settingsParseResult.error);
+                    settingsData = {};
+                }
             }
-
-            // Merge defaults with loaded data. This handles migrations and new settings gracefully.
-            // The version from loadedData is preserved here, as `...settingsData` overwrites `...DEFAULT_SETTINGS`.
-            this.settings = {
+    
+            // Merge defaults with loaded data, then parse to ensure the final object is valid.
+            // This handles migrations and adding new settings gracefully.
+            const mergedSettings = {
                 ...DEFAULT_SETTINGS,
                 ...settingsData,
-                // Deep merge the central manifest to ensure its internal structure is complete.
                 centralManifest: {
                     ...DEFAULT_SETTINGS.centralManifest,
                     ...(settingsData.centralManifest || {}),
                 },
             };
-            
-            // The plugin version should only be updated after the changelog is successfully shown.
-            // Stamping it here would prevent the update check from working correctly.
-
-            // Save back immediately to ensure the data on disk is in the latest format (e.g., new settings are added).
+    
+            this.settings = VersionControlSettingsSchema.parse(mergedSettings);
+    
+            // Save back immediately to ensure the data on disk is in the latest, valid format.
             await this.saveSettings();
         } catch (error) {
-            console.error("Version Control: Failed to load settings", error);
+            console.error("Version Control: Failed to load and validate settings", error);
             // Use defaults if loading fails
             this.settings = { ...DEFAULT_SETTINGS };
             await this.saveSettings();
@@ -254,39 +232,12 @@ export default class VersionControlPlugin extends Plugin {
 
     async saveSettings() {
         try {
-            // Validate settings before saving
-            if (!this.validateSettings()) {
-                throw new Error("Invalid settings configuration");
-            }
-            
-            // This method saves the global settings object.
-            await this.saveData(this.settings);
+            // Validate settings with Zod before saving to ensure data integrity.
+            const validatedSettings = VersionControlSettingsSchema.parse(this.settings);
+            await this.saveData(validatedSettings);
         } catch (error) {
-            console.error("Version Control: Failed to save settings", error);
+            console.error("Version Control: Failed to save settings due to validation error", error);
             new Notice("Failed to save settings. Please check the console for details.");
-        }
-    }
-
-    private validateSettings(): boolean {
-        try {
-            // Basic validation of settings structure
-            if (!this.settings || typeof this.settings !== 'object') {
-                return false;
-            }
-
-            // Validate critical settings
-            if (!this.settings.databasePath || typeof this.settings.databasePath !== 'string') {
-                return false;
-            }
-
-            if (!this.settings.centralManifest || typeof this.settings.centralManifest !== 'object') {
-                return false;
-            }
-
-            return true;
-        } catch (error) {
-            console.error("Version Control: Settings validation failed", error);
-            return false;
         }
     }
 
