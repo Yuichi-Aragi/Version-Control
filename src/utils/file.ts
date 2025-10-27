@@ -4,7 +4,6 @@ import { trim, trimStart, trimEnd, isEmpty } from 'lodash-es';
 // Constants for better maintainability and magic number elimination
 const DEFAULT_FILENAME = "Untitled Export";
 const MAX_ATTEMPTS = 1000;
-const EXTENSION = '.md';
 const MAX_FILENAME_LENGTH = 200;
 const RESERVED_NAMES_REGEX = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
 const INVALID_CHARS_REGEX = /[\x00-\x1f\x7f-\x9f\\/:*?"<>|#%&{}$!'"@+=`~\[\]\(\)]/g;
@@ -104,9 +103,10 @@ function fileExistsWithCache(app: App, filePath?: string): boolean {
  * @param app The Obsidian App instance.
  * @param baseName The desired base name for the file.
  * @param parentPath The path of the parent folder.
+ * @param extension The file extension to use (defaults to 'md').
  * @returns A unique, normalized file path.
  */
-export async function generateUniqueFilePath(app: App, baseName: string, parentPath?: string): Promise<string> {
+export async function generateUniqueFilePath(app: App, baseName: string, parentPath?: string, extension: string = 'md'): Promise<string> {
     // === STRICT INPUT VALIDATION ===
     validateAppInstance(app);
 
@@ -121,6 +121,7 @@ export async function generateUniqueFilePath(app: App, baseName: string, parentP
     // === PATH NORMALIZATION AND VALIDATION ===
     const folderPath = validateAndNormalizeParentPath(parentPath);
     const base = folderPath ? `${folderPath}/` : '';
+    const fileExtension = `.${extension}`;
 
     // Use the robust customSanitizeFileName function for consistency and safety.
     const sanitizedBaseName = customSanitizeFileName(baseName);
@@ -131,7 +132,7 @@ export async function generateUniqueFilePath(app: App, baseName: string, parentP
     let filePath: string;
 
     // First attempt without counter
-    fileName = sanitizedBaseName + EXTENSION;
+    fileName = sanitizedBaseName + fileExtension;
     filePath = normalizePath(String(base + fileName));
 
     // Validate normalized path
@@ -151,7 +152,7 @@ export async function generateUniqueFilePath(app: App, baseName: string, parentP
 
             // Generate next candidate
             counter++;
-            fileName = `${sanitizedBaseName} ${counter}${EXTENSION}`;
+            fileName = `${sanitizedBaseName} ${counter}${fileExtension}`;
             const candidatePath = base + fileName;
 
             // Re-normalize each iteration (defensive against path manipulation)
