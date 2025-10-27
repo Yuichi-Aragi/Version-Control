@@ -169,7 +169,7 @@
     cursor: pointer;
     transition: background-color 0.15s ease;
     outline: none;
-    min-height: 44px; /* Ensure consistent minimum height for card-like appearance */
+    /* FIX: Removed fixed min-height to allow items to grow vertically with wrapped text, preventing overlap. */
 }
 
 /* NEW: Card style for items in a drawer */
