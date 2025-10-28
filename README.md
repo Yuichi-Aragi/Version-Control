@@ -103,3 +103,10 @@ This structure ensures data persistence and privacy:
 
 * **Mobile**
 * **Desktop**
+
+### Download
+
+To jump straight to the Version Control plugin in Obsidian, try this:
+
+* **​Click the URI:** Copy and paste or click this [link](obsidian://show-plugin?id=version-control), which should launch the app: obsidian://show-plugin?id=version-control
+* **Alternatively (Search):** If the link doesn't work, go to your Obsidian Settings and search for 'Version-Control' in the Community Plugins list.
