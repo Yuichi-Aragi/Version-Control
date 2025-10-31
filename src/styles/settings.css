@@ -76,10 +76,38 @@
     border-color: var(--interactive-accent);
 }
 
+/* FIX: Slider with Input Control Container - Vertical Layout */
+.v-slider-with-input-container {
+    width: 100%;
+}
+
+.v-slider-with-input-container .v-slider-input-field {
+    width: 100%; /* Full width */
+    margin-top: var(--size-4-2); /* Space between slider and input */
+    text-align: left;
+    border: 1px solid var(--background-modifier-border);
+    background-color: var(--background-primary);
+    border-radius: var(--radius-s);
+    padding: var(--size-4-1) var(--size-4-2);
+    font-size: var(--font-ui-small);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.v-slider-with-input-container .v-slider-input-field:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+    box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.v-slider-with-input-container .v-slider-input-field.is-invalid {
+    border-color: var(--text-error);
+    box-shadow: 0 0 0 1px var(--text-error);
+}
+
 /* Slider container & tooltip */
 .v-slider-container {
     position: relative;
-    display: inline-block;
+    display: block; /* Use block for full-width layout */
     width: 100%;
     padding-top: 8px;
     padding-bottom: 4px;
