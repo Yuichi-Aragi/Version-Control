@@ -3,9 +3,9 @@ import { isEqual } from 'lodash-es';
 import { useAppDispatch, useAppSelector } from '../../../hooks/useRedux';
 import { thunks } from '../../../../state/thunks';
 import { SettingComponent } from '../../SettingComponent';
-import { SliderControl } from '../controls/SliderControl';
 import { validateNumber, formatInterval } from '../settingsUtils';
 import { MinLinesControl } from './MinLinesControl';
+import { SliderWithInputControl } from '../controls/SliderWithInputControl';
 
 export const AutoSaveSettings: React.FC<{ disabled: boolean }> = memo(({ disabled }) => {
     const dispatch = useAppDispatch();
@@ -27,8 +27,6 @@ export const AutoSaveSettings: React.FC<{ disabled: boolean }> = memo(({ disable
         }
     }, [dispatch]);
     
-    const formatter = useCallback((val: number) => formatInterval(val), []);
-
     return (
         <>
             <SettingComponent 
@@ -49,14 +47,15 @@ export const AutoSaveSettings: React.FC<{ disabled: boolean }> = memo(({ disable
                         name="Auto-save delay" 
                         desc={`Time to wait after last change before auto-saving. Current: ${formatInterval(interval)}.`}
                     >
-                        <SliderControl 
+                        <SliderWithInputControl
                             min={1} 
                             max={300} 
                             step={1} 
                             value={interval} 
                             onFinalChange={handleSliderChange} 
                             disabled={disabled} 
-                            formatter={formatter} 
+                            unit="seconds"
+                            placeholder="e.g., 2:30 or 150"
                         />
                     </SettingComponent>
                     <MinLinesControl disabled={disabled} />

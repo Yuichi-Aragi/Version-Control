@@ -3,8 +3,8 @@ import { isEqual } from 'lodash-es';
 import { useAppDispatch, useAppSelector } from '../../../hooks/useRedux';
 import { thunks } from '../../../../state/thunks';
 import { SettingComponent } from '../../SettingComponent';
-import { SliderControl } from '../controls/SliderControl';
 import { validateNumber } from '../settingsUtils';
+import { SliderWithInputControl } from '../controls/SliderWithInputControl';
 
 export const MinLinesControl: React.FC<{ disabled: boolean }> = memo(({ disabled }) => {
     const dispatch = useAppDispatch();
@@ -45,13 +45,15 @@ export const MinLinesControl: React.FC<{ disabled: boolean }> = memo(({ disabled
                     name="Minimum lines changed" 
                     desc={`The total number of added/removed lines required to trigger an auto-save. Current: ${value}.`}
                 >
-                    <SliderControl 
+                    <SliderWithInputControl
                         min={1} 
                         max={50} 
                         step={1} 
                         value={value} 
                         onFinalChange={handleSliderChange} 
                         disabled={disabled} 
+                        unit="lines"
+                        placeholder="e.g., 5"
                     />
                 </SettingComponent>
             )}

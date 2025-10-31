@@ -3,8 +3,8 @@ import { isEqual } from 'lodash-es';
 import { useAppDispatch, useAppSelector } from '../../../hooks/useRedux';
 import { thunks } from '../../../../state/thunks';
 import { SettingComponent } from '../../SettingComponent';
-import { SliderControl } from '../controls/SliderControl';
 import { validateNumber } from '../settingsUtils';
+import { SliderWithInputControl } from '../controls/SliderWithInputControl';
 
 export const AutoCleanupSettings: React.FC<{ disabled: boolean }> = memo(({ disabled }) => {
     const dispatch = useAppDispatch();
@@ -26,8 +26,6 @@ export const AutoCleanupSettings: React.FC<{ disabled: boolean }> = memo(({ disa
         }
     }, [dispatch]);
     
-    const formatter = useCallback((val: number) => `${val} days`, []);
-
     return (
         <>
             <SettingComponent 
@@ -47,14 +45,15 @@ export const AutoCleanupSettings: React.FC<{ disabled: boolean }> = memo(({ disa
                     name="Delete versions older than (days)" 
                     desc={`Applies if "auto-cleanup by age" is on. Min 7, max 365. Current: ${days} days.`}
                 >
-                    <SliderControl 
+                    <SliderWithInputControl
                         min={7} 
                         max={365} 
                         step={1} 
                         value={days} 
                         onFinalChange={handleSliderChange} 
                         disabled={disabled} 
-                        formatter={formatter} 
+                        unit="days"
+                        placeholder="e.g., 30"
                     />
                 </SettingComponent>
             )}
