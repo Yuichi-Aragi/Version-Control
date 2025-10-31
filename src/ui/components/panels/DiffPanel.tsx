@@ -3,7 +3,7 @@ import type { FC, ReactNode } from 'react';
 import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import * as Progress from '@radix-ui/react-progress';
-import type { VirtuosoHandle } from 'react-virtuoso';
+import type { VirtuosoHandle, ListRange } from 'react-virtuoso';
 import clsx from 'clsx';
 import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
 import { actions } from '../../../state/appSlice';
@@ -57,13 +57,13 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
     const { version1, version2, diffChanges, diffType, isReDiffing } = panelState;
 
     const virtuosoRef = useRef<VirtuosoHandle>(null);
-    const virtuosoScrollerRef = useRef<HTMLElement | null>(null);
+    const virtuosoRangeRef = useRef<ListRange | null>(null);
     const headerRef = useRef<HTMLDivElement>(null);
     const highlightTimeoutRef = useRef<number | null>(null);
     const unifiedViewContainerRef = useRef<HTMLPreElement>(null);
     const containerScrollerRef = useRef<HTMLDivElement>(null);
-    const lastScrollRatioRef = useRef<number | null>(null);
     const isInitialLoadRef = useRef(true);
+    const scrollAnchorRef = useRef<{ type: 'line' | 'change'; index: number } | null>(null);
 
     const [isMetaCollapsed, setIsMetaCollapsed] = useState(true);
 
@@ -88,12 +88,8 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
     // When the versions being compared change, reset initial load flag.
     useEffect(() => {
         isInitialLoadRef.current = true;
-        lastScrollRatioRef.current = null;
+        scrollAnchorRef.current = null;
     }, [version1.id, version2.id]);
-
-    const handleSetVirtuosoScrollerRef = useCallback((scroller: HTMLElement | null) => {
-        virtuosoScrollerRef.current = scroller;
-    }, []);
 
     const handleLineClick = useCallback((clickedLineData: DiffLineData) => {
         let targetLineNum: number | undefined;
@@ -277,21 +273,32 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
         dispatch(actions.closePanel());
     }, [dispatch]);
 
+    const handleRangeChanged = useCallback((range: ListRange) => {
+        virtuosoRangeRef.current = range;
+    }, []);
+
     const handleDiffTypeChange = useCallback((newType: DiffType) => {
         if (newType === diffType) return;
 
-        let scroller: HTMLElement | null = null;
         if (diffType === 'lines') {
-            scroller = virtuosoScrollerRef.current;
+            if (virtuosoRangeRef.current) {
+                const firstItemIndex = virtuosoRangeRef.current.startIndex;
+                scrollAnchorRef.current = { type: 'line', index: firstItemIndex };
+            }
         } else {
-            scroller = containerScrollerRef.current;
-        }
-
-        if (scroller && scroller.scrollHeight > 0) {
-            const ratio = scroller.scrollTop / (scroller.scrollHeight - scroller.clientHeight);
-            lastScrollRatioRef.current = Math.max(0, Math.min(1, ratio)); // Clamp between 0 and 1
-        } else {
-            lastScrollRatioRef.current = 0;
+            const scroller = containerScrollerRef.current;
+            if (scroller) {
+                const nodes = scroller.querySelectorAll<HTMLElement>('[data-change-index]');
+                let foundIndex = 0;
+                for (const node of Array.from(nodes)) {
+                    if (node.offsetTop <= scroller.scrollTop) {
+                        foundIndex = parseInt(node.dataset['changeIndex'] || '0', 10);
+                    } else {
+                        break;
+                    }
+                }
+                scrollAnchorRef.current = { type: 'change', index: foundIndex };
+            }
         }
 
         isInitialLoadRef.current = false;
@@ -302,8 +309,29 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
         if (!diffChanges) return;
 
         const timer = setTimeout(() => {
-            if (isInitialLoadRef.current) {
-                // This is the very first load of the diff panel. Scroll to the first change.
+            const anchor = scrollAnchorRef.current;
+            if (anchor) {
+                if (diffType === 'lines') {
+                    if (anchor.type === 'change' && virtuosoRef.current) {
+                        const targetLineIndex = lines.findIndex(l => l.originalChangeIndex >= anchor.index);
+                        if (targetLineIndex !== -1) {
+                            virtuosoRef.current.scrollToIndex({ index: targetLineIndex, align: 'start', behavior: 'auto' });
+                        }
+                    }
+                } else {
+                    if (anchor.type === 'line' && containerScrollerRef.current) {
+                        const lineData = lines[anchor.index];
+                        if (lineData) {
+                            const targetChangeIndex = lineData.originalChangeIndex;
+                            const targetElement = containerScrollerRef.current.querySelector<HTMLElement>(`[data-change-index="${targetChangeIndex}"]`);
+                            if (targetElement) {
+                                targetElement.scrollIntoView({ behavior: 'auto', block: 'start' });
+                            }
+                        }
+                    }
+                }
+                scrollAnchorRef.current = null;
+            } else if (isInitialLoadRef.current) {
                 if (diffType === 'lines') {
                     if (virtuosoRef.current && changedLineIndices.length > 0) {
                         const firstChangeIndex = changedLineIndices[0];
@@ -323,30 +351,11 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                     }
                 }
                 isInitialLoadRef.current = false;
-            } else {
-                const savedRatio = lastScrollRatioRef.current;
-                if (savedRatio !== null) {
-                    let scroller: HTMLElement | null = null;
-                    if (diffType === 'lines') {
-                        scroller = virtuosoScrollerRef.current;
-                    } else {
-                        scroller = containerScrollerRef.current;
-                    }
-
-                    if (scroller) {
-                        const newScrollTop = savedRatio * (scroller.scrollHeight - scroller.clientHeight);
-                        if (diffType === 'lines' && virtuosoRef.current) {
-                            virtuosoRef.current.scrollTo({ top: newScrollTop, behavior: 'auto' });
-                        } else {
-                            scroller.scrollTop = newScrollTop;
-                        }
-                    }
-                }
             }
         }, 100);
 
         return () => clearTimeout(timer);
-    }, [diffChanges, diffType, changedLineIndices]);
+    }, [diffChanges, diffType, lines, changedLineIndices]);
 
     const v1Label = version1.name ? `"${version1.name}" (V${version1.versionNumber})` : `Version ${version1.versionNumber}`;
     const v2Label = version2.id === 'current'
@@ -449,7 +458,10 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                                     changes={diffChanges as Change[]}
                                     diffType={diffType}
                                     virtuosoHandleRef={virtuosoRef}
-                                    setVirtuosoScrollerRef={handleSetVirtuosoScrollerRef}
+                                    setVirtuosoScrollerRef={(_scroller) => {
+                                        // This prop is for Virtuoso to take control of a parent scroller,
+                                        // which we are not doing. The containerScrollerRef is used for unified diffs.
+                                    }}
                                     unifiedViewContainerRef={unifiedViewContainerRef}
                                     highlightedIndex={highlightedIndex}
                                     searchQuery={searchQuery}
@@ -457,6 +469,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                                     activeMatchInfo={diffType === 'lines' ? (lineMatches[activeMatchIndex] ?? null) : null}
                                     activeUnifiedMatchIndex={diffType !== 'lines' ? activeMatchIndex : -1}
                                     onLineClick={handleLineClick}
+                                    onRangeChanged={handleRangeChanged}
                                 />
                             </div>
                         </>
