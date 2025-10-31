@@ -1,5 +1,4 @@
 import { App, TFile, Component, MarkdownView } from 'obsidian';
-import { sortBy } from 'lodash-es';
 import { injectable, inject } from 'inversify';
 import { wrap, releaseProxy, type Remote } from 'comlink';
 import { z } from 'zod';
@@ -354,8 +353,8 @@ export class DiffManager extends Component {
     }
 
     private getCacheKey(noteId: string, id1: string, id2: string, diffType: DiffType): string {
-        const sortedIds = sortBy([id1, id2]);
-        return `${noteId}:${sortedIds[0]}:${sortedIds[1]}:${diffType}`;
+        // The order of id1 and id2 is significant for a diff. Do not sort them.
+        return `${noteId}:${id1}:${id2}:${diffType}`;
     }
 
     public async invalidateCacheForNote(noteId: string): Promise<void> {
