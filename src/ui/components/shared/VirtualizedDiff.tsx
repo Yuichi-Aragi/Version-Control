@@ -1,5 +1,5 @@
 import { useMemo, type FC, Fragment, type Ref, useEffect } from 'react';
-import { Virtuoso, type VirtuosoHandle, type VirtuosoProps } from 'react-virtuoso';
+import { Virtuoso, type VirtuosoHandle, type VirtuosoProps, type ListRange } from 'react-virtuoso';
 import type { Change } from 'diff';
 import type { DiffType } from '../../../types';
 import clsx from 'clsx';
@@ -11,6 +11,7 @@ export interface DiffLineData {
     oldLineNum?: number;
     newLineNum?: number;
     content: string;
+    originalChangeIndex: number;
 }
 
 const HighlightedText: FC<{ 
@@ -58,7 +59,7 @@ export const processLineChanges = (changes: Change[]): DiffLineData[] => {
     let newLineNum = 1;
     let keyCounter = 0;
 
-    for (const part of changes) {
+    for (const [changeIndex, part] of changes.entries()) {
         const type = part.added ? 'add' : part.removed ? 'remove' : 'context';
         const partLines = part.value.split('\n');
         const lastIndex = partLines.length - 1;
@@ -72,6 +73,7 @@ export const processLineChanges = (changes: Change[]): DiffLineData[] => {
                 key: `${keyCounter++}`,
                 type,
                 content: line,
+                originalChangeIndex: changeIndex,
             };
 
             if (type !== 'add') {
@@ -140,9 +142,10 @@ interface LineDiffViewerProps {
     isCaseSensitive?: boolean;
     activeMatchInfo: { lineIndex: number; matchIndexInLine: number } | null;
     onLineClick?: (lineData: DiffLineData) => void;
+    onRangeChanged?: (range: ListRange) => void;
 }
 
-const LineDiffViewer: FC<LineDiffViewerProps> = ({ changes, virtuosoHandleRef, setVirtuosoScrollerRef, highlightedIndex, searchQuery, isCaseSensitive, activeMatchInfo, onLineClick }) => {
+const LineDiffViewer: FC<LineDiffViewerProps> = ({ changes, virtuosoHandleRef, setVirtuosoScrollerRef, highlightedIndex, searchQuery, isCaseSensitive, activeMatchInfo, onLineClick, onRangeChanged }) => {
     const lines = useMemo(() => processLineChanges(changes), [changes]);
     
     const virtuosoProps: VirtuosoProps<DiffLineData, unknown> = {
@@ -175,6 +178,10 @@ const LineDiffViewer: FC<LineDiffViewerProps> = ({ changes, virtuosoHandleRef, s
     if (setVirtuosoScrollerRef) {
         virtuosoProps.scrollerRef = setVirtuosoScrollerRef;
     }
+
+    if (onRangeChanged) {
+        virtuosoProps.rangeChanged = onRangeChanged;
+    }
     
     if (virtuosoHandleRef) {
         return (
@@ -203,6 +210,7 @@ const UnifiedDiffViewer: FC<{
             {changes.map((part, index) => (
                 <span
                     key={index}
+                    data-change-index={index}
                     className={clsx({
                         'diff-add': part.added,
                         'diff-remove': part.removed,
@@ -231,7 +239,8 @@ export const VirtualizedDiff: FC<{
     activeMatchInfo: { lineIndex: number; matchIndexInLine: number } | null;
     activeUnifiedMatchIndex: number;
     onLineClick?: (lineData: DiffLineData) => void;
-}> = ({ changes, diffType, virtuosoHandleRef, setVirtuosoScrollerRef, unifiedViewContainerRef, highlightedIndex, searchQuery, isCaseSensitive, activeMatchInfo, activeUnifiedMatchIndex, onLineClick }) => {
+    onRangeChanged?: (range: ListRange) => void;
+}> = ({ changes, diffType, virtuosoHandleRef, setVirtuosoScrollerRef, unifiedViewContainerRef, highlightedIndex, searchQuery, isCaseSensitive, activeMatchInfo, activeUnifiedMatchIndex, onLineClick, onRangeChanged }) => {
     
     useEffect(() => {
         if (diffType !== 'lines' && unifiedViewContainerRef && 'current' in unifiedViewContainerRef && unifiedViewContainerRef.current) {
@@ -265,6 +274,9 @@ export const VirtualizedDiff: FC<{
             if (onLineClick !== undefined) {
                 lineViewerProps.onLineClick = onLineClick;
             }
+            if (onRangeChanged !== undefined) {
+                lineViewerProps.onRangeChanged = onRangeChanged;
+            }
             return <LineDiffViewer {...lineViewerProps} />;
         }
         case 'words':
@@ -296,6 +308,9 @@ export const VirtualizedDiff: FC<{
             }
             if (onLineClick !== undefined) {
                 lineViewerProps.onLineClick = onLineClick;
+            }
+            if (onRangeChanged !== undefined) {
+                lineViewerProps.onRangeChanged = onRangeChanged;
             }
             return <LineDiffViewer {...lineViewerProps} />;
         }
