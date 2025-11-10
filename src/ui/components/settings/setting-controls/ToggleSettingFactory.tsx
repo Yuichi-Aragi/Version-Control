@@ -32,6 +32,13 @@ export const EnableNamingSetting = createToggleSetting(
 );
 EnableNamingSetting.displayName = 'EnableNamingSetting';
 
+export const EnableDescriptionSetting = createToggleSetting(
+    'Enable version description',
+    'If enabled, prompts for a version description when saving a new version.',
+    'enableVersionDescription'
+);
+EnableDescriptionSetting.displayName = 'EnableDescriptionSetting';
+
 export const ListViewSetting = createToggleSetting(
     'Compact list view', 
     'Display version history as a compact list. Otherwise, shows as cards.', 

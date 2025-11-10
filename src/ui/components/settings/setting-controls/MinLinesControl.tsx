@@ -1,63 +1,19 @@
-import { memo, useCallback } from 'react';
-import { isEqual } from 'lodash-es';
-import { useAppDispatch, useAppSelector } from '../../../hooks/useRedux';
-import { thunks } from '../../../../state/thunks';
-import { SettingComponent } from '../../SettingComponent';
-import { validateNumber } from '../settingsUtils';
-import { SliderWithInputControl } from '../controls/SliderWithInputControl';
+import { createToggleSliderSetting } from './ToggleSliderFactory';
 
-export const MinLinesControl: React.FC<{ disabled: boolean }> = memo(({ disabled }) => {
-    const dispatch = useAppDispatch();
-    const { enabled, value } = useAppSelector(state => ({
-        enabled: state.settings.enableMinLinesChangedCheck,
-        value: state.settings.minLinesChanged,
-    }), isEqual);
-    
-    const handleToggle = useCallback((v: boolean) => {
-        dispatch(thunks.updateSettings({ enableMinLinesChangedCheck: v }));
-    }, [dispatch]);
-    
-    const handleSliderChange = useCallback((v: number) => {
-        try {
-            const validatedValue = validateNumber(v, 1, 50);
-            dispatch(thunks.updateSettings({ minLinesChanged: validatedValue }));
-        } catch (error) {
-            console.error('Invalid min lines value:', error);
-        }
-    }, [dispatch]);
-
-    return (
-        <>
-            <SettingComponent 
-                name="Only save if lines changed" 
-                desc="If enabled, auto-save will only trigger if a minimum number of lines have changed."
-            >
-                <input 
-                    type="checkbox" 
-                    checked={enabled} 
-                    onChange={e => handleToggle(e.target.checked)} 
-                    disabled={disabled}
-                    aria-label="Toggle minimum lines check"
-                />
-            </SettingComponent>
-            {enabled && (
-                <SettingComponent 
-                    name="Minimum lines changed" 
-                    desc={`The total number of added/removed lines required to trigger an auto-save. Current: ${value}.`}
-                >
-                    <SliderWithInputControl
-                        min={1} 
-                        max={50} 
-                        step={1} 
-                        value={value} 
-                        onFinalChange={handleSliderChange} 
-                        disabled={disabled} 
-                        unit="lines"
-                        placeholder="e.g., 5"
-                    />
-                </SettingComponent>
-            )}
-        </>
-    );
+/**
+ * Minimum lines changed control using the shared factory to eliminate duplication.
+ */
+export const MinLinesControl = createToggleSliderSetting({
+    toggleName: 'Only save if lines changed',
+    toggleDesc: 'If enabled, auto-save will only trigger if a minimum number of lines have changed.',
+    toggleKey: 'enableMinLinesChangedCheck',
+    sliderName: 'Minimum lines changed',
+    sliderDesc: (value) => `The total number of added/removed lines required to trigger an auto-save. Current: ${value}.`,
+    sliderKey: 'minLinesChanged',
+    min: 1,
+    max: 50,
+    step: 1,
+    unit: 'lines',
+    placeholder: 'e.g., 5'
 });
 MinLinesControl.displayName = 'MinLinesControl';

@@ -7,6 +7,10 @@ import { validateNumber, formatInterval } from '../settingsUtils';
 import { MinLinesControl } from './MinLinesControl';
 import { SliderWithInputControl } from '../controls/SliderWithInputControl';
 
+/**
+ * Auto-save settings with toggle, slider, and nested MinLinesControl.
+ * Uses shared patterns but maintains custom structure due to nested component requirement.
+ */
 export const AutoSaveSettings: React.FC<{ disabled: boolean }> = memo(({ disabled }) => {
     const dispatch = useAppDispatch();
     const { enabled, interval } = useAppSelector(state => ({
