@@ -1,10 +1,9 @@
 import { MarkdownRenderer, Component } from 'obsidian';
-import { type FC, useCallback, useRef, useLayoutEffect } from 'react';
-import { useAppDispatch } from '../../hooks/useRedux';
-import { actions } from '../../../state/appSlice';
+import { type FC, useRef, useLayoutEffect } from 'react';
 import type { ChangelogPanel as ChangelogPanelState } from '../../../state/state';
 import { Icon } from '../Icon';
 import { useApp } from '../../AppContext';
+import { usePanelClose } from '../../hooks/usePanelClose';
 
 interface ChangelogPanelProps {
     panelState: ChangelogPanelState;
@@ -12,11 +11,10 @@ interface ChangelogPanelProps {
 
 export const ChangelogPanel: FC<ChangelogPanelProps> = ({ panelState }) => {
     const app = useApp();
-    const dispatch = useAppDispatch();
     const markdownRef = useRef<HTMLDivElement>(null);
     const { content } = panelState;
 
-    const handleClose = useCallback(() => dispatch(actions.closePanel()), [dispatch]);
+    const handleClose = usePanelClose();
 
     useLayoutEffect(() => {
         if (content && markdownRef.current) {

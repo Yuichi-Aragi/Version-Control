@@ -2,14 +2,15 @@
 import { MarkdownRenderer, moment, Component, debounce } from 'obsidian';
 import { type FC, useCallback, useState, useRef, useLayoutEffect, useEffect, useMemo } from 'react';
 import type { VirtuosoHandle } from 'react-virtuoso';
-import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
-import { actions } from '../../../state/appSlice';
+import { useAppSelector } from '../../hooks/useRedux';
 import type { PreviewPanel as PreviewPanelState } from '../../../state/state';
 import { Icon } from '../Icon';
 import { VirtualizedPlaintext } from '../shared/VirtualizedPlaintext';
 import { useApp } from '../../AppContext';
 import clsx from 'clsx';
 import { escapeRegExp } from '../../utils/strings';
+import { usePanelClose } from '../../hooks/usePanelClose';
+import { useDelayedFocus } from '../../hooks/useDelayedFocus';
 
 interface PreviewPanelProps {
     panelState: PreviewPanelState;
@@ -17,7 +18,6 @@ interface PreviewPanelProps {
 
 export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
     const app = useApp();
-    const dispatch = useAppDispatch();
     const { settings, notePath } = useAppSelector(state => ({
         settings: state.settings,
         notePath: state.file?.path ?? '',
@@ -104,20 +104,15 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
         }
     };
     
-    useEffect(() => {
-        if (isSearchActive && searchInputRef.current) {
-            const timer = setTimeout(() => searchInputRef.current?.focus(), 100);
-            return () => clearTimeout(timer);
-        }
-        return;
-    }, [isSearchActive]);
+    useDelayedFocus(searchInputRef, 100, isSearchActive);
 
     const shouldRenderMarkdown = notePath.endsWith('.md') && (settings.renderMarkdownInPreview || localRenderMarkdown) && !isSearchActive;
 
+    const panelClose = usePanelClose();
     const handleClose = useCallback((e: React.MouseEvent) => {
         e.stopPropagation();
-        dispatch(actions.closePanel());
-    }, [dispatch]);
+        panelClose();
+    }, [panelClose]);
 
     const toggleRenderMode = useCallback((e: React.MouseEvent) => {
         e.stopPropagation();

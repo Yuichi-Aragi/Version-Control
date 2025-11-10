@@ -6,13 +6,14 @@ import * as Progress from '@radix-ui/react-progress';
 import type { VirtuosoHandle, ListRange } from 'react-virtuoso';
 import clsx from 'clsx';
 import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
-import { actions } from '../../../state/appSlice';
 import { thunks } from '../../../state/thunks';
 import type { DiffPanel as DiffPanelState } from '../../../state/state';
 import type { Change, DiffType } from '../../../types';
 import { Icon } from '../Icon';
 import { VirtualizedDiff, processLineChanges, type DiffLineData } from '../shared/VirtualizedDiff';
 import { escapeRegExp } from '../../utils/strings';
+import { usePanelClose } from '../../hooks/usePanelClose';
+import { useDelayedFocus } from '../../hooks/useDelayedFocus';
 
 interface DiffPanelProps {
     panelState: DiffPanelState;
@@ -208,13 +209,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
         }
     };
 
-    useEffect(() => {
-        if (isSearchActive && searchInputRef.current) {
-            const timer = setTimeout(() => searchInputRef.current?.focus(), 100);
-            return () => clearTimeout(timer);
-        }
-        return;
-    }, [isSearchActive]);
+    useDelayedFocus(searchInputRef, 100, isSearchActive);
 
     const [activeChange, setActiveChange] = useState(-1);
     const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
@@ -268,10 +263,11 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
     const handleNextChange = useCallback((e: React.MouseEvent) => { e.stopPropagation(); scrollToChange('next'); }, [scrollToChange]);
     const handlePrevChange = useCallback((e: React.MouseEvent) => { e.stopPropagation(); scrollToChange('prev'); }, [scrollToChange]);
 
+    const panelClose = usePanelClose();
     const handleClose = useCallback((e: React.MouseEvent) => {
         e.stopPropagation();
-        dispatch(actions.closePanel());
-    }, [dispatch]);
+        panelClose();
+    }, [panelClose]);
 
     const handleRangeChanged = useCallback((range: ListRange) => {
         virtuosoRangeRef.current = range;

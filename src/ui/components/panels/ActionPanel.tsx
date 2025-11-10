@@ -3,9 +3,11 @@ import clsx from 'clsx';
 import { type FC, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { useAppDispatch } from '../../hooks/useRedux';
-import { actions } from '../../../state/appSlice';
 import type { ActionPanel as ActionPanelState, ActionItem } from '../../../state/state';
 import { Icon } from '../Icon';
+import { usePanelClose } from '../../hooks/usePanelClose';
+import { useBackdropClick } from '../../hooks/useBackdropClick';
+import { useDelayedFocus } from '../../hooks/useDelayedFocus';
 
 interface ActionPanelProps {
     panelState: ActionPanelState<any>;
@@ -88,7 +90,8 @@ export const ActionPanel: FC<ActionPanelProps> = ({ panelState }) => {
         return results;
     }, [items, filterQuery, onCreateAction]);
 
-    const handleClose = useCallback(() => dispatch(actions.closePanel()), [dispatch]);
+    const handleClose = usePanelClose();
+    const handleBackdropClick = useBackdropClick(handleClose);
     
     const chooseItem = useCallback((item: any) => {
         if (item.id === '__create__' && onCreateAction) {
@@ -100,12 +103,7 @@ export const ActionPanel: FC<ActionPanelProps> = ({ panelState }) => {
 
     const debouncedSetFilter = useMemo(() => debounce(setFilterQuery, 150, true), []);
 
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            filterInputRef.current?.focus();
-        }, 50);
-        return () => clearTimeout(timer);
-    }, []);
+    useDelayedFocus(filterInputRef);
 
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
         if (filteredItems.length === 0) return;
@@ -189,7 +187,7 @@ export const ActionPanel: FC<ActionPanelProps> = ({ panelState }) => {
                 'is-modal-like': !isDrawer,
                 'is-drawer-like': isDrawer,
             })} 
-            onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
+            onClick={handleBackdropClick}
         >
             <div 
                 className={clsx("v-inline-panel v-action-panel", { 'is-drawer': isDrawer })} 
