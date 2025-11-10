@@ -25,7 +25,7 @@ interface FileFilters {
 interface FileOperationContext {
     isHidden: boolean;
     isEditorActive: boolean;
-    file?: TFile;
+    file?: TFile | undefined;
 }
 
 @injectable()
@@ -364,7 +364,7 @@ export class KeyUpdateManager {
     private getFileOperationContext(filePath: string): FileOperationContext {
         const isHidden = this.isPathHidden(filePath);
         const activeFile = this.app.workspace.getActiveFile();
-        const isEditorActive = !isHidden && activeFile && activeFile.path === filePath;
+        const isEditorActive = !isHidden && !!activeFile && activeFile.path === filePath;
         const file = isEditorActive ? activeFile : this.app.vault.getAbstractFileByPath(filePath) as TFile | undefined;
         
         return { isHidden, isEditorActive, file };
