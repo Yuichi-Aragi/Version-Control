@@ -1,5 +1,13 @@
 ***
 
+**Version: 1.9.23**
+
+#### ✨ New Features
+
+*   **Descriptions** You can now add descriptions along side names for any version.
+
+***
+
 **Version: 1.9.22**
 
 #### 🎨 Improvements & UX
