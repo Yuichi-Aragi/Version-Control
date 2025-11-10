@@ -94,6 +94,28 @@
     }
 }
 
+/* NEW: Styles for inset modal panel (Description Panel) */
+.v-panel-container.is-inset-modal {
+    background-color: rgba(var(--background-primary-rgb), 0.7);
+    /* FIX: Reduce left, right, bottom padding */
+    padding: var(--size-4-8) var(--size-4-2) var(--size-4-2);
+    justify-content: stretch;
+    align-items: stretch;
+}
+
+.v-panel-container.is-inset-modal > .v-inline-panel {
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    min-width: 0;
+    box-shadow: var(--shadow-l);
+    border-radius: var(--radius-l);
+    background-color: var(--background-secondary);
+    display: flex;
+    flex-direction: column;
+}
+
 
 /* NEW: Animation for drawer panel */
 @keyframes v-slide-in-left {
@@ -436,7 +458,8 @@
 
 /* NEW: Styles for search result highlighting */
 .v-version-content-preview mark,
-.v-diff-content-wrapper mark {
+.v-diff-content-wrapper mark,
+.v-description-panel-list mark {
     background-color: var(--text-highlight-bg);
     color: inherit;
     border-radius: var(--radius-s);
@@ -447,7 +470,8 @@
 
 /* NEW: Style for the currently active search match */
 .v-version-content-preview mark.is-active-match,
-.v-diff-content-wrapper mark.is-active-match {
+.v-diff-content-wrapper mark.is-active-match,
+.v-description-panel-list mark.is-active-match {
     background-color: var(--color-purple-alpha);
     color: var(--color-purple);
     box-shadow: 0 0 0 2px var(--color-purple-alpha);
@@ -481,4 +505,145 @@
     min-width: 100%; /* Ensure it fills the container if content is narrow */
     border: none;
     margin: 0;
+}
+
+/* --- Description Panel --- */
+.v-description-panel {
+    overflow: hidden;
+}
+.v-description-panel-list {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: var(--size-4-2);
+}
+.v-description-entry-wrapper {
+    padding-bottom: var(--size-4-2);
+}
+.v-description-entry {
+    background-color: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    padding: var(--size-4-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-2);
+}
+.v-description-entry-header {
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-3);
+}
+.v-description-entry .v-version-id {
+    font-weight: 600;
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+    padding: var(--size-4-1) var(--size-4-2);
+    border-radius: var(--radius-s);
+    font-size: var(--font-ui-smaller);
+    flex-shrink: 0;
+}
+.v-description-entry-name {
+    font-weight: var(--font-semibold);
+    flex-grow: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.v-description-entry-meta {
+    display: flex;
+    gap: var(--size-4-3);
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+.v-description-entry-body {
+    font-size: var(--font-ui-small);
+    color: var(--text-normal);
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.5;
+    max-height: 15em;
+    overflow-y: auto;
+    background-color: var(--background-secondary);
+    padding: var(--size-4-2);
+    border-radius: var(--radius-s);
+}
+
+/* --- Description Panel Editing --- */
+.v-description-entry.is-naming {
+    border-color: var(--interactive-accent);
+    box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.version-control-view .v-description-entry.is-naming input.v-version-name-input {
+    -webkit-appearance: none;
+    appearance: none;
+    background-color: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    outline: none;
+    padding: 0;
+    margin: 0;
+    width: 100%;
+    height: auto;
+    line-height: 1.2;
+    flex-grow: 1;
+    min-width: 0;
+    font-family: inherit;
+    font-weight: var(--font-semibold);
+    font-size: inherit;
+    color: var(--text-normal);
+    caret-color: var(--interactive-accent);
+    border-bottom: 1px solid transparent;
+    transition: border-color 160ms ease-in-out;
+}
+
+.version-control-view .v-description-entry.is-naming input.v-version-name-input:focus {
+    border-bottom-color: var(--interactive-accent);
+}
+
+.version-control-view .v-description-entry.is-naming input.v-version-name-input::placeholder {
+    color: var(--text-faint);
+    font-weight: normal;
+    font-style: italic;
+    opacity: 1;
+}
+
+.v-description-entry-description-editor {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-2);
+}
+
+.v-description-entry-description-editor textarea {
+    -webkit-appearance: none;
+    appearance: none;
+    background-color: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    box-shadow: none;
+    outline: none;
+    padding: var(--size-4-2);
+    margin: 0;
+    width: 100%;
+    min-height: calc(var(--line-height-normal) * 2 + var(--size-4-2) * 2);
+    resize: none;
+    font-family: inherit;
+    font-size: var(--font-ui-small);
+    color: var(--text-normal);
+    caret-color: var(--interactive-accent);
+    transition: border-color 160ms ease-in-out, box-shadow 160ms ease-in-out;
+    overflow-y: hidden;
+}
+
+.v-description-entry-description-editor textarea:focus {
+    border-color: var(--interactive-accent);
+    box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.v-description-entry-description-editor textarea::placeholder {
+    color: var(--text-faint);
+    font-style: italic;
 }

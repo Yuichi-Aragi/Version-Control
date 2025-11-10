@@ -235,6 +235,37 @@
     animation: v-green-glow 1.2s ease-out;
 }
 
+/* NEW: Dropdown Menu for Action Bar */
+.v-actionbar-dropdown-content {
+    min-width: 180px;
+    background-color: var(--background-secondary);
+    border-radius: var(--radius-m);
+    padding: var(--size-4-1);
+    box-shadow: var(--shadow-l);
+    border: 1px solid var(--background-modifier-border);
+    z-index: 100;
+    animation: v-fade-in 0.1s ease-out;
+}
+
+.v-actionbar-dropdown-item {
+    font-size: var(--font-ui-small);
+    padding: var(--size-4-2) var(--size-4-3);
+    border-radius: var(--radius-s);
+    cursor: pointer;
+    outline: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--size-4-4);
+    user-select: none;
+}
+
+.v-actionbar-dropdown-item:hover,
+.v-actionbar-dropdown-item[data-highlighted] {
+    background-color: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+
 @keyframes v-glow-pulse {
     0%, 100% {
         transform: scale(1);
