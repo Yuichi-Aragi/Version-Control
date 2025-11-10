@@ -1,4 +1,4 @@
-import { App, TFile, MarkdownView, TFolder, type FrontMatterCache, Notice, TAbstractFile } from 'obsidian';
+import { App, TFile, MarkdownView, TFolder, type FrontMatterCache, Notice } from 'obsidian';
 import { map, orderBy } from 'lodash-es';
 import { injectable, inject } from 'inversify';
 import { diffLines } from 'diff';
@@ -152,11 +152,14 @@ export class VersionManager {
     }
   }
 
-  public async updateVersionDetails(noteId: string, versionId: string, name: string): Promise<void> {
+  public async updateVersionDetails(noteId: string, versionId: string, details: { name?: string; description?: string }): Promise<void> {
     if (!noteId || !versionId) {
       throw new Error('Invalid noteId or versionId for updateVersionDetails.');
     }
-    const version_name = name.trim();
+
+    const version_name = details.name?.trim();
+    const version_desc = details.description?.trim();
+
     await this.manifestManager.updateNoteManifest(noteId, (manifest) => {
       const branch = manifest.branches[manifest.currentBranch];
       if (!branch) throw new Error(`Current branch not found for note ${noteId}`);
@@ -165,11 +168,23 @@ export class VersionManager {
       if (!versionData) {
         throw new Error(`Version ${versionId} not found in manifest for note ${noteId}.`);
       }
-      if (version_name) {
-        versionData.name = version_name;
-      } else {
-        delete versionData.name;
+
+      if (details.name !== undefined) {
+          if (version_name) {
+            versionData.name = version_name;
+          } else {
+            delete versionData.name;
+          }
       }
+
+      if (details.description !== undefined) {
+          if (version_desc) {
+            versionData.description = version_desc;
+          } else {
+            delete versionData.description;
+          }
+      }
+
       manifest.lastModified = new Date().toISOString();
     });
   }
@@ -197,6 +212,7 @@ export class VersionManager {
         timestamp: data.timestamp,
         size: data.size,
         ...(data.name && { name: data.name }),
+        ...(data.description && { description: data.description }),
       }));
 
       return orderBy(history, ['versionNumber'], ['desc']);
