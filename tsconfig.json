@@ -17,39 +17,30 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noEmitOnError": false,
-
     "module": "ESNext",
     "moduleResolution": "bundler",
     "verbatimModuleSyntax": true,
     "resolveJsonModule": true,
-
     "target": "ES2022",
     "lib": ["DOM", "DOM.Iterable", "ES2022"],
     "jsx": "react-jsx",
-
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "useDefineForClassFields": true,
     "preserveConstEnums": true,
-
     "noEmit": false,
     "declaration": false,
     "sourceMap": false,
     "removeComments": true,
     "importHelpers": true,
-
     "allowJs": false,
     "checkJs": false,
-
     "isolatedModules": true,
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-
     "moduleDetection": "force",
-
     "skipLibCheck": true,
-
     "baseUrl": ".",
     "incremental": true,
     "tsBuildInfoFile": "./.tsbuildinfo"
