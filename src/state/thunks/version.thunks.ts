@@ -142,7 +142,7 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => 
     }
 };
 
-export const updateVersionDetails = (versionId: string, name: string): AppThunk => async (dispatch, getState, container) => {
+export const updateVersionDetails = (versionId: string, details: { name: string; description: string }): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
@@ -162,13 +162,17 @@ export const updateVersionDetails = (versionId: string, name: string): AppThunk 
         return;
     }
 
-    const version_name = name.trim();
-    dispatch(actions.updateVersionDetailsInState({ versionId, name: version_name }));
+    const updatePayload = {
+        name: details.name.trim(),
+        description: details.description.trim(),
+    };
+
+    dispatch(actions.updateVersionDetailsInState({ versionId, ...updatePayload }));
 
     try {
-        await versionManager.updateVersionDetails(noteId, versionId, version_name);
+        await versionManager.updateVersionDetails(noteId, versionId, updatePayload);
     } catch (error) {
-        console.error(`VC: Failed to save name update for version ${versionId}. Reverting UI.`, error);
+        console.error(`VC: Failed to save details update for version ${versionId}. Reverting UI.`, error);
         uiService.showNotice("VC: Error, could not save version details. Reverting changes.", 5000);
         if (!isPluginUnloading(container)) {
             dispatch(loadHistoryForNoteId(file, noteId));
