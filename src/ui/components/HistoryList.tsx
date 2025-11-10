@@ -2,7 +2,7 @@
 import { moment } from 'obsidian';
 import { orderBy } from 'lodash-es';
 import clsx from 'clsx';
-import { type FC, useEffect, useMemo, useRef, useState, useTransition, memo } from 'react';
+import { type FC, useEffect, useRef, useState, useTransition, memo } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { useAppSelector } from '../hooks/useRedux';
 import { AppStatus } from '../../state/state';
@@ -10,12 +10,6 @@ import type { VersionHistoryEntry as VersionHistoryEntryType } from '../../types
 import { formatFileSize } from '../utils/dom';
 import { HistoryEntry } from './HistoryEntry';
 import { Icon } from './Icon';
-
-/** Layout constants — kept local and immutable. */
-const LIST_ITEM_HEIGHT = 64;
-const LIST_ITEM_GAP = 4;
-const CARD_ITEM_HEIGHT = 110;
-const CARD_ITEM_GAP = 8;
 
 const SkeletonEntry: FC<{ isListView: boolean }> = memo(({ isListView }) => (
     <div className={clsx('v-history-entry', 'is-skeleton', { 'is-list-view': isListView })} aria-hidden>
@@ -76,7 +70,16 @@ interface HistoryListProps {
 
 /** Main list component */
 export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
-    const { status, history, searchQuery, isSearchCaseSensitive, sortOrder, isListView, panel, settings } = useAppSelector(state => ({
+    const { 
+        status, 
+        history, 
+        searchQuery, 
+        isSearchCaseSensitive, 
+        sortOrder, 
+        isListView, 
+        panel, 
+        settings,
+    } = useAppSelector(state => ({
         status: state.status,
         history: state.history ?? [],
         searchQuery: state.searchQuery ?? '',
@@ -84,7 +87,7 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
         sortOrder: state.sortOrder ?? { property: 'versionNumber', direction: 'desc' },
         isListView: state.settings?.isListView ?? true,
         panel: state.panel,
-        settings: state.settings ?? { isListView: true, useRelativeTimestamps: true },
+        settings: state.settings ?? { isListView: true, useRelativeTimestamps: true, enableVersionDescription: false },
     }));
 
     const [processedHistory, setProcessedHistory] = useState<VersionHistoryEntryType[]>([]);
@@ -177,7 +180,6 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
         });
     }, [status, history, searchQuery, isSearchCaseSensitive, sortOrder, startTransition, onCountChange]);
 
-    const itemHeight = useMemo(() => (isListView ? (LIST_ITEM_HEIGHT + LIST_ITEM_GAP) : (CARD_ITEM_HEIGHT + CARD_ITEM_GAP)), [isListView]);
 
     if (status === AppStatus.LOADING) {
         return (
@@ -209,7 +211,6 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
                 key={isListView ? 'list' : 'card'}
                 className="v-virtuoso-container"
                 data={processedHistory ?? []}
-                fixedItemHeight={Number(itemHeight) || LIST_ITEM_HEIGHT}
                 itemContent={(_index, version) => {
                     if (!version) return null;
                     return (

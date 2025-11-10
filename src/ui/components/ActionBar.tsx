@@ -1,6 +1,7 @@
 import { debounce } from 'obsidian';
 import clsx from 'clsx';
 import { type FC, type ChangeEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
 import { AppStatus } from '../../state/state';
 import { actions } from '../../state/appSlice';
@@ -22,6 +23,8 @@ export const ActionBar: FC = () => {
         history, 
         panel,
         file,
+        currentBranch,
+        availableBranches,
     } = useAppSelector(state => ({
         status: state.status,
         isSearchActive: state.isSearchActive,
@@ -35,6 +38,8 @@ export const ActionBar: FC = () => {
         history: state.history,
         panel: state.panel,
         file: state.file,
+        currentBranch: state.currentBranch,
+        availableBranches: state.availableBranches,
     }));
 
     const [localQuery, setLocalQuery] = useState(globalSearchQuery);
@@ -103,7 +108,12 @@ export const ActionBar: FC = () => {
         dispatch(thunks.showSortMenu());
     }, [dispatch]);
 
-    const handleBranchClick = useCallback(() => {
+    const handleOpenDescriptionDrawer = useCallback(() => {
+        if (status !== AppStatus.READY || isBusy) return;
+        dispatch(actions.openPanel({ type: 'description' }));
+    }, [dispatch, status, isBusy]);
+
+    const handleOpenBranchDrawer = useCallback(() => {
         if (status !== AppStatus.READY || isBusy || file?.extension === 'base') return;
         dispatch(thunks.showBranchSwitcher());
     }, [dispatch, status, isBusy, file]);
@@ -140,17 +150,43 @@ export const ActionBar: FC = () => {
         <div className={clsx('v-actions-container', { 'is-searching': isSearchActive })}>
             <div className="v-top-actions">
                 <div className="v-top-actions-left-group">
-                    <button
-                        className="clickable-icon"
-                        aria-label="Switch branch"
-                        onClick={handleBranchClick}
-                        disabled={isBusy || file?.extension === 'base'}
-                    >
-                        <Icon name="menu" />
-                    </button>
-                    {settings.enableWatchMode && watchModeCountdown !== null && !isProcessing && (
-                        <div className="v-watch-mode-timer">({watchModeCountdown}s)</div>
-                    )}
+                    <DropdownMenu.Root>
+                        <DropdownMenu.Trigger asChild>
+                            <button
+                                className="clickable-icon"
+                                aria-label="More options"
+                                disabled={isBusy}
+                            >
+                                <Icon name="menu" />
+                            </button>
+                        </DropdownMenu.Trigger>
+                        <DropdownMenu.Portal>
+                            <DropdownMenu.Content className="v-actionbar-dropdown-content" sideOffset={5} collisionPadding={10}>
+                                <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenDescriptionDrawer}>
+                                    <span>Descriptions</span>
+                                    <Icon name="file-text" />
+                                </DropdownMenu.Item>
+                                {file?.extension !== 'base' && (
+                                    <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenBranchDrawer}>
+                                        <span>Branches</span>
+                                        <Icon name="git-branch" />
+                                    </DropdownMenu.Item>
+                                )}
+                            </DropdownMenu.Content>
+                        </DropdownMenu.Portal>
+                    </DropdownMenu.Root>
+                    
+                    <div className="v-branch-switcher-container">
+                        {availableBranches.length > 1 && (
+                            <button className="v-branch-switcher-button" onClick={handleOpenBranchDrawer} disabled={isBusy || file?.extension === 'base'}>
+                                <Icon name="git-branch" />
+                                <span>{currentBranch}</span>
+                            </button>
+                        )}
+                        {settings.enableWatchMode && watchModeCountdown !== null && !isProcessing && (
+                            <div className="v-watch-mode-timer">({watchModeCountdown}s)</div>
+                        )}
+                    </div>
                 </div>
                 <div className="v-top-actions-right-group">
                     <button 
