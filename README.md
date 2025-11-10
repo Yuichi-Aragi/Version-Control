@@ -86,16 +86,16 @@ The plugin is designed to be intuitive and fit seamlessly with your Obsidian the
     <td align="center"><strong>Card View (Dark)</strong></td>
   </tr>
   <tr>
-    <td><img src="assets/Screenshot_20251006-194841.png" alt="Card View in Light Mode"></td>
-    <td><img src="assets/Screenshot_20251006-194759.png" alt="Card View in Dark Mode"></td>
+    <td><img src="assets/20251111_001800.jpg" alt="Card View in Light Mode"></td>
+    <td><img src="assets/20251111_001358.jpg" alt="Card View in Dark Mode"></td>
   </tr>
   <tr>
     <td align="center"><strong>List View (Light)</strong></td>
     <td align="center"><strong>List View (Dark)</strong></td>
   </tr>
   <tr>
-    <td><img src="assets/Screenshot_20251006-194827.png" alt="List View in Light Mode"></td>
-    <td><img src="assets/Screenshot_20251006-194815.png" alt="List View in Dark Mode"></td>
+    <td><img src="assets/20251111_001725.jpg" alt="List View in Light Mode"></td>
+    <td><img src="assets/20251111_001603.jpg" alt="List View in Dark Mode"></td>
   </tr>
 </table>
 
