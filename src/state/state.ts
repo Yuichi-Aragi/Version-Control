@@ -34,6 +34,10 @@ export interface PreviewPanel {
     content: string;
 }
 
+export interface DescriptionPanel {
+    type: 'description';
+}
+
 export interface DiffPanel {
     type: 'diff';
     version1: VersionHistoryEntry;
@@ -76,7 +80,14 @@ export interface ActionPanel<T> {
     showFilter?: boolean; // Whether to show a filter/search input.
 }
 
-export type PanelState = ConfirmationPanel | PreviewPanel | DiffPanel | SettingsPanel | ActionPanel<any> | ChangelogPanel | null;
+/** A state for stacking an overlay panel (like confirmation) on top of the description panel. */
+export interface StackedPanel {
+    type: 'stacked';
+    base: DescriptionPanel;
+    overlay: ActionPanel<any> | ConfirmationPanel;
+}
+
+export type PanelState = ConfirmationPanel | PreviewPanel | DiffPanel | SettingsPanel | ActionPanel<any> | ChangelogPanel | DescriptionPanel | StackedPanel | null;
 
 // --- Core Application State ---
 
@@ -112,6 +123,7 @@ export interface AppState {
     isRenaming: boolean; // Flag to block operations during DB rename
     panel: PanelState;
     namingVersionId: string | null;
+    isManualVersionEdit: boolean; // Distinguishes manual edit from post-save edit
     highlightedVersionId: string | null;
     
     // Search and sort properties
@@ -145,6 +157,7 @@ export const getInitialState = (loadedSettings: VersionControlSettings): AppStat
         isRenaming: false,
         panel: null,
         namingVersionId: null,
+        isManualVersionEdit: false,
         highlightedVersionId: null,
         isSearchActive: false,
         searchQuery: '',

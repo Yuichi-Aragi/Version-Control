@@ -1,7 +1,6 @@
 import { createSlice } from '@reduxjs/toolkit';
 import type { PayloadAction } from '@reduxjs/toolkit';
 import { TFile } from 'obsidian';
-import { find } from 'lodash-es';
 import { AppStatus, getInitialState } from './state';
 import type { AppState, PanelState, SortOrder } from './state';
 import type { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, ActiveNoteInfo, DiffType, Change } from '../types';
@@ -37,7 +36,7 @@ export const appSlice = createSlice({
                 }
             } else {
                 const shouldPreservePanel =
-                    (state.panel?.type === 'diff' || state.panel?.type === 'preview') &&
+                    (state.panel?.type === 'diff' || state.panel?.type === 'preview' || state.panel?.type === 'description' || state.panel?.type === 'stacked') &&
                     state.file?.path === file.path;
 
                 // Avoid unnecessary loading states if the view is already correct
@@ -53,6 +52,7 @@ export const appSlice = createSlice({
                 state.history = [];
                 state.currentBranch = null;
                 state.availableBranches = [];
+                state.isManualVersionEdit = false;
                 if (!shouldPreservePanel && state.panel?.type !== 'changelog') {
                     state.panel = null;
                 }
@@ -61,7 +61,7 @@ export const appSlice = createSlice({
         historyLoadedSuccess(state, action: PayloadAction<{ file: TFile; noteId: string | null; history: VersionHistoryEntry[], currentBranch: string, availableBranches: string[] }>) {
             if (state.file?.path === action.payload.file.path) {
                 const shouldPreservePanel =
-                    (state.panel?.type === 'diff' || state.panel?.type === 'preview');
+                    (state.panel?.type === 'diff' || state.panel?.type === 'preview' || state.panel?.type === 'description' || state.panel?.type === 'stacked');
 
                 state.status = AppStatus.READY;
                 state.noteId = action.payload.noteId;
@@ -75,6 +75,7 @@ export const appSlice = createSlice({
                 }
 
                 state.namingVersionId = null;
+                state.isManualVersionEdit = false;
                 state.highlightedVersionId = null;
                 state.diffRequest = null;
             }
@@ -90,6 +91,7 @@ export const appSlice = createSlice({
                 state.panel = null;
             }
             state.error = null;
+            state.isManualVersionEdit = false;
         },
 
         // --- Actions specific to ReadyState ---
@@ -102,13 +104,29 @@ export const appSlice = createSlice({
         openPanel(state, action: PayloadAction<NonNullable<PanelState>>) {
             const panelToOpen = action.payload;
 
-            // Changelog is special: it's not note-dependent and can be shown
-            // as soon as the view is available, even in a placeholder or loading state.
+            // Changelog is special: it can be shown in almost any state.
             if (panelToOpen.type === 'changelog') {
                 if (state.status === AppStatus.INITIALIZING || state.status === AppStatus.READY || state.status === AppStatus.PLACEHOLDER || state.status === AppStatus.LOADING) {
                     state.panel = panelToOpen;
                 }
-                // We don't reset other state fields here, as the changelog is an overlay.
+                return;
+            }
+
+            const isOverlayCandidate = panelToOpen.type === 'action' || panelToOpen.type === 'confirmation';
+
+            // If the description panel is open, stack action/confirmation panels on top.
+            if (state.panel?.type === 'description' && isOverlayCandidate) {
+                state.panel = {
+                    type: 'stacked',
+                    base: state.panel,
+                    overlay: panelToOpen,
+                };
+                return;
+            }
+            
+            // If already stacked, replace the overlay.
+            if (state.panel?.type === 'stacked' && isOverlayCandidate) {
+                state.panel.overlay = panelToOpen;
                 return;
             }
 
@@ -122,6 +140,12 @@ export const appSlice = createSlice({
             }
         },
         closePanel(state) {
+            // If a panel is stacked, closing only removes the top layer.
+            if (state.panel?.type === 'stacked') {
+                state.panel = state.panel.base;
+                return;
+            }
+
             // A panel can be closed in any state where it could be open.
             if (state.status === AppStatus.INITIALIZING || state.status === AppStatus.READY || state.status === AppStatus.PLACEHOLDER || state.status === AppStatus.LOADING) {
                 state.panel = null;
@@ -136,31 +160,52 @@ export const appSlice = createSlice({
             if (state.status === AppStatus.READY) {
                 state.history.unshift(action.payload.newVersion);
                 state.isProcessing = false;
-                state.namingVersionId = state.settings.enableVersionNaming ? action.payload.newVersion.id : null;
+                const shouldPromptEdit = state.settings.enableVersionNaming || state.settings.enableVersionDescription;
+                state.namingVersionId = shouldPromptEdit ? action.payload.newVersion.id : null;
+                state.isManualVersionEdit = false;
             }
         },
         startVersionEditing(state, action: PayloadAction<{ versionId: string }>) {
             if (state.status === AppStatus.READY) {
                 state.namingVersionId = action.payload.versionId;
+                state.isManualVersionEdit = true;
             }
         },
         stopVersionEditing(state) {
             if (state.status === AppStatus.READY) {
                 state.namingVersionId = null;
+                state.isManualVersionEdit = false;
             }
         },
-        updateVersionDetailsInState(state, action: PayloadAction<{ versionId: string; name?: string }>) {
+        updateVersionDetailsInState(state, action: PayloadAction<{ versionId: string; name?: string; description?: string }>) {
             if (state.status === AppStatus.READY) {
-                const version = find(state.history, { id: action.payload.versionId });
-                if (version) {
-                    const newName = action.payload.name;
-                    // This logic mirrors the one in `version-manager` for consistency:
-                    // a non-empty name is set, while an empty or undefined name is removed.
-                    if (newName) {
-                        version.name = newName;
-                    } else {
-                        delete version.name;
+                const versionIndex = state.history.findIndex(v => v.id === action.payload.versionId);
+                if (versionIndex > -1) {
+                    const originalVersion = state.history[versionIndex];
+                    if (!originalVersion) return;
+
+                    // Create a new object to ensure React's memoization detects the prop change.
+                    const updatedVersion = { ...originalVersion };
+
+                    if (action.payload.name !== undefined) {
+                        const newName = action.payload.name;
+                        if (newName) {
+                            updatedVersion.name = newName;
+                        } else {
+                            delete updatedVersion.name;
+                        }
                     }
+                    if (action.payload.description !== undefined) {
+                        const newDescription = action.payload.description;
+                        if (newDescription) {
+                            updatedVersion.description = newDescription;
+                        } else {
+                            delete updatedVersion.description;
+                        }
+                    }
+                    // Replace the old version object with the new one.
+                    // Immer will handle creating a new history array.
+                    state.history[versionIndex] = updatedVersion;
                 }
             }
         },
