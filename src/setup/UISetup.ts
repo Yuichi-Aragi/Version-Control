@@ -1,4 +1,4 @@
-import { Plugin, WorkspaceLeaf, MarkdownView, BasesView } from 'obsidian';
+import { Plugin, WorkspaceLeaf, FileView } from 'obsidian';
 import type { AppStore } from '../state/store';
 import { thunks } from '../state/thunks';
 import { VIEW_TYPE_VERSION_CONTROL } from '../constants';
@@ -71,16 +71,12 @@ export function registerCommands(plugin: Plugin, store: AppStore): void {
  */
 async function activateViewAndDispatch(plugin: Plugin, store: AppStore) {
     let contextLeaf: WorkspaceLeaf | null = null;
-    // Use the recommended API to find the active markdown or base view. This is safer
-    // than relying on `activeLeaf` which could be a non-file view.
-    let activeView = plugin.app.workspace.getActiveViewOfType(MarkdownView);
+    // Use the recommended API to find the active FileView. This is safer
+    // and more generic than checking for MarkdownView and then another type.
+    const activeView = plugin.app.workspace.getActiveViewOfType(FileView);
 
-    if (!activeView) {
-        activeView = plugin.app.workspace.getActiveViewOfType(BasesView);
-    }
-
-    // If there's an active markdown or base view with a file, its leaf is our context.
-    if (activeView && activeView.file) {
+    // If there's an active file view, its leaf is our context.
+    if (activeView) {
         contextLeaf = activeView.leaf;
     }
     
