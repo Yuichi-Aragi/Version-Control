@@ -32,4 +32,10 @@ export const DEFAULT_SETTINGS: VersionControlSettings = VersionControlSettingsSc
     version: "1.0.0",
     notes: {},
   },
+  enableWordCount: false,
+  includeMdSyntaxInWordCount: false,
+  enableCharacterCount: false,
+  includeMdSyntaxInCharacterCount: false,
+  enableLineCount: false,
+  includeMdSyntaxInLineCount: false,
 });

@@ -54,6 +54,12 @@ export const VersionControlSettingsSchema = z.object({
     pathFilters: z.array(z.string()).optional().default([]),
     centralManifest: CentralManifestSchema.optional().default({ version: "1.0.0", notes: {} }),
     isGlobal: z.boolean().optional(),
+    enableWordCount: z.boolean().optional().default(false),
+    includeMdSyntaxInWordCount: z.boolean().optional().default(false),
+    enableCharacterCount: z.boolean().optional().default(false),
+    includeMdSyntaxInCharacterCount: z.boolean().optional().default(false),
+    enableLineCount: z.boolean().optional().default(false),
+    includeMdSyntaxInLineCount: z.boolean().optional().default(false),
 });
 
 const PartialNoteSettingsSchema = VersionControlSettingsSchema.omit({
@@ -75,6 +81,12 @@ export const BranchSchema = z.object({
         name: z.string().optional(),
         description: z.string().optional(),
         size: z.number(),
+        wordCount: z.number().optional(),
+        wordCountWithMd: z.number().optional(),
+        charCount: z.number().optional(),
+        charCountWithMd: z.number().optional(),
+        lineCount: z.number().optional(),
+        lineCountWithoutMd: z.number().optional(),
     })),
     totalVersions: z.number().int(),
     settings: PartialNoteSettingsSchema.optional(),
@@ -102,6 +114,12 @@ export const VersionHistoryEntrySchema = z.object({
     name: z.string().optional(),
     description: z.string().optional(),
     size: z.number(),
+    wordCount: z.number().optional(),
+    wordCountWithMd: z.number().optional(),
+    charCount: z.number().optional(),
+    charCountWithMd: z.number().optional(),
+    lineCount: z.number().optional(),
+    lineCountWithoutMd: z.number().optional(),
 });
 
 export const VersionDataSchema = VersionHistoryEntrySchema.extend({
