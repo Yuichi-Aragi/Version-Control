@@ -218,6 +218,10 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
     const showNameEditor = isNamingThisVersion && (isManualVersionEdit || settings.enableVersionNaming);
     const showDescEditor = isNamingThisVersion && (isManualVersionEdit || settings.enableVersionDescription);
 
+    const wordCount = settings.includeMdSyntaxInWordCount ? version.wordCountWithMd : version.wordCount;
+    const charCount = settings.includeMdSyntaxInCharacterCount ? version.charCountWithMd : version.charCount;
+    const lineCount = settings.includeMdSyntaxInLineCount ? version.lineCount : version.lineCountWithoutMd;
+
     return (
         <div
             ref={entryRef}
@@ -266,7 +270,18 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
                 </span>
             </div>
 
-            <div className="v-version-content" aria-hidden>Size: {formatFileSize(typeof version.size === 'number' ? version.size : 0)}</div>
+            <div className="v-version-content" aria-hidden>
+                <span>Size: {formatFileSize(typeof version.size === 'number' ? version.size : 0)}</span>
+                {settings.enableWordCount && typeof wordCount === 'number' && (
+                    <span>Words: {wordCount}</span>
+                )}
+                {settings.enableCharacterCount && typeof charCount === 'number' && (
+                    <span>Chars: {charCount}</span>
+                )}
+                {settings.enableLineCount && typeof lineCount === 'number' && (
+                    <span>Lines: {lineCount}</span>
+                )}
+            </div>
             
             {(showDescEditor || (isNamingThisVersion && isManualVersionEdit)) && (
                 <div className="v-entry-description-editor">

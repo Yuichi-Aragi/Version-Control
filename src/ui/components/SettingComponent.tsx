@@ -10,6 +10,9 @@ interface SettingComponentProps {
 
 export const SettingComponent: FC<SettingComponentProps> = ({ name, desc, children }) => {
     const containerRef = useRef<HTMLDivElement>(null);
+    // Refs to hold the persistent Setting instance and React root
+    const settingRef = useRef<Setting | null>(null);
+    const reactRootRef = useRef<Root | null>(null);
 
     useLayoutEffect(() => {
         const container = containerRef.current;
@@ -17,27 +20,36 @@ export const SettingComponent: FC<SettingComponentProps> = ({ name, desc, childr
             return;
         }
 
-        // Always clear the container before creating a new Setting instance.
-        // This handles re-renders due to prop changes correctly.
-        container.empty();
-        const setting = new Setting(container)
-            .setName(name)
-            .setDesc(desc);
-
-        let root: Root | null = null;
-        if (children) {
-            const controlEl = setting.controlEl;
-            root = createRoot(controlEl);
-            root.render(children);
+        // Initialize Setting instance on first render
+        if (!settingRef.current) {
+            settingRef.current = new Setting(container);
         }
-        
-        // Return a cleanup function to be executed when the component unmounts
-        // or before the effect runs again. This is crucial for preventing memory leaks
-        // and ensuring stable integration with Obsidian's imperative DOM components.
-        return () => {
-            root?.unmount();
-        };
+
+        // Update properties imperatively. This avoids re-creating the entire DOM structure.
+        settingRef.current.setName(name).setDesc(desc);
+
+        // Manage the React root for children in the control element
+        if (children) {
+            if (!reactRootRef.current) {
+                // Create root if it doesn't exist
+                reactRootRef.current = createRoot(settingRef.current.controlEl);
+            }
+            // Render or update the children. React's diffing will preserve focus on the input.
+            reactRootRef.current.render(children);
+        } else if (reactRootRef.current) {
+            // If children are removed, unmount and clean up
+            reactRootRef.current.unmount();
+            reactRootRef.current = null;
+            settingRef.current.controlEl.empty();
+        }
     }, [name, desc, children]);
+
+    // Effect for final cleanup when the component is unmounted from the DOM
+    useLayoutEffect(() => {
+        return () => {
+            reactRootRef.current?.unmount();
+        };
+    }, []); // Empty dependency array ensures this runs only once on mount/unmount
 
     return <div ref={containerRef} />;
 };
