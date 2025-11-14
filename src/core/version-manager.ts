@@ -12,6 +12,7 @@ import { VersionContentRepository } from './storage/version-content-repository';
 import { TYPES } from '../types/inversify.types';
 import type VersionControlPlugin from '../main';
 import { DEFAULT_BRANCH_NAME } from '../constants';
+import { calculateTextStats } from '../utils/text-stats';
 
 /**
  * Manages the core business logic for versioning operations like saving,
@@ -101,6 +102,7 @@ export class VersionManager {
 
     try {
       const { size } = await this.versionContentRepo.write(noteId, versionId, contentToSave);
+      const textStats = calculateTextStats(contentToSave);
       const version_name = (name || '').trim();
       const timestamp = new Date().toISOString();
 
@@ -113,6 +115,12 @@ export class VersionManager {
               timestamp,
               size,
               ...(version_name && { name: version_name }),
+              wordCount: textStats.wordCount,
+              wordCountWithMd: textStats.wordCountWithMd,
+              charCount: textStats.charCount,
+              charCountWithMd: textStats.charCountWithMd,
+              lineCount: textStats.lineCount,
+              lineCountWithoutMd: textStats.lineCountWithoutMd,
             };
             branch.totalVersions = versionNumber;
             manifest.lastModified = timestamp;
@@ -138,6 +146,12 @@ export class VersionManager {
           timestamp,
           size,
           ...(version_name && { name: version_name }),
+          wordCount: savedVersionData.wordCount,
+          wordCountWithMd: savedVersionData.wordCountWithMd,
+          charCount: savedVersionData.charCount,
+          charCountWithMd: savedVersionData.charCountWithMd,
+          lineCount: savedVersionData.lineCount,
+          lineCountWithoutMd: savedVersionData.lineCountWithoutMd,
         },
         displayName,
         newNoteId: noteId,
@@ -213,6 +227,12 @@ export class VersionManager {
         size: data.size,
         ...(data.name && { name: data.name }),
         ...(data.description && { description: data.description }),
+        wordCount: data.wordCount,
+        wordCountWithMd: data.wordCountWithMd,
+        charCount: data.charCount,
+        charCountWithMd: data.charCountWithMd,
+        lineCount: data.lineCount,
+        lineCountWithoutMd: data.lineCountWithoutMd,
       }));
 
       return orderBy(history, ['versionNumber'], ['desc']);
