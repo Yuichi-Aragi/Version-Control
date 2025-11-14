@@ -1,6 +1,6 @@
 ***
 
-**Version: 1.9.22**
+**Version: 1.9.24**
 
 #### 🎨 Improvements & UX
 
