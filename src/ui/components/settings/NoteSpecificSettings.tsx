@@ -59,8 +59,15 @@ export const NoteSpecificSettings: React.FC = memo(() => {
                     Actions for "{file.basename}"
                 </h4>
                 <div className="v-settings-actions">
+                    {/* Primary Actions - Top Row */}
                     <SettingsAction text="Refresh history" icon="refresh-cw" onClick={handleRefresh} />
                     <SettingsAction text="Export history" icon="download-cloud" onClick={handleExport} disabled={!noteId} />
+                    
+                    {/* Meta/Support Actions - Middle Row */}
+                    <SettingsAction text="View Changelog" icon="file-text" onClick={handleViewChangelog} />
+                    <SettingsAction text="Report Issue" icon="bug" onClick={handleReportIssue} />
+                    
+                    {/* Destructive Action - Bottom Row (Full Width) */}
                     <SettingsAction 
                         text="Delete all versions" 
                         icon="trash-2" 
@@ -68,8 +75,6 @@ export const NoteSpecificSettings: React.FC = memo(() => {
                         isWarning 
                         disabled={!noteId || history.length === 0} 
                     />
-                    <SettingsAction text="View Changelog" icon="file-text" onClick={handleViewChangelog} />
-                    <SettingsAction text="Report Issue" icon="bug" onClick={handleReportIssue} />
                 </div>
             </div>
             <div className="v-settings-section" role="region" aria-labelledby="note-settings-title">
