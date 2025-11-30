@@ -1,5 +1,17 @@
 ***
 
+**Version: 1.9.25**
+
+#### ✨ New Features
+
+* **Smart Diff Mode:** Added a new diff mode for users working with very long documents, eliminating unnecessary scrolling to find changes.
+
+#### 🎨 Improvements & UX
+
+* **UI/UX Polish:** Implemented various UI/UX enhancements for a more better experience.
+
+***
+
 **Version: 1.9.24**
 
 #### ✨ New Features
