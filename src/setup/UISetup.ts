@@ -84,13 +84,38 @@ async function activateViewAndDispatch(plugin: Plugin, store: AppStore) {
     // or determine the context itself if the leaf is null.
     store.dispatch(thunks.initializeView(contextLeaf));
 
-    const existingLeaves = plugin.app.workspace.getLeavesOfType(VIEW_TYPE_VERSION_CONTROL);
-    const leafToReveal = existingLeaves[0];
+    // Determine the target window (document) based on the currently active UI context.
+    // This ensures that if the user is in a popout window, we target that window
+    // instead of defaulting to the main window.
+    const activeLeaf = plugin.app.workspace.getLeaf(false);
+    const targetDocument = activeLeaf?.view.containerEl.ownerDocument ?? document;
 
-    if (leafToReveal) {
-        plugin.app.workspace.revealLeaf(leafToReveal);
+    const existingLeaves = plugin.app.workspace.getLeavesOfType(VIEW_TYPE_VERSION_CONTROL);
+    
+    // Find a leaf that resides in the same window (document) as the active view.
+    const leafInTargetWindow = existingLeaves.find(leaf => leaf.view.containerEl.ownerDocument === targetDocument);
+
+    if (leafInTargetWindow) {
+        plugin.app.workspace.revealLeaf(leafInTargetWindow);
     } else {
-        const newLeaf = plugin.app.workspace.getRightLeaf(false);
+        let newLeaf: WorkspaceLeaf | null = null;
+
+        // Check if we are in the main window or a popout
+        if (targetDocument === document) {
+            // Main Window: Use the standard Right Sidebar
+            newLeaf = plugin.app.workspace.getRightLeaf(false);
+        } else {
+            // Popout Window: Sidebars are often not available or behave differently.
+            // We create a vertical split to the right of the active leaf to mimic the sidebar behavior.
+            // 'split' creates a new leaf adjacent to the currently active leaf.
+            newLeaf = plugin.app.workspace.getLeaf('split', 'vertical');
+        }
+
+        // Fallback: If specific creation failed, try creating a generic tab
+        if (!newLeaf) {
+             newLeaf = plugin.app.workspace.getLeaf(true);
+        }
+
         if (newLeaf) {
             await newLeaf.setViewState({
                 type: VIEW_TYPE_VERSION_CONTROL,
