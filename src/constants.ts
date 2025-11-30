@@ -18,6 +18,7 @@ export const DEFAULT_SETTINGS: VersionControlSettings = VersionControlSettingsSc
   useRelativeTimestamps: true,
   enableVersionNaming: true,
   enableVersionDescription: false,
+  showDescriptionInList: false,
   isListView: false,
   renderMarkdownInPreview: true,
   enableWatchMode: false,

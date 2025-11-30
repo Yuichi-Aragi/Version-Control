@@ -42,6 +42,7 @@ export const VersionControlSettingsSchema = z.object({
     useRelativeTimestamps: z.boolean().optional().default(true),
     enableVersionNaming: z.boolean().optional().default(true),
     enableVersionDescription: z.boolean().optional().default(false),
+    showDescriptionInList: z.boolean().optional().default(false),
     isListView: z.boolean().optional().default(false),
     renderMarkdownInPreview: z.boolean().optional().default(true),
     enableWatchMode: z.boolean().optional().default(false),
@@ -134,7 +135,7 @@ export const AppErrorSchema = z.object({
 
 // --- Diff-related Schemas ---
 
-export const DiffTypeSchema = z.enum(['lines', 'words', 'chars', 'json']);
+export const DiffTypeSchema = z.enum(['lines', 'words', 'chars', 'smart']);
 
 export const DiffTargetCurrentSchema = z.object({
     id: z.literal('current'),
@@ -147,9 +148,15 @@ export const DiffTargetSchema = z.union([VersionHistoryEntrySchema, DiffTargetCu
 
 export const ChangeSchema = z.object({
     value: z.string(),
-    added: z.boolean(),
-    removed: z.boolean(),
-    count: z.number(),
+    added: z.boolean().optional(),
+    removed: z.boolean().optional(),
+    count: z.number().optional(),
+    parts: z.array(z.object({
+        value: z.string(),
+        added: z.boolean().optional(),
+        removed: z.boolean().optional(),
+        count: z.number().optional(),
+    })).optional(),
 });
 
 export const DiffRequestSchema = z.object({
