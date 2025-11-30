@@ -5,7 +5,6 @@ import { DiffPanel } from './DiffPanel';
 import { ConfirmationPanel } from './ConfirmationPanel';
 import { ActionPanel } from './ActionPanel';
 import { ChangelogPanel } from './ChangelogPanel';
-import { DescriptionPanel } from './DescriptionPanel';
 import type { PanelState } from '../../../state/state';
 
 const renderPanelComponent = (p: NonNullable<PanelState>): React.ReactNode => {
@@ -20,8 +19,6 @@ const renderPanelComponent = (p: NonNullable<PanelState>): React.ReactNode => {
             return <ActionPanel panelState={p} />;
         case 'changelog':
             return <ChangelogPanel panelState={p} />;
-        case 'description':
-            return <DescriptionPanel />;
         default:
             return null;
     }

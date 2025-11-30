@@ -5,7 +5,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import * as Progress from '@radix-ui/react-progress';
 import type { VirtuosoHandle, ListRange } from 'react-virtuoso';
 import clsx from 'clsx';
-import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
+import { useAppDispatch } from '../../hooks/useRedux';
 import { thunks } from '../../../state/thunks';
 import type { DiffPanel as DiffPanelState } from '../../../state/state';
 import type { Change, DiffType } from '../../../types';
@@ -19,15 +19,13 @@ interface DiffPanelProps {
     panelState: DiffPanelState;
 }
 
-const getDiffOptions = (fileExtension: string | undefined) => {
+const getDiffOptions = () => {
     const options = [
+        { type: 'smart' as DiffType, label: 'Smart Diff' },
         { type: 'lines' as DiffType, label: 'Line Diff' },
         { type: 'words' as DiffType, label: 'Word Diff' },
         { type: 'chars' as DiffType, label: 'Character Diff' },
     ];
-    if (fileExtension === 'md') {
-        options.push({ type: 'json' as DiffType, label: 'JSON Diff' });
-    }
     return options;
 };
 
@@ -35,13 +33,12 @@ const DiffDropdown: FC<{
     currentType: DiffType;
     onSelect: (type: DiffType) => void;
     children: ReactNode;
-    fileExtension: string | undefined;
-}> = ({ currentType, onSelect, children, fileExtension }) => (
+}> = ({ currentType, onSelect, children }) => (
     <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>{children}</DropdownMenu.Trigger>
         <DropdownMenu.Portal>
             <DropdownMenu.Content className="v-diff-dropdown-content" sideOffset={5} collisionPadding={10}>
-                {getDiffOptions(fileExtension).map(({ type, label }) => (
+                {getDiffOptions().map(({ type, label }) => (
                     <DropdownMenu.Item key={type} className="v-diff-dropdown-item" onSelect={() => onSelect(type)}>
                         {label}
                         {currentType === type && <Icon name="check" />}
@@ -52,9 +49,33 @@ const DiffDropdown: FC<{
     </DropdownMenu.Root>
 );
 
+// Helper function to transform diff changes to properly typed Change objects
+const transformDiffChanges = (changes: any[]): Change[] => {
+    return changes.map(change => {
+        const changeObj = {
+            value: change.value,
+        } as Change;
+        
+        // Only add properties that have meaningful values
+        if (typeof change.added === 'boolean') {
+            changeObj.added = change.added;
+        }
+        if (typeof change.removed === 'boolean') {
+            changeObj.removed = change.removed;
+        }
+        if (typeof change.count === 'number') {
+            changeObj.count = change.count;
+        }
+        if (Array.isArray(change.parts)) {
+            changeObj.parts = change.parts;
+        }
+        
+        return changeObj;
+    });
+};
+
 export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
     const dispatch = useAppDispatch();
-    const { file } = useAppSelector(state => ({ file: state.file }));
     const { version1, version2, diffChanges, diffType, isReDiffing } = panelState;
 
     const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -80,11 +101,15 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
     const [lines, setLines] = useState<DiffLineData[]>([]);
     useEffect(() => {
         if (diffChanges) {
-            setLines(processLineChanges(diffChanges as Change[]));
+            // Transform diff changes to match Change type (remove undefined properties)
+            const transformedChanges = transformDiffChanges(diffChanges) as any;
+            
+            // processLineChanges handles 'smart' diff logic internally
+            setLines(processLineChanges(transformedChanges, diffType));
         } else {
             setLines([]);
         }
-    }, [diffChanges]);
+    }, [diffChanges, diffType]);
 
     // When the versions being compared change, reset initial load flag.
     useEffect(() => {
@@ -120,29 +145,32 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
 
     const debouncedSetSearchQuery = useCallback(debounce(setSearchQuery, 300, true), []);
 
+    const isLineBasedDiff = diffType === 'lines' || diffType === 'smart';
+
     const lineMatches = useMemo(() => {
-        if (diffType !== 'lines' || !searchQuery || !diffChanges) return [];
+        if (!isLineBasedDiff || !searchQuery || !diffChanges) return [];
         const regex = new RegExp(escapeRegExp(searchQuery), isCaseSensitive ? 'g' : 'gi');
         const allMatches: { lineIndex: number; matchIndexInLine: number }[] = [];
         lines.forEach((line, lineIndex) => {
+            if (line.type === 'collapsed') return;
             const lineContentMatches = [...line.content.matchAll(regex)];
             lineContentMatches.forEach((_, matchIndexInLine) => {
                 allMatches.push({ lineIndex, matchIndexInLine });
             });
         });
         return allMatches;
-    }, [searchQuery, isCaseSensitive, diffChanges, diffType, lines]);
+    }, [searchQuery, isCaseSensitive, diffChanges, isLineBasedDiff, lines]);
 
     useEffect(() => {
-        if (diffType !== 'lines' && searchQuery && unifiedViewContainerRef.current) {
+        if (!isLineBasedDiff && searchQuery && unifiedViewContainerRef.current) {
             const marks = Array.from(unifiedViewContainerRef.current.querySelectorAll('mark'));
             setUnifiedMatches(marks);
         } else {
             setUnifiedMatches([]);
         }
-    }, [searchQuery, isCaseSensitive, diffType, diffChanges]);
+    }, [searchQuery, isCaseSensitive, isLineBasedDiff, diffChanges]);
 
-    const totalMatches = diffType === 'lines' ? lineMatches.length : unifiedMatches.length;
+    const totalMatches = isLineBasedDiff ? lineMatches.length : unifiedMatches.length;
 
     const goToMatch = useCallback((direction: 'next' | 'prev') => {
         if (totalMatches === 0) return;
@@ -159,7 +187,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
     useEffect(() => {
         if (activeMatchIndex === -1) return;
 
-        if (diffType === 'lines') {
+        if (isLineBasedDiff) {
             const match = lineMatches[activeMatchIndex];
             if (match && virtuosoRef.current) {
                 virtuosoRef.current.scrollToIndex({
@@ -180,7 +208,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                 });
             }
         }
-    }, [activeMatchIndex, diffType, lineMatches, unifiedMatches]);
+    }, [activeMatchIndex, isLineBasedDiff, lineMatches, unifiedMatches]);
 
     const handleSearchInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         setLocalSearchQuery(e.target.value);
@@ -215,14 +243,14 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
     const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
 
     const changedLineIndices = useMemo(() => {
-        if (diffType !== 'lines' || !diffChanges) return [];
+        if (!isLineBasedDiff || !diffChanges) return [];
         return lines.reduce((acc, line, index) => {
             if (line.type === 'add' || line.type === 'remove') {
                 acc.push(index);
             }
             return acc;
         }, [] as number[]);
-    }, [diffChanges, diffType, lines]);
+    }, [diffChanges, isLineBasedDiff, lines]);
 
     useEffect(() => {
         setActiveChange(-1);
@@ -276,7 +304,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
     const handleDiffTypeChange = useCallback((newType: DiffType) => {
         if (newType === diffType) return;
 
-        if (diffType === 'lines') {
+        if (isLineBasedDiff) {
             if (virtuosoRangeRef.current) {
                 const firstItemIndex = virtuosoRangeRef.current.startIndex;
                 scrollAnchorRef.current = { type: 'line', index: firstItemIndex };
@@ -299,7 +327,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
 
         isInitialLoadRef.current = false;
         dispatch(thunks.recomputeDiff(newType));
-    }, [dispatch, diffType]);
+    }, [dispatch, diffType, isLineBasedDiff]);
 
     useEffect(() => {
         if (!diffChanges) return;
@@ -307,7 +335,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
         const timer = setTimeout(() => {
             const anchor = scrollAnchorRef.current;
             if (anchor) {
-                if (diffType === 'lines') {
+                if (isLineBasedDiff) {
                     if (anchor.type === 'change' && virtuosoRef.current) {
                         const targetLineIndex = lines.findIndex(l => l.originalChangeIndex >= anchor.index);
                         if (targetLineIndex !== -1) {
@@ -328,7 +356,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                 }
                 scrollAnchorRef.current = null;
             } else if (isInitialLoadRef.current) {
-                if (diffType === 'lines') {
+                if (isLineBasedDiff) {
                     if (virtuosoRef.current && changedLineIndices.length > 0) {
                         const firstChangeIndex = changedLineIndices[0];
                         if (firstChangeIndex !== undefined) {
@@ -351,7 +379,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
         }, 100);
 
         return () => clearTimeout(timer);
-    }, [diffChanges, diffType, lines, changedLineIndices]);
+    }, [diffChanges, diffType, lines, changedLineIndices, isLineBasedDiff]);
 
     const v1Label = version1.name ? `"${version1.name}" (V${version1.versionNumber})` : `Version ${version1.versionNumber}`;
     const v2Label = version2.id === 'current'
@@ -368,7 +396,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                         <div className="v-diff-panel-title" onClick={() => setIsMetaCollapsed(v => !v)}>
                             <Icon name={isMetaCollapsed ? 'chevron-right' : 'chevron-down'} />
                             <h3>Comparing</h3>
-                            {diffType === 'lines' && changedLineIndices.length > 0 && (
+                            {isLineBasedDiff && changedLineIndices.length > 0 && (
                                 <div className="v-diff-nav-actions">
                                     <button className="clickable-icon" aria-label="Previous change" title="Previous change" onClick={handlePrevChange}>
                                         <Icon name="chevron-up" />
@@ -383,7 +411,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                             <button className="clickable-icon" aria-label="Search diff" title="Search diff" onClick={handleToggleSearch}>
                                 <Icon name="search" />
                             </button>
-                            <DiffDropdown currentType={diffType} onSelect={handleDiffTypeChange} fileExtension={file?.extension}>
+                            <DiffDropdown currentType={diffType} onSelect={handleDiffTypeChange}>
                                 <button className="clickable-icon v-diff-dropdown-trigger" aria-label="Change diff type" title="Change diff type" onClick={e => e.stopPropagation()}>
                                     <Icon name="git-commit-horizontal" />
                                 </button>
@@ -451,7 +479,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                                     </div>
                                 )}
                                 <VirtualizedDiff
-                                    changes={diffChanges as Change[]}
+                                    changes={(diffChanges ? transformDiffChanges(diffChanges) : []) as any}
                                     diffType={diffType}
                                     virtuosoHandleRef={virtuosoRef}
                                     setVirtuosoScrollerRef={(_scroller) => {
@@ -462,8 +490,8 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                                     highlightedIndex={highlightedIndex}
                                     searchQuery={searchQuery}
                                     isCaseSensitive={isCaseSensitive}
-                                    activeMatchInfo={diffType === 'lines' ? (lineMatches[activeMatchIndex] ?? null) : null}
-                                    activeUnifiedMatchIndex={diffType !== 'lines' ? activeMatchIndex : -1}
+                                    activeMatchInfo={isLineBasedDiff ? (lineMatches[activeMatchIndex] ?? null) : null}
+                                    activeUnifiedMatchIndex={!isLineBasedDiff ? activeMatchIndex : -1}
                                     onLineClick={handleLineClick}
                                     onRangeChanged={handleRangeChanged}
                                 />
