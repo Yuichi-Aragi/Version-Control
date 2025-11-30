@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 
 import { expose } from 'comlink';
-import { diffLines, diffWordsWithSpace, diffChars, diffJson, type Change } from 'diff';
+import { diffLines, diffWordsWithSpace, diffChars, type Change } from 'diff';
 import type { DiffType } from '../types';
 
 /**
@@ -12,18 +12,15 @@ import type { DiffType } from '../types';
 const diffEngine = {
     /**
      * Calculates the differences between two strings using a specified algorithm.
-     * @param type The type of diff to perform ('lines', 'words', 'chars', 'json').
+     * @param type The type of diff to perform ('lines', 'words', 'chars', 'smart').
      * @param content1 The first string for comparison.
      * @param content2 The second string for comparison.
      * @returns An array of Change objects representing the differences.
-     * @throws {Error} If the diffing algorithm fails (e.g., invalid JSON).
+     * @throws {Error} If the diffing algorithm fails.
      */
     computeDiff(type: DiffType, content1: string, content2: string): Change[] {
         switch (type) {
             case 'lines':
-                // Using standard line diffing. The result is an array of Change objects where
-                // each object can represent multiple lines. The processing logic in the main
-                // thread is responsible for splitting these into individual lines for display.
                 return diffLines(content1, content2, { 
                     ignoreWhitespace: false,
                 });
@@ -33,16 +30,35 @@ const diffEngine = {
                 });
             case 'chars':
                 return diffChars(content1, content2);
-            case 'json': {
-                // The manager should have already validated that these are valid JSON strings.
-                // This parse is for the diffJson function's requirement for objects, not strings.
-                const parsed1 = JSON.parse(content1);
-                const parsed2 = JSON.parse(content2);
-                return diffJson(parsed1, parsed2);
+            case 'smart': {
+                // Smart diff: Perform line diff, then perform word diff on adjacent removed/added blocks
+                const changes = diffLines(content1, content2, {
+                    ignoreWhitespace: false,
+                });
+
+                for (let i = 0; i < changes.length - 1; i++) {
+                    const current = changes[i];
+                    const next = changes[i + 1];
+
+                    // Identify a "modification" hunk: a removal followed immediately by an addition
+                    if (current && next && current.removed && next.added) {
+                        const wordChanges = diffWordsWithSpace(current.value, next.value, {
+                            ignoreCase: false
+                        });
+                        
+                        // Attach the word-level diffs to both the removed and added line blocks.
+                        // The UI will use these to highlight specific words within the lines.
+                        // We cast to any to attach the 'parts' property which is defined in our extended Change schema.
+                        (current as any).parts = wordChanges;
+                        (next as any).parts = wordChanges;
+                        
+                        // Skip the next change since we just processed it as part of this pair
+                        i++;
+                    }
+                }
+                return changes;
             }
             default:
-                // This case should not be reached if DiffManager validates `diffType`.
-                // Throwing an error is a safe fallback.
                 throw new Error(`Unsupported diff type: ${type}`);
         }
     }
