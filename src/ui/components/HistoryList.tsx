@@ -113,58 +113,95 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
                 const src = Array.isArray(history) ? history : [];
                 const trimmedQuery = String(searchQuery ?? '').trim();
 
-                let filtered = src;
+                let result = src;
 
                 if (trimmedQuery !== '') {
                     const query = isSearchCaseSensitive ? trimmedQuery : trimmedQuery.toLowerCase();
 
-                    filtered = src.filter(v => {
-                        try {
-                            const versionId = `V${v.versionNumber ?? ''}`;
-                            const name = String(v.name ?? '');
-                            const timestampFromNow = (() => {
-                                try {
-                                    return (moment as any)(v.timestamp).fromNow(true);
-                                } catch {
-                                    return '';
-                                }
-                            })();
-                            const timestampFull = safeFormatTimestamp(v.timestamp, 'LLLL');
-                            const size = formatFileSize(typeof v.size === 'number' ? v.size : 0);
+                    // Calculate score for each item
+                    const scored = src.map(v => {
+                        let score = 0;
+                        const versionId = `V${v.versionNumber ?? ''}`;
+                        const name = String(v.name ?? '');
+                        const description = String(v.description ?? '');
+                        
+                        // Prepare searchable fields based on settings
+                        const size = formatFileSize(typeof v.size === 'number' ? v.size : 0);
+                        
+                        // Timestamp search based on setting
+                        const timestampStr = settings.useRelativeTimestamps 
+                            ? (() => { try { return (moment as any)(v.timestamp).fromNow(true); } catch { return ''; } })()
+                            : safeFormatTimestamp(v.timestamp, 'LLLL');
 
-                            const searchableString = [versionId, name, timestampFromNow, timestampFull, size].join(' ');
-                            return isSearchCaseSensitive ? searchableString.includes(query) : searchableString.toLowerCase().includes(query);
-                        } catch (err) {
-                            return false;
-                        }
+                        // Stats based on settings
+                        const wordCount = settings.enableWordCount 
+                            ? String(settings.includeMdSyntaxInWordCount ? v.wordCountWithMd : v.wordCount) 
+                            : '';
+                        const charCount = settings.enableCharacterCount
+                            ? String(settings.includeMdSyntaxInCharacterCount ? v.charCountWithMd : v.charCount)
+                            : '';
+                        const lineCount = settings.enableLineCount
+                            ? String(settings.includeMdSyntaxInLineCount ? v.lineCount : v.lineCountWithoutMd)
+                            : '';
+
+                        // Helper for case-insensitive check
+                        const check = (val: string) => isSearchCaseSensitive ? val : val.toLowerCase();
+                        const q = query;
+
+                        // Scoring Logic
+                        if (check(versionId) === q) score += 100;
+                        else if (check(versionId).includes(q)) score += 80;
+
+                        if (check(name).startsWith(q)) score += 60;
+                        else if (check(name).includes(q)) score += 50;
+
+                        if (check(description).includes(q)) score += 40;
+
+                        if (check(size).includes(q)) score += 20;
+                        if (check(timestampStr).includes(q)) score += 20;
+                        
+                        if (wordCount && check(wordCount) === q) score += 15;
+                        if (charCount && check(charCount) === q) score += 15;
+                        if (lineCount && check(lineCount) === q) score += 15;
+
+                        return { version: v, score };
                     });
-                }
 
-                const iteratee = (v: VersionHistoryEntryType): string | number => {
-                    const prop = sortOrder?.property ?? 'versionNumber';
-                    switch (prop) {
-                        case 'name':
-                            return (String(v.name ?? '').toLowerCase()) || '\uffff';
-                        case 'size':
-                            return typeof v.size === 'number' ? v.size : 0;
-                        case 'timestamp': {
-                            const ms = (() => {
-                                const t = v.timestamp;
-                                const parsed = Number(new Date(String(t)));
-                                return Number.isFinite(parsed) ? parsed : 0;
-                            })();
-                            return ms;
+                    // Filter out non-matches and sort by score
+                    const filteredScored = scored.filter(item => item.score > 0);
+                    
+                    // Sort by score descending, then by user selected sort order
+                    const sortedByScore = orderBy(filteredScored, ['score'], ['desc']);
+                    
+                    result = sortedByScore.map(item => item.version);
+
+                } else {
+                    // Standard sorting when no search
+                    const iteratee = (v: VersionHistoryEntryType): string | number => {
+                        const prop = sortOrder?.property ?? 'versionNumber';
+                        switch (prop) {
+                            case 'name':
+                                return (String(v.name ?? '').toLowerCase()) || '\uffff';
+                            case 'size':
+                                return typeof v.size === 'number' ? v.size : 0;
+                            case 'timestamp': {
+                                const ms = (() => {
+                                    const t = v.timestamp;
+                                    const parsed = Number(new Date(String(t)));
+                                    return Number.isFinite(parsed) ? parsed : 0;
+                                })();
+                                return ms;
+                            }
+                            case 'versionNumber':
+                            default:
+                                const num = Number((v as any).versionNumber);
+                                return Number.isFinite(num) ? num : 0;
                         }
-                        case 'versionNumber':
-                        default:
-                            const num = Number((v as any).versionNumber);
-                            return Number.isFinite(num) ? num : 0;
-                    }
-                };
+                    };
 
-                const dir = sortOrder?.direction === 'asc' ? 'asc' : 'desc';
-
-                const result = orderBy(filtered, [iteratee], [dir]);
+                    const dir = sortOrder?.direction === 'asc' ? 'asc' : 'desc';
+                    result = orderBy(src, [iteratee], [dir]);
+                }
 
                 if (isMountedRef.current) {
                     setProcessedHistory(result);
@@ -178,7 +215,7 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
                 }
             }
         });
-    }, [status, history, searchQuery, isSearchCaseSensitive, sortOrder, startTransition, onCountChange]);
+    }, [status, history, searchQuery, isSearchCaseSensitive, sortOrder, startTransition, onCountChange, settings]);
 
 
     if (status === AppStatus.LOADING) {
@@ -215,7 +252,11 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
                     if (!version) return null;
                     return (
                         <div className={isListView ? 'v-history-item-list-wrapper' : 'v-history-item-card-wrapper'} data-version-id={String(version.id)}>
-                            <HistoryEntry version={version} />
+                            <HistoryEntry 
+                                version={version} 
+                                searchQuery={searchQuery}
+                                isSearchCaseSensitive={isSearchCaseSensitive}
+                            />
                         </div>
                     );
                 }}

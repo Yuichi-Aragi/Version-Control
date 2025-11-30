@@ -108,11 +108,6 @@ export const ActionBar: FC = () => {
         dispatch(thunks.showSortMenu());
     }, [dispatch]);
 
-    const handleOpenDescriptionDrawer = useCallback(() => {
-        if (status !== AppStatus.READY || isBusy) return;
-        dispatch(actions.openPanel({ type: 'description' }));
-    }, [dispatch, status, isBusy]);
-
     const handleOpenBranchDrawer = useCallback(() => {
         if (status !== AppStatus.READY || isBusy || file?.extension === 'base') return;
         dispatch(thunks.showBranchSwitcher());
@@ -150,31 +145,27 @@ export const ActionBar: FC = () => {
         <div className={clsx('v-actions-container', { 'is-searching': isSearchActive })}>
             <div className="v-top-actions">
                 <div className="v-top-actions-left-group">
-                    <DropdownMenu.Root>
-                        <DropdownMenu.Trigger asChild>
-                            <button
-                                className="clickable-icon"
-                                aria-label="More options"
-                                disabled={isBusy}
-                            >
-                                <Icon name="menu" />
-                            </button>
-                        </DropdownMenu.Trigger>
-                        <DropdownMenu.Portal>
-                            <DropdownMenu.Content className="v-actionbar-dropdown-content" sideOffset={5} collisionPadding={10}>
-                                <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenDescriptionDrawer}>
-                                    <span>Descriptions</span>
-                                    <Icon name="file-text" />
-                                </DropdownMenu.Item>
-                                {file?.extension !== 'base' && (
+                    {file?.extension !== 'base' && (
+                        <DropdownMenu.Root>
+                            <DropdownMenu.Trigger asChild>
+                                <button
+                                    className="clickable-icon"
+                                    aria-label="More options"
+                                    disabled={isBusy}
+                                >
+                                    <Icon name="menu" />
+                                </button>
+                            </DropdownMenu.Trigger>
+                            <DropdownMenu.Portal>
+                                <DropdownMenu.Content className="v-actionbar-dropdown-content" sideOffset={5} collisionPadding={10}>
                                     <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenBranchDrawer}>
                                         <span>Branches</span>
                                         <Icon name="git-branch" />
                                     </DropdownMenu.Item>
-                                )}
-                            </DropdownMenu.Content>
-                        </DropdownMenu.Portal>
-                    </DropdownMenu.Root>
+                                </DropdownMenu.Content>
+                            </DropdownMenu.Portal>
+                        </DropdownMenu.Root>
+                    )}
                     
                     <div className="v-branch-switcher-container">
                         {availableBranches.length > 1 && (

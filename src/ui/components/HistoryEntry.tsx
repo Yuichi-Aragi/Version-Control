@@ -1,32 +1,55 @@
 import { moment } from 'obsidian';
 import clsx from 'clsx';
-import { type FC, type MouseEvent, type KeyboardEvent, useCallback, useEffect, useRef, memo, useMemo, useState, useLayoutEffect, type FocusEvent } from 'react';
+import { type FC, type MouseEvent, type KeyboardEvent, useCallback, useEffect, useRef, memo, useMemo, useState, useLayoutEffect, type FocusEvent, Fragment } from 'react';
 import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
 import type { VersionHistoryEntry as VersionHistoryEntryType } from '../../types';
 import { formatFileSize } from '../utils/dom';
+import { escapeRegExp } from '../utils/strings';
 import { thunks } from '../../state/thunks';
 import { actions } from '../../state/appSlice';
 import { versionActions } from '../VersionActions';
 import { Icon } from './Icon';
 import type { AppStore } from '../../state/store';
 import { useTime } from '../contexts/TimeContext';
-import type { PanelState } from '../../state/state';
 
 interface HistoryEntryProps {
     version: VersionHistoryEntryType;
+    searchQuery?: string;
+    isSearchCaseSensitive?: boolean;
 }
 
 const MAX_NAME_LENGTH = 256;
 const MAX_DESC_LENGTH = 2048;
 
-export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
+const HighlightedText: FC<{ text: string; highlight?: string; isCaseSensitive?: boolean }> = memo(({ text, highlight, isCaseSensitive }) => {
+    if (!highlight || !highlight.trim() || !text) {
+        return <>{text}</>;
+    }
+    try {
+        const escaped = escapeRegExp(highlight);
+        const regex = new RegExp(`(${escaped})`, isCaseSensitive ? 'g' : 'gi');
+        const parts = text.split(regex);
+        return (
+            <>
+                {parts.map((part, i) =>
+                    regex.test(part) ? <mark key={i}>{part}</mark> : <Fragment key={i}>{part}</Fragment>
+                )}
+            </>
+        );
+    } catch (e) {
+        return <>{text}</>;
+    }
+});
+HighlightedText.displayName = 'HighlightedText';
+
+export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery, isSearchCaseSensitive }) => {
     const dispatch = useAppDispatch();
-    const { settings, namingVersionId, highlightedVersionId, isManualVersionEdit, panel } = useAppSelector(state => ({
+    const { settings, namingVersionId, highlightedVersionId, isManualVersionEdit, isSearchActive } = useAppSelector(state => ({
         settings: state.settings,
         namingVersionId: state.namingVersionId,
         highlightedVersionId: state.highlightedVersionId,
         isManualVersionEdit: state.isManualVersionEdit,
-        panel: state.panel,
+        isSearchActive: state.isSearchActive,
     }));
     const { now } = useTime();
 
@@ -36,18 +59,9 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
     
     const ignoreBlurRef = useRef(false);
     const isEditButtonAction = useRef(false);
+    const shouldIgnoreClickRef = useRef(false);
 
-    // This helper is needed because panels can be stacked.
-    const isPanelTypeActive = (p: PanelState | null, type: NonNullable<PanelState>['type']): boolean => {
-        if (!p) return false;
-        if (p.type === type) return true;
-        if (p.type === 'stacked') {
-            return isPanelTypeActive(p.base, type) || isPanelTypeActive(p.overlay, type);
-        }
-        return false;
-    };
-
-    const isNamingThisVersion = version.id === namingVersionId && !isPanelTypeActive(panel, 'description');
+    const isNamingThisVersion = version.id === namingVersionId;
 
     // Local state for controlled inputs, active only during editing
     const [nameValue, setNameValue] = useState('');
@@ -78,11 +92,28 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
         }
     }, [descValue, isNamingThisVersion]);
 
+    const handleMouseDown = useCallback((e: MouseEvent<HTMLDivElement>) => {
+        // If any version is being edited, prevent the subsequent click from triggering the preview.
+        // This ensures that clicking away from an active input only commits the change (via blur)
+        // and doesn't immediately navigate/open a panel.
+        if (namingVersionId !== null) {
+            shouldIgnoreClickRef.current = true;
+        } else {
+            shouldIgnoreClickRef.current = false;
+        }
+    }, [namingVersionId]);
+
     const handleEntryClick = useCallback((e: MouseEvent<HTMLDivElement>) => {
         try {
             e.preventDefault();
             e.stopPropagation();
         } catch { /* noop */ }
+
+        if (shouldIgnoreClickRef.current) {
+            shouldIgnoreClickRef.current = false;
+            return;
+        }
+
         dispatch(thunks.viewVersionInPanel(version));
     }, [dispatch, version]);
 
@@ -222,6 +253,20 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
     const charCount = settings.includeMdSyntaxInCharacterCount ? version.charCountWithMd : version.charCount;
     const lineCount = settings.includeMdSyntaxInLineCount ? version.lineCount : version.lineCountWithoutMd;
 
+    // Logic for showing description in list/footer
+    // Show description if:
+    // 1. Search is active AND description exists (requirement: "renders name and description both... until search bar is active")
+    // 2. Setting is enabled AND description exists
+    const hasDescription = !!version.description && version.description.trim().length > 0;
+    const shouldShowDescription = hasDescription && (isSearchActive || settings.showDescriptionInList);
+    
+    // In search mode, we must show description if it exists.
+    // If settings.showDescriptionInList is ON, we replace buttons with description.
+    // If OFF but Search Active, we also show description.
+    // The requirement says "Replace the action buttons area".
+    const showFooterDescription = shouldShowDescription && !settings.isListView;
+    const showListDescription = shouldShowDescription && settings.isListView;
+
     return (
         <div
             ref={entryRef}
@@ -233,6 +278,7 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
             role="listitem"
             tabIndex={0}
             onClick={handleEntryClick}
+            onMouseDown={handleMouseDown}
             onContextMenu={handleContextMenu}
             onKeyDown={handleKeyDown}
             onBlur={isNamingThisVersion ? handleContainerBlur : undefined}
@@ -240,7 +286,13 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
             data-version-id={String(version.id)}
         >
             <div className="v-entry-header">
-                <span className="v-version-id" aria-hidden>V{String(version.versionNumber ?? '')}</span>
+                <span className="v-version-id" aria-hidden>
+                    <HighlightedText 
+                        text={`V${String(version.versionNumber ?? '')}`} 
+                        {...(searchQuery && { highlight: searchQuery })}
+                        {...(isSearchCaseSensitive !== undefined && { isCaseSensitive: isSearchCaseSensitive })}
+                    />
+                </span>
 
                 {showNameEditor ? (
                     <input
@@ -258,7 +310,13 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
                 ) : (
                     <div className="v-entry-main-info">
                         {version.name ? (
-                            <div className="v-version-name">{version.name}</div>
+                            <div className="v-version-name">
+                                <HighlightedText 
+                                    text={version.name} 
+                                    {...(searchQuery && { highlight: searchQuery })}
+                                    {...(isSearchCaseSensitive !== undefined && { isCaseSensitive: isSearchCaseSensitive })}
+                                />
+                            </div>
                         ) : (
                             <div className="v-version-name is-empty" />
                         )}
@@ -266,20 +324,48 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
                 )}
 
                 <span className="v-version-timestamp" title={tooltipTimestamp}>
-                    {timestampText}
+                    <HighlightedText 
+                        text={timestampText} 
+                        {...(searchQuery && { highlight: searchQuery })}
+                        {...(isSearchCaseSensitive !== undefined && { isCaseSensitive: isSearchCaseSensitive })}
+                    />
                 </span>
             </div>
 
             <div className="v-version-content" aria-hidden>
-                <span>Size: {formatFileSize(typeof version.size === 'number' ? version.size : 0)}</span>
+                <span>
+                    Size: <HighlightedText 
+                        text={formatFileSize(typeof version.size === 'number' ? version.size : 0)} 
+                        {...(searchQuery && { highlight: searchQuery })}
+                        {...(isSearchCaseSensitive !== undefined && { isCaseSensitive: isSearchCaseSensitive })}
+                    />
+                </span>
                 {settings.enableWordCount && typeof wordCount === 'number' && (
-                    <span>Words: {wordCount}</span>
+                    <span>
+                        Words: <HighlightedText 
+                            text={String(wordCount)} 
+                            {...(searchQuery && { highlight: searchQuery })}
+                            {...(isSearchCaseSensitive !== undefined && { isCaseSensitive: isSearchCaseSensitive })}
+                        />
+                    </span>
                 )}
                 {settings.enableCharacterCount && typeof charCount === 'number' && (
-                    <span>Chars: {charCount}</span>
+                    <span>
+                        Chars: <HighlightedText 
+                            text={String(charCount)} 
+                            {...(searchQuery && { highlight: searchQuery })}
+                            {...(isSearchCaseSensitive !== undefined && { isCaseSensitive: isSearchCaseSensitive })}
+                        />
+                    </span>
                 )}
                 {settings.enableLineCount && typeof lineCount === 'number' && (
-                    <span>Lines: {lineCount}</span>
+                    <span>
+                        Lines: <HighlightedText 
+                            text={String(lineCount)} 
+                            {...(searchQuery && { highlight: searchQuery })}
+                            {...(isSearchCaseSensitive !== undefined && { isCaseSensitive: isSearchCaseSensitive })}
+                        />
+                    </span>
                 )}
             </div>
             
@@ -298,48 +384,71 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version }) => {
                 </div>
             )}
 
+            {/* Description display for List View */}
+            {showListDescription && !isNamingThisVersion && (
+                <div className="v-history-description">
+                    <HighlightedText 
+                        text={version.description || ''} 
+                        {...(searchQuery && { highlight: searchQuery })}
+                        {...(isSearchCaseSensitive !== undefined && { isCaseSensitive: isSearchCaseSensitive })}
+                    />
+                </div>
+            )}
+
             {!settings?.isListView && (
                 <div className={clsx("v-entry-footer", { 'is-hidden': isNamingThisVersion })}>
-                    <button
-                        className="v-action-btn"
-                        aria-label="Preview in panel"
-                        onClick={(e) => { e.stopPropagation(); dispatch(thunks.viewVersionInPanel(version)); }}
-                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); dispatch(thunks.viewVersionInPanel(version)); } }}
-                    >
-                        <Icon name="eye" />
-                    </button>
-
-                    {safeActions.map(action => {
-                        const handleAction = (e: React.SyntheticEvent) => {
-                            e.stopPropagation();
-                            // If this is the edit action, set a flag. This prevents the onBlur handler
-                            // from immediately closing the editor when the button disappears on re-render.
-                            if (action.id === 'edit') {
-                                isEditButtonAction.current = true;
-                            }
-                            try {
-                                if (typeof action.actionHandler === 'function') {
-                                    action.actionHandler(version, { dispatch } as unknown as AppStore);
-                                } else {
-                                    console.warn('HistoryEntry: action missing handler', action);
-                                }
-                            } catch (err) {
-                                console.error('HistoryEntry: action handler threw', err);
-                            }
-                        };
-
-                        return (
+                    {showFooterDescription ? (
+                        <div className="v-history-description">
+                            <HighlightedText 
+                                text={version.description || ''} 
+                                {...(searchQuery && { highlight: searchQuery })}
+                                {...(isSearchCaseSensitive !== undefined && { isCaseSensitive: isSearchCaseSensitive })}
+                            />
+                        </div>
+                    ) : (
+                        <>
                             <button
-                                key={String(action.id)}
-                                className={clsx('v-action-btn', { 'danger': Boolean(action.isDanger) })}
-                                aria-label={String(action.tooltip ?? '')}
-                                onClick={handleAction}
-                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAction(e); } }}
+                                className="v-action-btn"
+                                aria-label="Preview in panel"
+                                onClick={(e) => { e.stopPropagation(); dispatch(thunks.viewVersionInPanel(version)); }}
+                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); dispatch(thunks.viewVersionInPanel(version)); } }}
                             >
-                                <Icon name={String(action.icon ?? '')} />
+                                <Icon name="eye" />
                             </button>
-                        );
-                    })}
+
+                            {safeActions.map(action => {
+                                const handleAction = (e: React.SyntheticEvent) => {
+                                    e.stopPropagation();
+                                    // If this is the edit action, set a flag. This prevents the onBlur handler
+                                    // from immediately closing the editor when the button disappears on re-render.
+                                    if (action.id === 'edit') {
+                                        isEditButtonAction.current = true;
+                                    }
+                                    try {
+                                        if (typeof action.actionHandler === 'function') {
+                                            action.actionHandler(version, { dispatch } as unknown as AppStore);
+                                        } else {
+                                            console.warn('HistoryEntry: action missing handler', action);
+                                        }
+                                    } catch (err) {
+                                        console.error('HistoryEntry: action handler threw', err);
+                                    }
+                                };
+
+                                return (
+                                    <button
+                                        key={String(action.id)}
+                                        className={clsx('v-action-btn', { 'danger': Boolean(action.isDanger) })}
+                                        aria-label={String(action.tooltip ?? '')}
+                                        onClick={handleAction}
+                                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAction(e); } }}
+                                    >
+                                        <Icon name={String(action.icon ?? '')} />
+                                    </button>
+                                );
+                            })}
+                        </>
+                    )}
                 </div>
             )}
         </div>
