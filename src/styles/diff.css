@@ -1,40 +1,38 @@
 /* src/styles/diff.css */
 
-/* Diff Panel Styles */
-.v-diff-panel-content.is-loading {
+/* --- Main Panel Layout --- */
+.v-diff-panel-content {
     display: flex;
     flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    background-color: var(--background-primary);
+}
+
+.v-diff-panel-content.is-loading {
     align-items: center;
     justify-content: center;
     gap: var(--size-4-4);
     color: var(--text-muted);
-    flex-grow: 1;
 }
 
-/* NEW: Wrapper for title and nav actions in diff panel header */
+/* --- Header & Meta --- */
 .v-diff-panel-title {
     display: flex;
     align-items: center;
-    gap: var(--size-4-2); /* Reduced gap */
+    gap: var(--size-4-2);
     flex-grow: 1;
-    min-width: 0; /* Allow h3 to ellipsis */
-    cursor: pointer; /* NEW: Indicate clickable area for collapsing meta */
+    min-width: 0;
+    cursor: pointer;
+    user-select: none;
 }
 .v-diff-panel-title h3 {
-    flex-grow: 0; /* Override default panel header h3 style */
-    padding-left: 0; /* Reduced padding */
+    margin: 0;
+    flex-grow: 0;
 }
 .v-diff-panel-title .lucide {
     color: var(--text-muted);
-    transition: transform 0.3s ease-in-out;
-}
-/* FIX: Use direct child selector to avoid affecting nested icons */
-.v-diff-panel-title > .lucide-chevron-right {
-    transform: rotate(0deg);
-}
-/* FIX: Use direct child selector to avoid affecting nested icons */
-.v-diff-panel-title > .lucide-chevron-down {
-    transform: rotate(90deg);
+    transition: transform 0.2s ease;
 }
 
 .v-diff-nav-actions {
@@ -42,75 +40,106 @@
     align-items: center;
     gap: var(--size-4-1);
     margin-left: var(--size-4-2);
+    padding-left: var(--size-4-2);
+    border-left: 1px solid var(--background-modifier-border);
 }
 
-/* NEW: Meta container for diff panel and tab view - now a collapsible grid */
 .v-diff-meta-container {
-    padding-bottom: 0;
-    margin-bottom: 0;
-    border-bottom: 1px solid var(--background-modifier-border);
-    flex-shrink: 0; /* PREVENT SHRINKING in flex column layout */
-    
-    will-change: grid-template-rows, padding, margin;
+    background-color: var(--background-secondary);
+    /* Border removed from container to prevent visibility when collapsed */
+    flex-shrink: 0;
+    will-change: grid-template-rows;
     display: grid;
     grid-template-rows: 0fr;
-    transition: grid-template-rows 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-                padding-bottom 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-                margin-bottom 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     overflow: hidden;
+    /* FIX: Ensure container allows shrinking to 0 */
+    min-height: 0;
 }
+
 .v-diff-meta-container.is-open {
     grid-template-rows: 1fr;
-    padding-bottom: var(--size-4-2);
-    margin-bottom: var(--size-4-2);
 }
+
+/* FIX: Ensure visibility is toggled to handle cases where 0fr doesn't fully collapse */
+.v-diff-meta-container:not(.is-open) {
+    visibility: hidden;
+    transition: grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear 0.3s;
+}
+
+.v-diff-meta-container.is-open {
+    visibility: visible;
+    transition: grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear 0s;
+}
+
 .v-diff-meta-content-wrapper {
     min-height: 0;
+    padding: var(--size-4-2) var(--size-4-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-1);
+    /* Border moved to wrapper so it hides completely when collapsed */
+    border-bottom: 1px solid var(--background-modifier-border);
+    /* FIX: Ensure content doesn't overflow during animation */
     overflow: hidden;
+    box-sizing: border-box;
 }
+
 .v-diff-meta-content-wrapper .v-meta-label {
     color: var(--text-muted);
-    font-size: var(--font-ui-small);
+    font-size: var(--font-ui-smaller);
+    font-family: var(--font-monospace);
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-2);
 }
+.v-meta-label::before {
+    content: '';
+    display: block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+.v-meta-label:first-child::before { background-color: var(--color-red); }
+.v-meta-label:last-child::before { background-color: var(--color-green); }
 
 
+/* --- Diff Content Area --- */
 .v-diff-content-wrapper {
     font-family: var(--font-monospace);
     font-size: var(--font-ui-smaller);
-    line-height: 1.6; /* Increased for readability */
-    background-color: var(--background-secondary);
-    border-radius: var(--radius-m);
+    line-height: 1.5;
+    background-color: var(--background-primary);
     overflow-y: auto;
-    padding: var(--size-4-2) 0;
-    position: relative; /* For progress bar */
-    /* FIX: Use explicit flex properties and min-height to ensure robust sizing, 
-       especially on mobile when the virtual keyboard resizes the viewport. */
     flex: 1 1 0;
     min-height: 0;
+    position: relative;
+    /* Ensure tab size is reasonable for code */
+    tab-size: 4;
 }
 
-/* NEW: Styles for re-diffing progress bar */
+/* Progress Overlay */
 .v-diff-progress-overlay {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(var(--background-secondary-rgb), 0.8);
+    background-color: rgba(var(--background-primary-rgb), 0.8);
+    backdrop-filter: blur(2px);
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    z-index: 10;
-    gap: var(--size-4-2);
+    z-index: 20;
+    gap: var(--size-4-3);
     color: var(--text-muted);
 }
 .v-diff-progress-bar {
-    width: 50%;
-    max-width: 200px;
+    width: 200px;
     height: 4px;
     background-color: var(--background-modifier-border);
-    border-radius: var(--radius-s);
+    border-radius: var(--radius-full);
     overflow: hidden;
 }
 .v-diff-progress-indicator {
@@ -118,10 +147,12 @@
     height: 100%;
     background-color: var(--interactive-accent);
     animation: v-progress-indeterminate 1.5s ease-in-out infinite;
+    transform-origin: left;
 }
 @keyframes v-progress-indeterminate {
-    0% { transform: translateX(-100%); }
-    100% { transform: translateX(100%); }
+    0% { transform: translateX(-100%) scaleX(0.2); }
+    50% { transform: translateX(0%) scaleX(0.5); }
+    100% { transform: translateX(100%) scaleX(0.2); }
 }
 
 
@@ -129,126 +160,196 @@
 .diff-line {
     display: flex;
     width: 100%;
-    padding: 0; /* Padding is handled by children */
-    min-height: 1.6em; /* Match line-height */
+    min-height: 1.5em; /* Ensure empty lines have height */
     box-sizing: border-box;
-    outline: 2px solid transparent;
-    outline-offset: -2px;
-    transition: outline-color 0.2s ease;
+    /* Border on the left for change indication */
+    border-left: 3px solid transparent; 
+    transition: background-color 0.1s ease;
 }
 
-/* NEW: Highlight for diff navigation */
-@keyframes v-highlight-outline-fade {
-    0% { outline-color: var(--interactive-accent); }
-    100% { outline-color: transparent; }
+/* Scroll Highlight Animation */
+@keyframes v-flash-highlight {
+    0% { background-color: var(--text-highlight-bg); }
+    100% { background-color: transparent; }
 }
 .diff-line.is-scrolled-to {
-    animation: v-highlight-outline-fade 1.5s ease-out forwards;
+    animation: v-flash-highlight 1.5s ease-out;
 }
 
-
-.diff-line:hover {
-    background-color: var(--background-modifier-hover);
-}
-
+/* Gutter (Line Numbers) */
 .diff-line-gutter {
     display: flex;
     flex-shrink: 0;
-    width: 8ch; /* 4ch for each number */
+    /* Fixed width for stability, adjusted for 2 columns of numbers */
+    min-width: 4rem; 
     user-select: none;
-    text-align: right;
-    /* FIX: Reduce horizontal padding to a minimum */
-    padding: 0 var(--size-4-1);
+    padding: 0 var(--size-4-2);
+    background-color: var(--background-secondary);
     border-right: 1px solid var(--background-modifier-border);
+    color: var(--text-muted);
+    justify-content: flex-end;
+    gap: var(--size-4-2);
+    align-items: flex-start; /* Align numbers to top of line */
 }
 
 .diff-line-num {
     display: inline-block;
-    width: 4ch;
-    color: var(--text-faint);
+    width: 3ch;
+    text-align: right;
+    opacity: 0.7;
 }
+.diff-line-num.old { color: var(--text-faint); }
+.diff-line-num.new { color: var(--text-muted); }
 
-.diff-line-prefix {
-    flex-shrink: 0;
-    width: 2.5ch; /* A bit more space for the symbol */
-    text-align: center;
-    user-select: none;
-    font-weight: var(--font-semibold);
-    padding-right: var(--size-4-1);
-}
 
+/* Content Area */
 .diff-line-content {
     flex-grow: 1;
     white-space: pre-wrap;
     word-break: break-all;
-    padding-left: var(--size-4-2);
+    padding: 0 var(--size-4-3); /* Comfortable padding */
     user-select: text;
+    position: relative;
+    display: flex; /* To align marker and text */
 }
 
-/* Added lines */
-.diff-add {
-    background-color: rgba(var(--color-green-rgb), 0.15);
+/* Marker (+/-) */
+.diff-line-marker {
+    display: inline-block;
+    width: 1.5ch;
+    flex-shrink: 0;
+    user-select: none;
+    opacity: 0.6;
+    font-weight: bold;
 }
-.diff-add .diff-line-prefix {
+
+/* Text */
+.diff-line-text {
+    flex-grow: 1;
+}
+
+
+/* --- Change Types --- */
+
+/* Added Lines */
+.diff-add {
+    background-color: rgba(var(--color-green-rgb), 0.12);
+    border-left-color: var(--color-green);
+}
+.diff-add .diff-line-gutter {
+    background-color: rgba(var(--color-green-rgb), 0.18);
+    color: var(--text-normal);
+}
+.diff-add .diff-line-marker {
     color: var(--color-green);
 }
-.diff-add .diff-line-num.new {
-    font-weight: var(--font-semibold);
+
+/* Removed Lines */
+.diff-remove {
+    background-color: rgba(var(--color-red-rgb), 0.12);
+    border-left-color: var(--color-red);
+}
+.diff-remove .diff-line-gutter {
+    background-color: rgba(var(--color-red-rgb), 0.18);
     color: var(--text-normal);
 }
-
-/* Removed lines */
-.diff-remove {
-    background-color: rgba(var(--color-red-rgb), 0.15);
-}
-.diff-remove .diff-line-prefix {
+.diff-remove .diff-line-marker {
     color: var(--color-red);
 }
-.diff-remove .diff-line-num.old {
-    font-weight: var(--font-semibold);
-    color: var(--text-normal);
+
+/* Context Lines */
+.diff-context {
+    background-color: transparent;
+}
+.diff-context:hover {
+    background-color: var(--background-modifier-hover);
 }
 
-/* Context lines */
-.diff-context .diff-line-prefix {
-    color: var(--text-faint);
+/* Collapsed Lines (Smart Diff) */
+.diff-collapsed {
+    background-color: var(--background-secondary);
+    border-top: 1px solid var(--background-modifier-border);
+    border-bottom: 1px solid var(--background-modifier-border);
+    min-height: 1.5em;
+    color: var(--text-muted);
+}
+.diff-collapsed .diff-line-gutter {
+    background-color: var(--background-secondary);
+}
+.diff-collapsed-marker {
+    display: block;
+    text-align: center;
+    width: 100%;
+    font-weight: bold;
+    letter-spacing: 2px;
+    opacity: 0.5;
 }
 
-/* --- Word/Char/JSON Diff Styles --- */
+/* Word-level highlights for Smart Diff */
+.diff-word-add {
+    background-color: rgba(var(--color-green-rgb), 0.3);
+    border-radius: 2px;
+}
+.diff-word-remove {
+    background-color: rgba(var(--color-red-rgb), 0.3);
+    border-radius: 2px;
+    text-decoration: line-through;
+}
+
+
+/* --- Word/Char/JSON Diff Styles (Unified View) --- */
 .v-unified-diff-view {
-    padding: var(--size-4-3);
+    padding: var(--size-4-4);
     white-space: pre-wrap;
     word-break: break-all;
     user-select: text;
+    font-family: var(--font-monospace);
+    font-size: var(--font-ui-smaller);
+    color: var(--text-normal);
 }
 
 .v-unified-diff-view .diff-add {
-    background-color: rgba(var(--color-green-rgb), 0.25);
+    background-color: rgba(var(--color-green-rgb), 0.2);
+    color: var(--text-normal);
+    border-bottom: 2px solid rgba(var(--color-green-rgb), 0.4);
+    text-decoration: none;
+    border-left: none; /* Reset line style */
+    padding: 1px 2px;
     border-radius: var(--radius-s);
 }
 
 .v-unified-diff-view .diff-remove {
-    background-color: rgba(var(--color-red-rgb), 0.25);
+    background-color: rgba(var(--color-red-rgb), 0.15);
+    color: var(--text-muted);
     text-decoration: line-through;
+    border-left: none; /* Reset line style */
+    padding: 1px 2px;
     border-radius: var(--radius-s);
 }
 
-/* --- Radix Dropdown Menu Styles --- */
+/* --- Search Highlighting --- */
+mark.is-active-match {
+    background-color: var(--color-yellow);
+    color: var(--text-on-accent);
+    box-shadow: 0 0 0 2px var(--color-yellow);
+    border-radius: 2px;
+}
+
+/* --- Dropdown Menu --- */
 .v-diff-dropdown-trigger {
-    margin-left: 0;
     padding: var(--size-4-1);
-    height: calc(var(--icon-size) + 2 * var(--size-4-1));
-    width: calc(var(--icon-size) + 2 * var(--size-4-1));
+    height: calc(var(--icon-size) + var(--size-4-2));
+    width: calc(var(--icon-size) + var(--size-4-2));
 }
 
 .v-diff-dropdown-content {
-    min-width: 180px;
+    min-width: 160px;
     background-color: var(--background-secondary);
     border-radius: var(--radius-m);
     padding: var(--size-4-1);
     box-shadow: var(--shadow-l);
     border: 1px solid var(--background-modifier-border);
-    z-index: 100; /* Ensure it's above other UI */
+    z-index: 50;
 }
 
 .v-diff-dropdown-item {
@@ -258,16 +359,22 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    user-select: none;
-    outline: none;
     cursor: pointer;
+    outline: none;
+    color: var(--text-normal);
 }
 
 .v-diff-dropdown-item:hover,
 .v-diff-dropdown-item[data-highlighted] {
-    background-color: var(--background-modifier-hover);
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+.v-diff-dropdown-item[data-highlighted] .lucide {
+    color: var(--text-on-accent);
 }
 
 .v-diff-dropdown-item .lucide {
-    color: var(--interactive-accent);
+    width: 14px;
+    height: 14px;
+    color: var(--text-muted);
 }

@@ -126,6 +126,15 @@
     transition: box-shadow 280ms ease-out;
 }
 
+/* NEW: Search highlighting styles */
+.v-history-entry mark {
+    background-color: var(--text-highlight-bg);
+    color: var(--text-normal);
+    border-radius: 2px;
+    padding: 0 2px;
+    box-shadow: 0 0 0 1px var(--text-highlight-bg);
+}
+
 .v-entry-header {
     display: flex;
     align-items: center;
@@ -182,6 +191,23 @@
 
 .v-entry-footer.is-hidden {
     display: none;
+}
+
+/* NEW: Description styling in list/footer */
+.v-history-description {
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted); /* Avoid pure black, use theme muted color */
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.4;
+    width: 100%;
+    margin-top: var(--size-4-1);
+}
+
+/* Adjust footer when showing description instead of buttons */
+.v-entry-footer .v-history-description {
+    margin-top: 0;
+    text-align: left;
 }
 
 .v-action-btn {

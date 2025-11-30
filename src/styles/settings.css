@@ -49,17 +49,20 @@
     padding: var(--size-4-2) var(--size-4-3);
 }
 
+/* FIX: Grid layout for actions to prevent awkward wrapping */
 .v-settings-actions {
-    display: flex;
-    justify-content: flex-start;
+    display: grid;
+    /* Create a responsive grid that defaults to 2 columns on most panel widths */
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
     gap: var(--size-4-2);
-    flex-wrap: wrap;
+    width: 100%;
 }
 
 /* Actions */
 .v-settings-action-button {
-    display: inline-flex;
+    display: flex;
     align-items: center;
+    justify-content: center; /* Center content */
     gap: var(--size-4-2);
     padding: var(--size-4-2) var(--size-4-3);
     border: 1px solid var(--background-modifier-border);
@@ -69,11 +72,26 @@
     cursor: pointer;
     transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
     color: var(--text-normal);
+    width: 100%; /* Fill the grid cell */
+    text-align: center;
 }
 
 .v-settings-action-button:hover {
     background-color: var(--background-modifier-hover);
     border-color: var(--interactive-accent);
+}
+
+/* Destructive action styling */
+.v-settings-action-button.mod-warning {
+    color: var(--text-error);
+    /* Make the destructive action span the full width of the grid */
+    grid-column: 1 / -1;
+    margin-top: var(--size-4-1);
+}
+
+.v-settings-action-button.mod-warning:hover {
+    background-color: var(--background-modifier-error-hover);
+    border-color: var(--text-error);
 }
 
 /* FIX: Slider with Input Control Container - Vertical Layout */
