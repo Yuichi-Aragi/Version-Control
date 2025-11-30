@@ -39,6 +39,13 @@ export const EnableDescriptionSetting = createToggleSetting(
 );
 EnableDescriptionSetting.displayName = 'EnableDescriptionSetting';
 
+export const ShowDescriptionInListSetting = createToggleSetting(
+    'Show description in list',
+    'If enabled, displays the version description in the history list instead of action buttons.',
+    'showDescriptionInList'
+);
+ShowDescriptionInListSetting.displayName = 'ShowDescriptionInListSetting';
+
 export const ListViewSetting = createToggleSetting(
     'Compact list view', 
     'Display version history as a compact list. Otherwise, shows as cards.', 

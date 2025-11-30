@@ -2,7 +2,7 @@ import { memo } from 'react';
 import { AutoCleanupSettings } from './AutoCleanupSettings';
 import { AutoSaveSettings } from './AutoSaveSettings';
 import { MaxVersionsSetting } from './MaxVersionsSetting';
-import { EnableNamingSetting, ListViewSetting, RelativeTimestampSetting, RenderMarkdownSetting, EnableDescriptionSetting } from './ToggleSettingFactory';
+import { EnableNamingSetting, ListViewSetting, RelativeTimestampSetting, RenderMarkdownSetting, EnableDescriptionSetting, ShowDescriptionInListSetting } from './ToggleSettingFactory';
 import { WatchModeSettings } from './WatchModeSettings';
 import { CharacterCountSettings, LineCountSettings, WordCountSettings } from './TextStatSettings';
 
@@ -11,6 +11,7 @@ export const NoteSettingsControls: React.FC<{ disabled: boolean }> = memo(({ dis
         <>
             <EnableNamingSetting disabled={disabled} />
             <EnableDescriptionSetting disabled={disabled} />
+            <ShowDescriptionInListSetting disabled={disabled} />
             <ListViewSetting disabled={disabled} />
             <RelativeTimestampSetting disabled={disabled} />
             <RenderMarkdownSetting disabled={disabled} />
