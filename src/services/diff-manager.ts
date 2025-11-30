@@ -264,20 +264,11 @@ export class DiffManager extends Component {
             version2Id: z.string().min(1),
             content1: z.string(),
             content2: z.string(),
-            diffType: z.enum(['lines', 'words', 'chars', 'json']),
+            diffType: z.enum(['lines', 'words', 'chars', 'smart']),
         }).parse(params);
 
         if (content1.length > MAX_CONTENT_SIZE || content2.length > MAX_CONTENT_SIZE) {
             throw new DiffManagerError('Content size exceeds maximum allowed size', 'CONTENT_TOO_LARGE');
-        }
-
-        if (diffType === 'json') {
-            try {
-                JSON.parse(content1);
-                JSON.parse(content2);
-            } catch (jsonError) {
-                throw new DiffManagerError('Invalid JSON input', 'INVALID_JSON', { originalError: jsonError });
-            }
         }
 
         const sanitizedContent1 = this.sanitizeInput(content1);
