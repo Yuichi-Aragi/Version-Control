@@ -51,9 +51,15 @@ export const ActionBar: FC = () => {
 
     const isBusy = isProcessing || isRenaming;
 
-    const handleDiffIndicatorClick = useCallback(() => {
+    const handleOpenDiffPanel = useCallback(() => {
         if (diffRequest?.status === 'ready') {
-            dispatch(thunks.viewReadyDiff());
+            dispatch(thunks.viewReadyDiff('panel'));
+        }
+    }, [dispatch, diffRequest]);
+
+    const handleOpenDiffWindow = useCallback(() => {
+        if (diffRequest?.status === 'ready') {
+            dispatch(thunks.viewReadyDiff('window'));
         }
     }, [dispatch, diffRequest]);
 
@@ -180,14 +186,40 @@ export const ActionBar: FC = () => {
                     </div>
                 </div>
                 <div className="v-top-actions-right-group">
-                    <button 
-                        className={diffIndicatorClasses} 
-                        aria-label={diffIndicatorAriaLabel}
-                        onClick={handleDiffIndicatorClick}
-                        disabled={isDiffGenerating || (diffRequest?.status === 'ready' && isBusy)}
-                    >
-                        <Icon name={diffIndicatorIcon} />
-                    </button>
+                    {diffRequest?.status === 'ready' ? (
+                        <DropdownMenu.Root>
+                            <DropdownMenu.Trigger asChild>
+                                <button 
+                                    className={diffIndicatorClasses} 
+                                    aria-label={diffIndicatorAriaLabel}
+                                    disabled={isBusy}
+                                >
+                                    <Icon name={diffIndicatorIcon} />
+                                </button>
+                            </DropdownMenu.Trigger>
+                            <DropdownMenu.Portal>
+                                <DropdownMenu.Content className="v-actionbar-dropdown-content" sideOffset={5} collisionPadding={10}>
+                                    <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenDiffPanel}>
+                                        <span>Open in panel</span>
+                                        <Icon name="layout-sidebar-right" />
+                                    </DropdownMenu.Item>
+                                    <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenDiffWindow}>
+                                        <span>Open in window</span>
+                                        <Icon name="app-window" />
+                                    </DropdownMenu.Item>
+                                </DropdownMenu.Content>
+                            </DropdownMenu.Portal>
+                        </DropdownMenu.Root>
+                    ) : (
+                        <button 
+                            className={diffIndicatorClasses} 
+                            aria-label={diffIndicatorAriaLabel}
+                            disabled={true}
+                        >
+                            <Icon name={diffIndicatorIcon} />
+                        </button>
+                    )}
+                    
                     {history.length > 0 && (
                         <>
                             <button 

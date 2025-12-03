@@ -1,4 +1,3 @@
-// src/ui/components/VersionControlRoot.tsx
 import clsx from 'clsx';
 import { type FC, useCallback, useState, useRef, useLayoutEffect } from 'react';
 import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
@@ -10,6 +9,7 @@ import { HistoryList } from './HistoryList';
 import { PanelContainer } from './panels/PanelContainer';
 import { SettingsPanel } from './SettingsPanel';
 import { KeyUpdateOverlay } from './KeyUpdateOverlay';
+import { DiffWindow } from './panels/DiffWindow';
 import { thunks } from '../../state/thunks';
 import { Icon } from './Icon';
 import { HistoryListHeader } from './HistoryListHeader';
@@ -54,7 +54,7 @@ export const VersionControlRoot: FC = () => {
         return () => {};
     }, [status]);
 
-    const isOverlayActive = panel !== null && panel.type !== 'settings';
+    const isOverlayActive = panel !== null && panel.type !== 'settings' && !(panel.type === 'diff' && panel.renderMode === 'window');
     
     const rootClassName = clsx(
         'version-control-content',
@@ -113,6 +113,7 @@ export const VersionControlRoot: FC = () => {
         <div className={rootClassName}>
             {renderContent()}
             { !keyUpdateActive && <PanelContainer /> }
+            { panel?.type === 'diff' && panel.renderMode === 'window' && <DiffWindow panelState={panel} /> }
         </div>
     );
 };
