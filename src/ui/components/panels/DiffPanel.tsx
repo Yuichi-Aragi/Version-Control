@@ -76,7 +76,7 @@ const transformDiffChanges = (changes: any[]): Change[] => {
 
 export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
     const dispatch = useAppDispatch();
-    const { version1, version2, diffChanges, diffType, isReDiffing } = panelState;
+    const { version1, version2, diffChanges, diffType, isReDiffing, renderMode } = panelState;
 
     const virtuosoRef = useRef<VirtuosoHandle>(null);
     const virtuosoRangeRef = useRef<ListRange | null>(null);
@@ -388,8 +388,10 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
             ? (version2.name ? `"${version2.name}" (V${version2.versionNumber})` : `Version ${version2.versionNumber}`)
             : version2.name;
 
+    const isWindowMode = renderMode === 'window';
+
     return (
-        <div className="v-panel-container is-active">
+        <div className={clsx("v-panel-container is-active", { "v-panel-window-mode": isWindowMode })}>
             <div className="v-inline-panel v-diff-panel">
                 <div className={clsx("v-panel-header", { 'is-searching': isSearchActive })} ref={headerRef}>
                     <div className="v-panel-header-content">
@@ -416,9 +418,11 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                                     <Icon name="git-commit-horizontal" />
                                 </button>
                             </DiffDropdown>
-                            <button className="clickable-icon v-panel-close" aria-label="Close diff" title="Close diff" onClick={handleClose}>
-                                <Icon name="x" />
-                            </button>
+                            {!isWindowMode && (
+                                <button className="clickable-icon v-panel-close" aria-label="Close diff" title="Close diff" onClick={handleClose}>
+                                    <Icon name="x" />
+                                </button>
+                            )}
                         </div>
                     </div>
                     <div className="v-panel-search-bar-container" onClick={e => e.stopPropagation()}>

@@ -12,6 +12,8 @@ const renderPanelComponent = (p: NonNullable<PanelState>): React.ReactNode => {
         case 'preview':
             return <PreviewPanel panelState={p} />;
         case 'diff':
+            // If renderMode is 'window', do not render it in the panel container
+            if (p.renderMode === 'window') return null;
             return <DiffPanel panelState={p} />;
         case 'confirmation':
             return <ConfirmationPanel panelState={p} />;
