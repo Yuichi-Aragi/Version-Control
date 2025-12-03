@@ -47,6 +47,7 @@ export interface DiffPanel {
     content1: string;
     content2: string;
     isReDiffing?: boolean;
+    renderMode?: 'panel' | 'window'; // NEW: Determines where the diff is rendered
 }
 
 export interface SettingsPanel {
