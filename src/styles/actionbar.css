@@ -1,7 +1,4 @@
 /* Actions Bar */
-.v-top-container {
-    flex-shrink: 0;
-}
 .v-actions-container {
     flex-shrink: 0;
     padding: var(--size-4-2) var(--size-4-2) 0;
@@ -124,11 +121,6 @@
     z-index: 3;
 }
 .v-search-bar-container.is-query-active .v-search-input-wrapper::after {
-    width: 100%;
-}
-
-
-.v-search-bar-container .search-input-container {
     width: 100%;
 }
 

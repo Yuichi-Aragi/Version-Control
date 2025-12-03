@@ -56,16 +56,6 @@
     padding-bottom: 4px;
 }
 
-.v-history-list-sizer {
-    position: relative;
-    width: 100%;
-    height: 0;
-}
-
-.v-history-list.hide-timestamps .v-version-timestamp {
-    display: none;
-}
-
 .v-history-entry {
     display: flex;
     flex-direction: column;
@@ -114,13 +104,6 @@
     box-shadow: 0 0 0 1.5px var(--interactive-accent);
 }
 
-.v-history-entry.is-error {
-    border-color: var(--color-red);
-}
-.v-history-entry.is-error .v-error-icon {
-    color: var(--color-red);
-    margin-left: auto;
-}
 .v-history-entry.is-highlighted {
     box-shadow: 0 0 0 1.5px var(--interactive-accent);
     transition: box-shadow 280ms ease-out;

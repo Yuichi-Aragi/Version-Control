@@ -221,50 +221,6 @@
     pointer-events: auto;
 }
 
-/* Tooltip */
-.v-slider-tooltip {
-    position: absolute;
-    bottom: calc(100% + 8px);
-    transform: translateX(-50%);
-    background: var(--background-modifier-cover);
-    color: var(--text-normal);
-    padding: 4px 10px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 500;
-    line-height: 1.4;
-    white-space: nowrap;
-    pointer-events: none;
-    user-select: none;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-    z-index: 1000;
-    animation: v-tooltip-fade-in 0.15s ease-out;
-    will-change: left, transform;
-    backdrop-filter: blur(4px);
-}
-
-.v-slider-tooltip::after {
-    content: '';
-    position: absolute;
-    top: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    border: 5px solid transparent;
-    border-top-color: var(--background-modifier-cover);
-    filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.1));
-}
-
-@keyframes v-tooltip-fade-in {
-    from { 
-        opacity: 0; 
-        transform: translateX(-50%) translateY(4px);
-    }
-    to { 
-        opacity: 1; 
-        transform: translateX(-50%) translateY(0);
-    }
-}
-
 /* Accessibility & reduced-motion */
 .v-slider-input:focus-visible {
     outline: 2px solid var(--interactive-accent);
@@ -275,14 +231,9 @@
 @media (prefers-reduced-motion: reduce) {
     .v-slider-input,
     .v-slider-input::-webkit-slider-thumb,
-    .v-slider-input::-moz-range-thumb,
-    .v-slider-tooltip {
+    .v-slider-input::-moz-range-thumb {
         transition: none;
         animation: none;
-    }
-
-    .v-slider-tooltip {
-        transition: opacity 0.1s ease;
     }
 }
 
@@ -294,10 +245,6 @@
     .v-slider-container {
         padding-top: 12px;
         padding-bottom: 8px;
-    }
-    .v-slider-tooltip {
-        font-size: 13px;
-        padding: 6px 12px;
     }
 }
 
@@ -380,4 +327,77 @@
 .version-control-settings-tab .v-settings-textarea {
     background-color: var(--background-secondary); /* Match Obsidian's textarea style in settings */
     max-width: 600px;
+}
+
+/* --- Validation Feedback Styles --- */
+
+/* Wrapper for input/textarea to position tooltip */
+.v-input-validation-wrapper {
+    position: relative;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Valid state - Green accent */
+.v-input-validation-wrapper.is-valid input,
+.v-input-validation-wrapper.is-valid textarea {
+    border-color: var(--color-green);
+    box-shadow: 0 0 0 1px var(--color-green);
+}
+
+/* Invalid state - Red accent */
+.v-input-validation-wrapper.is-invalid input,
+.v-input-validation-wrapper.is-invalid textarea {
+    border-color: var(--text-error);
+    box-shadow: 0 0 0 1px var(--text-error);
+}
+
+/* Hovering Validation Card */
+.v-validation-tooltip {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    margin-bottom: 8px;
+    background-color: var(--background-modifier-error);
+    color: var(--text-on-accent);
+    padding: var(--size-4-2) var(--size-4-3);
+    border-radius: var(--radius-m);
+    font-size: var(--font-ui-smaller);
+    font-weight: var(--font-semibold);
+    box-shadow: var(--shadow-l);
+    z-index: 100;
+    max-width: 300px;
+    pointer-events: none;
+    animation: v-slide-up-fade 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Tooltip Arrow */
+.v-validation-tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 16px; /* Offset from left */
+    border: 6px solid transparent;
+    border-top-color: var(--background-modifier-error);
+}
+
+/* Animation for tooltip */
+@keyframes v-slide-up-fade {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Ensure inputs in the wrapper fill width */
+.v-input-validation-wrapper input,
+.v-input-validation-wrapper textarea {
+    width: 100%;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
