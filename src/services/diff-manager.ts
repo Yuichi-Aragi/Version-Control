@@ -235,7 +235,7 @@ export class DiffManager extends Component {
             }
             
             const activeMarkdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-            if (activeMarkdownView?.file?.path === file.path) {
+            if (activeMarkdownView?.file?.path === file.path && activeMarkdownView.getMode() === 'source') {
                 return activeMarkdownView.editor.getValue();
             } else {
                 return await this.app.vault.read(file);
