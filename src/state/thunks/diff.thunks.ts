@@ -109,7 +109,7 @@ export const generateAndShowDiffInPanel = (version1: VersionHistoryEntry, versio
     }
 };
 
-export const viewReadyDiff = (): AppThunk => (dispatch, getState, container) => {
+export const viewReadyDiff = (renderMode: 'panel' | 'window' = 'panel'): AppThunk => (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     const uiService = container.get<UIService>(TYPES.UIService);
     const state = getState();
@@ -129,7 +129,17 @@ export const viewReadyDiff = (): AppThunk => (dispatch, getState, container) => 
     const { version1, version2, diffChanges, diffType, content1, content2 } = diffRequest;
 
     dispatch(actions.clearDiffRequest());
-    dispatch(actions.openPanel({ type: 'diff', version1, version2, diffChanges, diffType, content1, content2, isReDiffing: false }));
+    dispatch(actions.openPanel({ 
+        type: 'diff', 
+        version1, 
+        version2, 
+        diffChanges, 
+        diffType, 
+        content1, 
+        content2, 
+        isReDiffing: false,
+        renderMode // Pass the requested render mode
+    }));
 };
 
 export const recomputeDiff = (newDiffType: DiffType): AppThunk => async (dispatch, getState, container) => {
