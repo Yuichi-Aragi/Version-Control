@@ -234,6 +234,78 @@ export class VersionContentRepository {
   }
 
   /**
+   * Renames a version file from an old ID to a new ID.
+   * Used when version name changes affect the generated ID.
+   * Includes idempotency checks to handle retries where the rename succeeded but timed out.
+   * @param noteId - The unique identifier of the note
+   * @param oldVersionId - The current version ID
+   * @param newVersionId - The new version ID
+   * @returns Promise resolving when rename is complete
+   */
+  public async rename(
+    noteId: string,
+    oldVersionId: string,
+    newVersionId: string
+  ): Promise<void> {
+    // Strict input validation
+    if (typeof noteId !== 'string' || noteId.trim() === '') {
+      throw new Error(`VC: Invalid noteId provided for rename operation: ${String(noteId)}`);
+    }
+    if (typeof oldVersionId !== 'string' || oldVersionId.trim() === '') {
+      throw new Error(`VC: Invalid oldVersionId provided for rename operation: ${String(oldVersionId)}`);
+    }
+    if (typeof newVersionId !== 'string' || newVersionId.trim() === '') {
+      throw new Error(`VC: Invalid newVersionId provided for rename operation: ${String(newVersionId)}`);
+    }
+
+    return this.queueService.enqueue(noteId, async () => {
+      const oldPath = this.pathService.getNoteVersionPath(noteId, oldVersionId);
+      const newPath = this.pathService.getNoteVersionPath(noteId, newVersionId);
+
+      // Validate paths
+      if (!oldPath || !newPath) {
+        throw new Error(`VC: Failed to generate paths for rename operation: ${oldVersionId} -> ${newVersionId}`);
+      }
+
+      await this.executeWithRetryAndTimeout(
+        async () => {
+          // Check source existence
+          const sourceExists = await this.app.vault.adapter.exists(oldPath);
+          // Check target existence
+          const targetExists = await this.app.vault.adapter.exists(newPath);
+
+          if (!sourceExists) {
+            if (targetExists) {
+              // Idempotency check: If source is missing but target exists, 
+              // assume the rename succeeded in a previous (timed-out) attempt.
+              // Since we are inside a queue lock for this note, we can be reasonably sure we did this.
+              return;
+            }
+            throw new Error(`Source file for rename does not exist: ${oldPath}`);
+          }
+          
+          if (targetExists) {
+             throw new Error(`Target file for rename already exists: ${newPath}`);
+          }
+
+          try {
+            await this.app.vault.adapter.rename(oldPath, newPath);
+          } catch (error) {
+            console.error(
+              `VC: Failed to rename version file from ${oldVersionId} to ${newVersionId}.`,
+              error instanceof Error ? error.message : String(error)
+            );
+            throw error;
+          }
+        },
+        `rename_${noteId}_${oldVersionId}_to_${newVersionId}`,
+        this.MAX_RETRIES,
+        this.RETRY_DELAY_MS
+      );
+    });
+  }
+
+  /**
    * Retrieves the content of the latest version based on version number.
    * @param noteId - The unique identifier of the note
    * @param noteManifest - The manifest containing version metadata
