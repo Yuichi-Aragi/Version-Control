@@ -349,7 +349,7 @@ mark.is-active-match {
     padding: var(--size-4-1);
     box-shadow: var(--shadow-l);
     border: 1px solid var(--background-modifier-border);
-    z-index: 50;
+    z-index: 10002; /* FIX: Increased z-index to appear above DiffWindow (9999) */
 }
 
 .v-diff-dropdown-item {

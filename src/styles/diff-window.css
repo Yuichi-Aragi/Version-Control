@@ -1,0 +1,110 @@
+/* src/styles/diff-window.css */
+
+.v-diff-window {
+    position: fixed;
+    top: 0;
+    left: 0;
+    background-color: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    box-shadow: var(--shadow-xl);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    will-change: transform, width, height;
+    /* Prevent default touch actions like scrolling while interacting with the window */
+    touch-action: none;
+}
+
+.v-diff-window.is-resize-mode {
+    cursor: move; /* Changed to move to indicate resizing from any point */
+}
+
+.v-diff-window.is-dragging {
+    cursor: grabbing;
+}
+
+.v-diff-window-header {
+    height: 40px;
+    background-color: var(--background-secondary);
+    border-bottom: 1px solid var(--background-modifier-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 var(--size-4-2);
+    cursor: grab;
+    user-select: none;
+    flex-shrink: 0;
+    /* Ensure header also captures touches correctly */
+    touch-action: none;
+    /* FIX: Ensure header sits above the resize overlay so buttons remain clickable */
+    position: relative;
+    z-index: 101;
+}
+
+.v-diff-window-header:active {
+    cursor: grabbing;
+}
+
+.v-diff-window-title {
+    font-weight: var(--font-semibold);
+    font-size: var(--font-ui-small);
+    color: var(--text-normal);
+}
+
+.v-diff-window-controls {
+    display: flex;
+    gap: var(--size-4-1);
+}
+
+/* Transparent gap between header and content */
+.v-diff-window-gap {
+    height: 4px;
+    background-color: transparent;
+    flex-shrink: 0;
+}
+
+.v-diff-window-content {
+    flex-grow: 1;
+    position: relative;
+    overflow: hidden;
+    background-color: var(--background-primary);
+    /* Re-enable touch actions for content scrolling */
+    touch-action: pan-y;
+}
+
+/* Override panel container styles when inside window */
+.v-panel-container.v-panel-window-mode {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: transparent;
+    animation: none;
+}
+
+/* Ghost outline for resizing */
+.v-diff-window-ghost {
+    position: fixed;
+    top: 0;
+    left: 0;
+    border: 2px dashed var(--interactive-accent);
+    background-color: rgba(var(--interactive-accent-rgb), 0.1);
+    border-radius: var(--radius-m);
+    pointer-events: none;
+    will-change: transform, width, height;
+}
+
+/* Overlay to block interaction during resize mode */
+.v-resize-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 100;
+    cursor: move; /* Consistent cursor */
+    /* Ensure overlay captures touches for resizing */
+    touch-action: none;
+}
