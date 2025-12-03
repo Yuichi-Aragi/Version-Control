@@ -4,10 +4,10 @@ import { injectable, inject } from 'inversify';
 import { diffLines } from 'diff';
 import { ManifestManager } from './manifest-manager';
 import { NoteManager } from './note-manager';
-import type { VersionControlSettings, VersionHistoryEntry, BranchState, Branch } from '../types';
+import type { VersionControlSettings, VersionHistoryEntry, BranchState, Branch, NoteManifest } from '../types';
 import { generateUniqueFilePath } from '../utils/file';
 import { PluginEvents } from './plugin-events';
-import { generateUniqueId } from '../utils/id';
+import { generateVersionId } from '../utils/id';
 import { VersionContentRepository } from './storage/version-content-repository';
 import { TYPES } from '../types/inversify.types';
 import type VersionControlPlugin from '../main';
@@ -98,18 +98,30 @@ export class VersionManager {
       }
     }
 
-    const versionId = generateUniqueId();
+    // Determine version number for ID generation
+    const nextVersionNumber = (currentBranch.totalVersions || 0) + 1;
+    const version_name = (name || '').trim();
+    
+    // Generate version ID using the configured format
+    const versionId = generateVersionId(settings, nextVersionNumber, version_name);
 
     try {
       const { size } = await this.versionContentRepo.write(noteId, versionId, contentToSave);
       const textStats = calculateTextStats(contentToSave);
-      const version_name = (name || '').trim();
       const timestamp = new Date().toISOString();
 
       const updatedManifest = await this.manifestManager.updateNoteManifest(noteId, (manifest) => {
         const branch = manifest.branches[branchName];
         if (branch) {
+            // Recalculate version number inside update to ensure consistency if concurrent saves happened
             const versionNumber = (branch.totalVersions || 0) + 1;
+            
+            // Note: If versionId was generated based on versionNumber, and versionNumber changed due to concurrency,
+            // there is a theoretical mismatch. However, manifest updates are queued, so this block runs sequentially.
+            // The file write happened before this. If we strictly want ID to match number, we might need to lock earlier.
+            // For now, we assume sequential access via queue in manifest manager protects the integrity of the manifest,
+            // but the file name might reflect the 'attempted' version number.
+            
             branch.versions[versionId] = {
               versionNumber,
               timestamp,
@@ -166,7 +178,7 @@ export class VersionManager {
     }
   }
 
-  public async updateVersionDetails(noteId: string, versionId: string, details: { name?: string; description?: string }): Promise<void> {
+  public async updateVersionDetails(noteId: string, versionId: string, details: { name?: string; description?: string }): Promise<string> {
     if (!noteId || !versionId) {
       throw new Error('Invalid noteId or versionId for updateVersionDetails.');
     }
@@ -174,33 +186,100 @@ export class VersionManager {
     const version_name = details.name?.trim();
     const version_desc = details.description?.trim();
 
+    // 1. Load manifest to check current state and settings
+    const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
+    if (!noteManifest) throw new Error(`Manifest not found for note ${noteId}`);
+
+    const branchName = noteManifest.currentBranch;
+    const branch = noteManifest.branches[branchName];
+    if (!branch) throw new Error(`Current branch not found for note ${noteId}`);
+
+    const versionData = branch.versions[versionId];
+    if (!versionData) throw new Error(`Version ${versionId} not found in manifest for note ${noteId}.`);
+
+    // 2. Resolve effective settings to check ID format
+    const effectiveSettings = this.getEffectiveSettings(noteManifest);
+    const versionIdFormat = effectiveSettings.versionIdFormat;
+
+    // 3. Determine if rename is required
+    // Rename is required if the name changed AND the ID format uses {name}
+    const nameChanged = details.name !== undefined && version_name !== versionData.name;
+    const formatUsesName = versionIdFormat.includes('{name}');
+    
+    let newVersionId = versionId;
+
+    if (nameChanged && formatUsesName) {
+        // Calculate new ID
+        // We must preserve the original timestamp
+        const originalDate = new Date(versionData.timestamp);
+        newVersionId = generateVersionId(effectiveSettings, versionData.versionNumber, version_name, originalDate);
+
+        if (newVersionId !== versionId) {
+            try {
+                // Rename file on disk
+                await this.versionContentRepo.rename(noteId, versionId, newVersionId);
+            } catch (error) {
+                console.error(`VC: Failed to rename version file from ${versionId} to ${newVersionId}. Aborting update.`, error);
+                throw error;
+            }
+        }
+    }
+
+    // 4. Update manifest
     await this.manifestManager.updateNoteManifest(noteId, (manifest) => {
-      const branch = manifest.branches[manifest.currentBranch];
-      if (!branch) throw new Error(`Current branch not found for note ${noteId}`);
+      const b = manifest.branches[manifest.currentBranch];
+      if (!b) return;
       
-      const versionData = branch.versions[versionId];
-      if (!versionData) {
-        throw new Error(`Version ${versionId} not found in manifest for note ${noteId}.`);
+      // If ID changed, we need to move the data to the new key
+      if (newVersionId !== versionId) {
+          const data = b.versions[versionId];
+          if (data) {
+              delete b.versions[versionId];
+              b.versions[newVersionId] = data;
+          }
       }
+
+      const targetVersionData = b.versions[newVersionId];
+      if (!targetVersionData) return; // Should not happen if logic is correct
 
       if (details.name !== undefined) {
           if (version_name) {
-            versionData.name = version_name;
+            targetVersionData.name = version_name;
           } else {
-            delete versionData.name;
+            delete targetVersionData.name;
           }
       }
 
       if (details.description !== undefined) {
           if (version_desc) {
-            versionData.description = version_desc;
+            targetVersionData.description = version_desc;
           } else {
-            delete versionData.description;
+            delete targetVersionData.description;
           }
       }
 
       manifest.lastModified = new Date().toISOString();
     });
+
+    return newVersionId;
+  }
+
+  private getEffectiveSettings(noteManifest: NoteManifest): VersionControlSettings {
+      const branch = noteManifest.branches[noteManifest.currentBranch];
+      const branchSettings = branch?.settings;
+      const isGlobal = branchSettings?.isGlobal !== false; // Default to true if undefined
+
+      if (isGlobal) {
+          return this.plugin.settings;
+      } else {
+          // Merge global settings with local overrides
+          // We filter out undefined values from branchSettings to allow defaults to shine through if needed,
+          // though typically local settings are fully populated when set.
+          const definedBranchSettings = Object.fromEntries(
+              Object.entries(branchSettings ?? {}).filter(([, v]) => v !== undefined)
+          );
+          return { ...this.plugin.settings, ...definedBranchSettings, isGlobal: false };
+      }
   }
 
   public async getVersionHistory(noteId: string): Promise<VersionHistoryEntry[]> {
@@ -431,17 +510,32 @@ export class VersionManager {
 
     // 1. Save current editor state to the old branch
     if (targetView) {
-        const state: BranchState = {
-            content: targetView.editor.getValue(),
-            cursor: targetView.editor.getCursor(),
-            scroll: targetView.editor.getScrollInfo()
-        };
-        await this.manifestManager.updateNoteManifest(noteId, manifest => {
-            const branch = manifest.branches[currentBranchName];
-            if (branch) {
-                branch.state = state;
-            }
-        });
+        let state: BranchState | null = null;
+        if (targetView.getMode() === 'source') {
+            state = {
+                content: targetView.editor.getValue(),
+                cursor: targetView.editor.getCursor(),
+                scroll: targetView.editor.getScrollInfo()
+            };
+        } else if (targetView.file) {
+            // If in preview, we assume the file on disk is the current state.
+            // We can't capture cursor/scroll.
+            const content = await this.app.vault.read(targetView.file);
+            state = {
+                content,
+                cursor: { line: 0, ch: 0 },
+                scroll: { left: 0, top: 0 }
+            };
+        }
+
+        if (state) {
+            await this.manifestManager.updateNoteManifest(noteId, manifest => {
+                const branch = manifest.branches[currentBranchName];
+                if (branch) {
+                    branch.state = state;
+                }
+            });
+        }
     }
 
     // 2. Switch branch pointer in manifest
@@ -460,16 +554,24 @@ export class VersionManager {
     const newBranchState = newBranch?.state;
 
     if (targetView) {
+        let contentToRestore: string | null = null;
+        
         if (newBranchState) {
-            // A saved state exists for the new branch, restore it.
-            targetView.editor.setValue(newBranchState.content);
-            targetView.editor.setCursor(newBranchState.cursor);
-            targetView.editor.scrollTo(newBranchState.scroll.left, newBranchState.scroll.top);
+            contentToRestore = newBranchState.content;
         } else {
-            // No saved state. Load the content of the latest version of the new branch.
-            const latestVersionContent = await this.versionContentRepo.getLatestVersionContent(noteId, newManifest);
-            if (latestVersionContent !== null) {
-                targetView.editor.setValue(latestVersionContent);
+            contentToRestore = await this.versionContentRepo.getLatestVersionContent(noteId, newManifest);
+        }
+
+        if (contentToRestore !== null) {
+            if (targetView.getMode() === 'source') {
+                targetView.editor.setValue(contentToRestore);
+                if (newBranchState) {
+                    targetView.editor.setCursor(newBranchState.cursor);
+                    targetView.editor.scrollTo(newBranchState.scroll.left, newBranchState.scroll.top);
+                }
+            } else if (targetView.file) {
+                // In preview mode, write to file to update view
+                await this.app.vault.modify(targetView.file, contentToRestore);
             }
         }
     }

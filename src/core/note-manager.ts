@@ -2,7 +2,7 @@ import { App, TFile, WorkspaceLeaf, MarkdownView, type FrontMatterCache, FileVie
 import { injectable, inject } from 'inversify';
 import { ManifestManager } from "./manifest-manager";
 import type { ActiveNoteInfo } from "../types";
-import { generateUniqueId } from "../utils/id";
+import { generateNoteId } from "../utils/id";
 import { TYPES } from "../types/inversify.types";
 import type VersionControlPlugin from "../main";
 
@@ -114,8 +114,10 @@ export class NoteManager {
                 return existingId;
             }
 
-            // If no ID, create one and write it to the file.
-            const newId = generateUniqueId();
+            // If no ID, generate one based on settings and write it to the file.
+            // We use the new generateNoteId which respects the noteIdFormat setting.
+            const newId = generateNoteId(this.plugin.settings, file);
+            
             try {
                 await this.writeNoteIdToFrontmatter(file, newId);
                 return newId;
