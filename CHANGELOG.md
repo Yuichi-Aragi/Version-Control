@@ -1,5 +1,13 @@
 ***
 
+**Version: 1.9.26**
+
+#### ✨ New Features
+
+* **Diff Popup Window:** You can now view or open the diff in a separate popup window.
+
+***
+
 **Version: 1.9.25**
 
 #### ✨ New Features
