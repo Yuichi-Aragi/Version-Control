@@ -167,10 +167,18 @@ export const updateVersionDetails = (versionId: string, details: { name: string;
         description: details.description.trim(),
     };
 
+    // Optimistically update the UI for the current version ID
     dispatch(actions.updateVersionDetailsInState({ versionId, ...updatePayload }));
 
     try {
-        await versionManager.updateVersionDetails(noteId, versionId, updatePayload);
+        const newVersionId = await versionManager.updateVersionDetails(noteId, versionId, updatePayload);
+        
+        // If the ID changed due to renaming, we must reload the history to reflect the new ID in the state
+        if (newVersionId !== versionId) {
+             if (!isPluginUnloading(container)) {
+                dispatch(loadHistoryForNoteId(file, noteId));
+            }
+        }
     } catch (error) {
         console.error(`VC: Failed to save details update for version ${versionId}. Reverting UI.`, error);
         uiService.showNotice("VC: Error, could not save version details. Reverting changes.", 5000);

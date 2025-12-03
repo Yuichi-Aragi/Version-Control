@@ -201,6 +201,12 @@ export const scrollToLineInEditor = (line: number): AppThunk => (_dispatch, getS
 
     // Since we found it via getLeavesOfType('markdown') and checked instanceof, this cast is safe.
     const view = targetLeaf.view as MarkdownView;
+
+    if (view.getMode() !== 'source') {
+        uiService.showNotice("Cannot scroll to line: note is in Reading view.", 3000);
+        return;
+    }
+
     const editor = view.editor;
 
     // Bring the editor into focus for better user experience.
