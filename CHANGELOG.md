@@ -1,5 +1,13 @@
 ***
 
+**Version: 1.9.27**
+
+#### 🎨 Improvements & UX
+
+* **UI/UX Polish:** Implemented various UI/UX enhancements for a more better experience.
+
+***
+
 **Version: 1.9.26**
 
 #### ✨ New Features
