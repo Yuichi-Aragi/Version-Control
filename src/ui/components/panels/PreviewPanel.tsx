@@ -1,5 +1,4 @@
-// src/ui/components/panels/PreviewPanel.tsx
-import { MarkdownRenderer, moment, Component, debounce } from 'obsidian';
+import { MarkdownRenderer, moment, Component } from 'obsidian';
 import { type FC, useCallback, useState, useRef, useLayoutEffect, useEffect, useMemo } from 'react';
 import type { VirtuosoHandle } from 'react-virtuoso';
 import { useAppSelector } from '../../hooks/useRedux';
@@ -10,7 +9,7 @@ import { useApp } from '../../AppContext';
 import clsx from 'clsx';
 import { escapeRegExp } from '../../utils/strings';
 import { usePanelClose } from '../../hooks/usePanelClose';
-import { useDelayedFocus } from '../../hooks/useDelayedFocus';
+import { usePanelSearch } from '../../hooks/usePanelSearch';
 
 interface PreviewPanelProps {
     panelState: PreviewPanelState;
@@ -25,22 +24,15 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
     const [localRenderMarkdown, setLocalRenderMarkdown] = useState(false);
     const markdownRef = useRef<HTMLDivElement>(null);
     const virtuosoRef = useRef<VirtuosoHandle>(null);
-
-    // Search and navigation state
-    const [isSearchActive, setIsSearchActive] = useState(false);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [localSearchQuery, setLocalSearchQuery] = useState('');
-    const [isCaseSensitive, setIsCaseSensitive] = useState(false);
-    const [activeMatchIndex, setActiveMatchIndex] = useState(-1);
-    const searchInputRef = useRef<HTMLInputElement>(null);
-
-    const debouncedSetSearchQuery = useCallback(debounce(setSearchQuery, 300, true), []);
-    
     const { version, content } = panelState;
 
+    // Initialize search hook
+    const search = usePanelSearch();
+
+    // Calculate matches based on hook state
     const matches = useMemo(() => {
-        if (!searchQuery || !content) return [];
-        const regex = new RegExp(escapeRegExp(searchQuery), isCaseSensitive ? 'g' : 'gi');
+        if (!search.searchQuery || !content) return [];
+        const regex = new RegExp(escapeRegExp(search.searchQuery), search.isCaseSensitive ? 'g' : 'gi');
         const lines = content.split('\n');
         const allMatches: { lineIndex: number; matchIndexInLine: number }[] = [];
         lines.forEach((line, lineIndex) => {
@@ -50,23 +42,24 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
             });
         });
         return allMatches;
-    }, [searchQuery, isCaseSensitive, content]);
+    }, [search.searchQuery, search.isCaseSensitive, content]);
 
-    const goToMatch = useCallback((direction: 'next' | 'prev') => {
+    // Handle navigation locally since totalMatches depends on query
+    const handleGoToMatch = useCallback((direction: 'next' | 'prev') => {
         if (matches.length === 0) return;
-        const nextIndex = direction === 'next'
-            ? (activeMatchIndex + 1) % matches.length
-            : (activeMatchIndex - 1 + matches.length) % matches.length;
-        setActiveMatchIndex(nextIndex);
-    }, [activeMatchIndex, matches.length]);
+        search.setActiveMatchIndex(current => {
+            if (direction === 'next') {
+                return (current + 1) % matches.length;
+            } else {
+                return (current - 1 + matches.length) % matches.length;
+            }
+        });
+    }, [matches.length, search.setActiveMatchIndex]);
 
+    // Scroll effect
     useEffect(() => {
-        setActiveMatchIndex(-1);
-    }, [searchQuery, isCaseSensitive]);
-
-    useEffect(() => {
-        if (activeMatchIndex > -1 && virtuosoRef.current) {
-            const match = matches[activeMatchIndex];
+        if (search.activeMatchIndex > -1 && virtuosoRef.current) {
+            const match = matches[search.activeMatchIndex];
             if (match) {
                 virtuosoRef.current.scrollToIndex({
                     index: match.lineIndex,
@@ -75,49 +68,12 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
                 });
             }
         }
-    }, [activeMatchIndex, matches]);
+    }, [search.activeMatchIndex, matches]);
 
-    const handleSearchInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-        setLocalSearchQuery(e.target.value);
-        debouncedSetSearchQuery(e.target.value);
-    }, [debouncedSetSearchQuery]);
-
-    const handleToggleSearch = useCallback((e?: React.MouseEvent) => {
-        e?.stopPropagation();
-        setIsSearchActive(v => !v);
-    }, []);
-
-    const handleClearSearch = useCallback((e: React.MouseEvent) => {
-        e.stopPropagation();
-        setLocalSearchQuery('');
-        setSearchQuery('');
-        searchInputRef.current?.focus();
-    }, []);
-
-    const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === 'Escape') {
-            handleToggleSearch();
-        }
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            goToMatch(e.shiftKey ? 'prev' : 'next');
-        }
-    };
-    
-    useDelayedFocus(searchInputRef, 100, isSearchActive);
-
-    const shouldRenderMarkdown = notePath.endsWith('.md') && (settings.renderMarkdownInPreview || localRenderMarkdown) && !isSearchActive;
-
+    const shouldRenderMarkdown = notePath.endsWith('.md') && (settings.renderMarkdownInPreview || localRenderMarkdown) && !search.isSearchActive;
     const panelClose = usePanelClose();
-    const handleClose = useCallback((e: React.MouseEvent) => {
-        e.stopPropagation();
-        panelClose();
-    }, [panelClose]);
-
-    const toggleRenderMode = useCallback((e: React.MouseEvent) => {
-        e.stopPropagation();
-        setLocalRenderMarkdown(v => !v);
-    }, []);
+    const handleClose = useCallback((e: React.MouseEvent) => { e.stopPropagation(); panelClose(); }, [panelClose]);
+    const toggleRenderMode = useCallback((e: React.MouseEvent) => { e.stopPropagation(); setLocalRenderMarkdown(v => !v); }, []);
 
     useLayoutEffect(() => {
         if (shouldRenderMarkdown && markdownRef.current) {
@@ -126,7 +82,7 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
             try {
                 MarkdownRenderer.render(app, content, container, notePath, new Component());
             } catch (error) {
-                console.error("VC: Failed to render Markdown preview in panel.", error);
+                console.error("VC: Failed to render Markdown preview.", error);
                 container.setText(content);
             }
         }
@@ -138,13 +94,13 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
         <div className="v-panel-container is-active">
             <div className="v-inline-panel v-preview-panel">
                 <div className="v-preview-panel-content">
-                    <div className={clsx("v-panel-header", { 'is-searching': isSearchActive })}>
+                    <div className={clsx("v-panel-header", { 'is-searching': search.isSearchActive })}>
                         <div className="v-panel-header-content">
                             <h3 title={`Timestamp: ${(moment as any)(version.timestamp).format("LLLL")} | Size: ${version.size} bytes`}>
                                 {versionLabel}
                             </h3>
                             <div className="v-panel-header-actions">
-                                <button className="clickable-icon" aria-label="Search content" onClick={handleToggleSearch}>
+                                <button className="clickable-icon" aria-label="Search content" onClick={search.handleToggleSearch}>
                                     <Icon name="search" />
                                 </button>
                                 {notePath.endsWith('.md') && !settings.renderMarkdownInPreview && (
@@ -159,31 +115,39 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
                         </div>
                         <div className="v-panel-search-bar-container">
                             <div className="v-search-input-wrapper">
-                                <div className="v-search-icon" role="button" aria-label="Close search" onClick={handleToggleSearch}>
+                                <div className="v-search-icon" role="button" aria-label="Close search" onClick={search.handleToggleSearch}>
                                     <Icon name="x-circle" />
                                 </div>
                                 <input
-                                    ref={searchInputRef}
+                                    ref={search.searchInputRef}
                                     type="search"
                                     placeholder="Search content..."
-                                    value={localSearchQuery}
-                                    onChange={handleSearchInputChange}
-                                    onKeyDown={handleSearchKeyDown}
+                                    value={search.localSearchQuery}
+                                    onChange={search.handleSearchInputChange}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') { 
+                                            e.preventDefault(); 
+                                            handleGoToMatch(e.shiftKey ? 'prev' : 'next'); 
+                                        }
+                                        if (e.key === 'Escape') {
+                                            search.handleToggleSearch();
+                                        }
+                                    }}
                                 />
                                 <div className="v-search-input-buttons">
-                                    {searchQuery && matches.length > 0 && (
-                                        <span className="v-search-match-count">{activeMatchIndex + 1} / {matches.length}</span>
+                                    {search.searchQuery && matches.length > 0 && (
+                                        <span className="v-search-match-count">{search.activeMatchIndex + 1} / {matches.length}</span>
                                     )}
-                                    <button className="clickable-icon v-search-nav-button" aria-label="Previous match" disabled={matches.length === 0} onClick={() => goToMatch('prev')}>
+                                    <button className="clickable-icon v-search-nav-button" aria-label="Previous match" disabled={matches.length === 0} onClick={() => handleGoToMatch('prev')}>
                                         <Icon name="chevron-up" />
                                     </button>
-                                    <button className="clickable-icon v-search-nav-button" aria-label="Next match" disabled={matches.length === 0} onClick={() => goToMatch('next')}>
+                                    <button className="clickable-icon v-search-nav-button" aria-label="Next match" disabled={matches.length === 0} onClick={() => handleGoToMatch('next')}>
                                         <Icon name="chevron-down" />
                                     </button>
-                                    <button className={clsx('clickable-icon', { 'is-active': isCaseSensitive })} aria-label="Toggle case sensitivity" onClick={() => setIsCaseSensitive(v => !v)}>
+                                    <button className={clsx('clickable-icon', { 'is-active': search.isCaseSensitive })} aria-label="Toggle case sensitivity" onClick={search.toggleCaseSensitivity}>
                                         <Icon name="case-sensitive" />
                                     </button>
-                                    <button className={clsx('clickable-icon', { 'is-hidden': !localSearchQuery })} aria-label="Clear search" onClick={handleClearSearch}>
+                                    <button className={clsx('clickable-icon', { 'is-hidden': !search.localSearchQuery })} aria-label="Clear search" onClick={search.handleClearSearch}>
                                         <Icon name="x" />
                                     </button>
                                 </div>
@@ -196,10 +160,10 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
                         ) : (
                             <VirtualizedPlaintext 
                                 content={content} 
-                                searchQuery={searchQuery} 
-                                isCaseSensitive={isCaseSensitive}
+                                searchQuery={search.searchQuery} 
+                                isCaseSensitive={search.isCaseSensitive}
                                 scrollerRef={virtuosoRef}
-                                activeMatchInfo={matches[activeMatchIndex] ?? null}
+                                activeMatchInfo={matches[search.activeMatchIndex] ?? null}
                             />
                         )}
                     </div>
