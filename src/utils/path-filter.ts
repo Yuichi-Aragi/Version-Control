@@ -1,269 +1,578 @@
-import type { VersionControlSettings } from '../types';
-
-// Cache compiled regexes for performance with LRU-like cleanup to prevent memory leaks
-const regexCache = new Map<string, { regex: RegExp; lastUsed: number }>();
-const MAX_CACHE_SIZE = 1000; // Prevent unbounded memory growth
-const MAX_PATTERN_LENGTH = 10000; // Maximum allowed pattern length
-const CLEANUP_INTERVAL = 60000; // Cleanup interval in milliseconds
-
-// Cleanup timer for stale cache entries
-let cleanupTimer: NodeJS.Timeout | null = null;
-
 /**
- * Initializes the cleanup timer for regex cache
+ * VERSION CONTROL PATH FILTER MODULE
+ * 
+ * Optimized, hardened, and production-ready implementation
+ * with comprehensive validation, security, and performance optimizations
  */
-function initializeCleanupTimer(): void {
-    if (cleanupTimer) return;
-    
-    cleanupTimer = setInterval(() => {
-        const now = Date.now();
-        const entries = Array.from(regexCache.entries());
-        
-        // Remove entries not used in the last 5 minutes
-        entries.forEach(([key, value]) => {
-            if (now - value.lastUsed > 300000) {
-                regexCache.delete(key);
-            }
-        });
-    }, CLEANUP_INTERVAL);
+
+// ================================
+// TYPES & INTERFACES
+// ================================
+
+
+
+/** Cache entry for compiled regex patterns */
+interface RegexCacheEntry {
+    readonly regex: RegExp;
+    readonly timestamp: number;
+    readonly hitCount: number;
 }
 
-/**
- * Safely compiles and caches regex patterns with strict validation and error handling.
- * @param pattern The regex pattern string to compile
- * @returns Compiled RegExp if valid, null otherwise
- */
-function getRegex(pattern: string): RegExp | null {
-    // Strict input validation
-    if (typeof pattern !== 'string') {
-        console.warn(`Version Control: Invalid pattern type received (expected string, got ${typeof pattern})`);
-        return null;
-    }
-    
-    if (pattern.trim() === '') {
-        console.warn('Version Control: Empty pattern skipped');
-        return null;
-    }
+/** Performance metrics for monitoring */
+interface PerformanceMetrics {
+    cacheHits: number;
+    cacheMisses: number;
+    compilations: number;
+    validationFailures: number;
+    totalProcessed: number;
+}
 
-    // Initialize cleanup timer on first use
-    initializeCleanupTimer();
+/** Comprehensive validation result */
+interface ValidationResult<T> {
+    readonly isValid: boolean;
+    readonly value?: T;
+    readonly error?: string;
+    readonly sanitized?: string;
+}
 
-    // Return from cache if available
-    const cached = regexCache.get(pattern);
-    if (cached) {
-        cached.lastUsed = Date.now();
-        return cached.regex;
-    }
+// ================================
+// CONSTANTS & CONFIGURATION
+// ================================
 
-    try {
-        // Validate pattern before compilation (basic sanity check)
-        if (pattern.length > MAX_PATTERN_LENGTH) {
-            console.warn(`Version Control: Pattern too long (${pattern.length} chars), skipped: "${pattern.substring(0, 50)}..."`);
-            return null;
-        }
+/** Maximum cache size to prevent memory exhaustion */
+const MAX_CACHE_SIZE = 1000;
 
-        // Additional pattern validation to prevent ReDoS attacks
-        if (/(\\[pP]{[^}]*})/.test(pattern)) {
-            console.warn('Version Control: Unicode property escapes not supported in pattern');
-            return null;
-        }
+/** Maximum allowed pattern length for security */
+const MAX_PATTERN_LENGTH = 10000;
 
-        // Check for potentially catastrophic backtracking
-        if (/\(\?=[^)]*\)|\(\?!.*\*.*\)/.test(pattern)) {
-            console.warn('Version Control: Potentially dangerous lookahead pattern detected');
-            return null;
-        }
+/** Maximum path length (Windows MAX_PATH limit) */
+const MAX_PATH_LENGTH = 260;
 
-        // Compile without flags as specified (case-sensitive only)
-        const regex = new RegExp(pattern);
+/** Cache TTL in milliseconds (5 minutes) */
+const CACHE_TTL_MS = 300000;
+
+/** Path traversal patterns for security validation */
+const PATH_TRAVERSAL_PATTERNS = [
+    /\.\.\//,        // ../ in Unix-style paths
+    /\.\.\\/,        // ..\ in Windows-style paths
+    /\0/,            // Null bytes
+    /\\\.\./,        // \.. in mixed paths
+    /\/\.\.\//,      // /../ in paths
+    /\\\\\.\.\\/     // \\..\\ in UNC paths
+] as const;
+
+/** Dangerous regex patterns that could cause ReDoS */
+const DANGEROUS_REGEX_PATTERNS = [
+    /\(\?=[^)]*\)/,     // Lookahead with quantifiers
+    /\(\?!.*\*.*\)/,    // Negative lookahead with wildcards
+    /\*\*+/,           // Nested quantifiers
+    /\(\?:.*\)\{2,\}/,  // Repeated non-capturing groups
+    /\\[pP]\{[^}]*\}/  // Unicode property escapes
+] as const;
+
+/** Reserved filenames and paths (Windows/Linux) */
+const RESERVED_NAMES = new Set([
+    'CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+    'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9',
+    '.', '..', '...'
+]);
+
+// ================================
+// CACHE MANAGEMENT
+// ================================
+
+/** LRU cache for compiled regex patterns with TTL and size limits */
+class RegexCache {
+    private cache = new Map<string, RegexCacheEntry>();
+    private metrics: PerformanceMetrics = {
+        cacheHits: 0,
+        cacheMisses: 0,
+        compilations: 0,
+        validationFailures: 0,
+        totalProcessed: 0
+    };
+
+    /** Get compiled regex with LRU update */
+    get(pattern: string): RegExp | null {
+        this.metrics.totalProcessed++;
         
-        // Cache management - LRU-like behavior with timestamp
-        if (regexCache.size >= MAX_CACHE_SIZE) {
-            // Find and remove the least recently used entry
-            let oldestKey: string | null = null;
-            let oldestTime = Date.now();
-            
-            regexCache.forEach((value, key) => {
-                if (value.lastUsed < oldestTime) {
-                    oldestTime = value.lastUsed;
-                    oldestKey = key;
-                }
+        const entry = this.cache.get(pattern);
+        if (entry) {
+            this.metrics.cacheHits++;
+            // Update LRU order by deleting and re-inserting
+            this.cache.delete(pattern);
+            this.cache.set(pattern, {
+                ...entry,
+                timestamp: Date.now(),
+                hitCount: entry.hitCount + 1
             });
-            
-            if (oldestKey) {
-                regexCache.delete(oldestKey);
+            return entry.regex;
+        }
+        
+        this.metrics.cacheMisses++;
+        return null;
+    }
+
+    /** Store compiled regex with cache management */
+    set(pattern: string, regex: RegExp): void {
+        this.metrics.compilations++;
+        
+        // Clean up expired entries before adding new one
+        this.cleanupExpired();
+        
+        // Enforce maximum cache size
+        if (this.cache.size >= MAX_CACHE_SIZE) {
+            this.evictLRU();
+        }
+        
+        this.cache.set(pattern, {
+            regex,
+            timestamp: Date.now(),
+            hitCount: 1
+        });
+    }
+
+    /** Remove expired cache entries (older than TTL) */
+    private cleanupExpired(): void {
+        const now = Date.now();
+        const expiredKeys: string[] = [];
+        
+        for (const [key, entry] of this.cache) {
+            if (now - entry.timestamp > CACHE_TTL_MS) {
+                expiredKeys.push(key);
             }
         }
         
-        regexCache.set(pattern, { regex, lastUsed: Date.now() });
-        return regex;
-    } catch (error) {
-        // Defensive error handling with detailed logging
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.warn(`Version Control: Invalid regex pattern skipped: "${pattern}"`, {
-            error: errorMessage,
-            patternLength: pattern.length,
-            timestamp: new Date().toISOString()
-        });
-        return null;
+        expiredKeys.forEach(key => this.cache.delete(key));
+    }
+
+    /** Evict least recently used entry */
+    private evictLRU(): void {
+        if (this.cache.size === 0) return;
+        
+        let oldestKey: string | null = null;
+        let oldestTime = Date.now();
+        
+        for (const [key, entry] of this.cache) {
+            if (entry.timestamp < oldestTime) {
+                oldestTime = entry.timestamp;
+                oldestKey = key;
+            }
+        }
+        
+        if (oldestKey) {
+            this.cache.delete(oldestKey);
+        }
+    }
+
+    /** Clear all cache entries */
+    clear(): void {
+        this.cache.clear();
+        this.resetMetrics();
+    }
+
+    /** Get current cache statistics */
+    getStats(): { size: number; hits: number; misses: number; hitRate: number } {
+        const totalAccesses = this.metrics.cacheHits + this.metrics.cacheMisses;
+        const hitRate = totalAccesses > 0 
+            ? (this.metrics.cacheHits / totalAccesses) * 100 
+            : 0;
+            
+        return {
+            size: this.cache.size,
+            hits: this.metrics.cacheHits,
+            misses: this.metrics.cacheMisses,
+            hitRate: parseFloat(hitRate.toFixed(2))
+        };
+    }
+
+    /** Reset performance metrics */
+    private resetMetrics(): void {
+        this.metrics = {
+            cacheHits: 0,
+            cacheMisses: 0,
+            compilations: 0,
+            validationFailures: 0,
+            totalProcessed: 0
+        };
     }
 }
 
-/**
- * Validates and sanitizes a file path
- * @param path The path to validate
- * @returns Sanitized path or null if invalid
- */
-function validatePath(path: unknown): string | null {
-    if (typeof path !== 'string') {
-        console.warn(`Version Control: Invalid path type received (expected string, got ${typeof path})`);
-        return null;
+// Global regex cache instance
+const regexCache = new RegexCache();
+
+// ================================
+// VALIDATION UTILITIES
+// ================================
+
+/** Comprehensive pattern validation with security checks */
+function validatePattern(pattern: unknown): ValidationResult<string> {
+    // Type validation
+    if (typeof pattern !== 'string') {
+        return {
+            isValid: false,
+            error: `Invalid pattern type: expected string, got ${typeof pattern}`
+        };
     }
+
+    const trimmed = pattern.trim();
     
-    if (path.trim() === '') {
-        console.warn('Version Control: Empty path received');
-        return null;
+    // Empty pattern validation
+    if (trimmed.length === 0) {
+        return {
+            isValid: false,
+            error: 'Pattern cannot be empty or whitespace only'
+        };
+    }
+
+    // Length validation for security
+    if (trimmed.length > MAX_PATTERN_LENGTH) {
+        return {
+            isValid: false,
+            error: `Pattern too long: ${trimmed.length} characters (max ${MAX_PATTERN_LENGTH})`,
+            sanitized: trimmed.substring(0, 100) + '...'
+        };
+    }
+
+    // Dangerous pattern detection
+    for (const dangerousPattern of DANGEROUS_REGEX_PATTERNS) {
+        if (dangerousPattern.test(trimmed)) {
+            return {
+                isValid: false,
+                error: 'Pattern contains potentially dangerous regex constructs',
+                sanitized: trimmed
+            };
+        }
+    }
+
+    return {
+        isValid: true,
+        value: trimmed,
+        sanitized: trimmed
+    };
+}
+
+/** Comprehensive path validation with security hardening */
+function validatePath(path: unknown): ValidationResult<string> {
+    // Type validation
+    if (typeof path !== 'string') {
+        return {
+            isValid: false,
+            error: `Invalid path type: expected string, got ${typeof path}`
+        };
+    }
+
+    const trimmed = path.trim();
+    
+    // Empty path validation
+    if (trimmed.length === 0) {
+        return {
+            isValid: false,
+            error: 'Path cannot be empty or whitespace only'
+        };
+    }
+
+    // Length validation
+    if (trimmed.length > MAX_PATH_LENGTH) {
+        return {
+            isValid: false,
+            error: `Path too long: ${trimmed.length} characters (max ${MAX_PATH_LENGTH})`,
+            sanitized: trimmed.substring(0, 100) + '...'
+        };
+    }
+
+    // Security: Path traversal detection
+    for (const traversalPattern of PATH_TRAVERSAL_PATTERNS) {
+        if (traversalPattern.test(trimmed)) {
+            return {
+                isValid: false,
+                error: 'Path contains traversal patterns',
+                sanitized: trimmed.replace(/\0/g, '').replace(/[\\/]/g, '/')
+            };
+        }
     }
 
     // Normalize path separators
-    let sanitizedPath = path.replace(/\\/g, '/');
+    let sanitized = trimmed.replace(/\\/g, '/');
     
-    // Remove any null bytes
-    sanitizedPath = sanitizedPath.replace(/\0/g, '');
+    // Remove any remaining null bytes
+    sanitized = sanitized.replace(/\0/g, '');
     
-    // Check for path traversal attempts
-    if (sanitizedPath.includes('../') || sanitizedPath.includes('..\\')) {
-        console.warn('Version Control: Path traversal attempt detected', { path });
-        return null;
+    // Check for reserved names (case-insensitive)
+    const segments = sanitized.split('/');
+    for (const segment of segments) {
+        const upperSegment = segment.toUpperCase();
+        if (RESERVED_NAMES.has(upperSegment)) {
+            return {
+                isValid: false,
+                error: `Path contains reserved name: ${segment}`,
+                sanitized
+            };
+        }
     }
-    
-    // Check for excessively long paths
-    if (sanitizedPath.length > 260) { // Windows MAX_PATH limit
-        console.warn('Version Control: Path too long', { path: sanitizedPath.substring(0, 50) + '...' });
-        return null;
-    }
-    
-    return sanitizedPath;
+
+    return {
+        isValid: true,
+        value: sanitized,
+        sanitized
+    };
 }
 
-/**
- * Validates the settings object
- * @param settings The settings to validate
- * @returns Validated pathFilters array or null if invalid
- */
-function validateSettings(settings: unknown): string[] | null {
-    if (!settings || typeof settings !== 'object') {
-        console.warn('Version Control: Invalid settings object received');
-        return null;
+/** Settings validation with comprehensive type checking */
+function validateSettings(settings: unknown): ValidationResult<readonly string[]> {
+    // Null/undefined check
+    if (settings == null) {
+        return {
+            isValid: false,
+            error: 'Settings object is null or undefined'
+        };
+    }
+
+    // Type check
+    if (typeof settings !== 'object' || Array.isArray(settings)) {
+        return {
+            isValid: false,
+            error: `Settings must be an object, got ${typeof settings}`
+        };
     }
 
     const settingsObj = settings as Record<string, unknown>;
     
+    // Check for required pathFilters property
     if (!('pathFilters' in settingsObj)) {
-        console.warn('Version Control: Settings missing pathFilters property');
-        return null;
+        return {
+            isValid: false,
+            error: 'Settings missing required property: pathFilters'
+        };
     }
 
     const pathFilters = settingsObj['pathFilters'];
     
+    // Type check for pathFilters
     if (!Array.isArray(pathFilters)) {
-        console.warn('Version Control: pathFilters is not an array');
+        return {
+            isValid: false,
+            error: `pathFilters must be an array, got ${typeof pathFilters}`
+        };
+    }
+
+    // Validate each filter
+    const validFilters: string[] = [];
+    const errors: string[] = [];
+    
+    for (let i = 0; i < pathFilters.length; i++) {
+        const filter = pathFilters[i];
+        
+        // Skip null/undefined entries
+        if (filter == null) {
+            continue;
+        }
+        
+        const validation = validatePattern(filter);
+        if (validation.isValid && validation.value) {
+            validFilters.push(validation.value);
+        } else if (validation.error) {
+            errors.push(`Filter at index ${i}: ${validation.error}`);
+        }
+    }
+
+    if (errors.length > 0 && validFilters.length === 0) {
+        return {
+            isValid: false,
+            error: `All filters invalid: ${errors.join('; ')}`
+        };
+    }
+
+    return {
+        isValid: true,
+        value: Object.freeze([...validFilters]) // Return immutable array
+    };
+}
+
+// ================================
+// REGEX COMPILATION
+// ================================
+
+/** Safely compile and cache regex pattern with comprehensive error handling */
+function compileRegex(pattern: string): RegExp | null {
+    // Validate pattern first
+    const patternValidation = validatePattern(pattern);
+    if (!patternValidation.isValid) {
+        console.warn('Version Control: Pattern validation failed:', {
+            pattern: patternValidation.sanitized || pattern.substring(0, 50),
+            error: patternValidation.error
+        });
         return null;
     }
 
-    // Validate each filter pattern
-    const validFilters: string[] = [];
-    for (const filter of pathFilters) {
-        if (filter === null || filter === undefined) {
-            continue;
-        }
-        
-        const filterStr = String(filter);
-        if (filterStr.trim() === '') {
-            continue;
-        }
-        
-        // Additional validation for filter patterns
-        if (filterStr.length > MAX_PATTERN_LENGTH) {
-            console.warn('Version Control: Filter pattern too long, skipping', { 
-                filter: filterStr.substring(0, 50) + '...' 
-            });
-            continue;
-        }
-        
-        validFilters.push(filterStr);
-    }
+    const validatedPattern = patternValidation.value!;
     
-    return validFilters;
+    // Check cache first
+    const cachedRegex = regexCache.get(validatedPattern);
+    if (cachedRegex) {
+        return cachedRegex;
+    }
+
+    try {
+        // Attempt compilation
+        const regex = new RegExp(validatedPattern);
+        
+        // Test compilation with safe input to catch runtime errors early
+        const testInput = 'test-string-for-validation';
+        regex.test(testInput);
+        
+        // Store in cache
+        regexCache.set(validatedPattern, regex);
+        
+        return regex;
+    } catch (error) {
+        // Comprehensive error handling with structured logging
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorName = error instanceof Error ? error.name : 'UnknownError';
+        
+        console.warn('Version Control: Regex compilation failed:', {
+            pattern: validatedPattern.substring(0, 100),
+            patternLength: validatedPattern.length,
+            errorType: errorName,
+            errorMessage,
+            timestamp: new Date().toISOString()
+        });
+        
+        return null;
+    }
 }
+
+// ================================
+// MAIN FUNCTIONALITY
+// ================================
 
 /**
  * Checks if a given file path should be processed based on the plugin's
  * blacklist settings.
  * 
- * @param path - The full, vault-relative path of the file (must be a non-empty string)
+ * @param path - The full, vault-relative path of the file
  * @param settings - The current global plugin settings with required properties
  * @returns `true` if the path is allowed, `false` otherwise
- * @throws Will not throw - always returns boolean for maximum resilience
+ * 
+ * @remarks
+ * - Always returns boolean for maximum resilience (never throws)
+ * - Comprehensive input validation and sanitization
+ * - Fail-safe defaults for invalid inputs
+ * - Performance optimized with caching
  */
 export function isPathAllowed(
     path: unknown, 
-    settings: Pick<VersionControlSettings, 'pathFilters'>
+    settings: { pathFilters?: unknown }
 ): boolean {
-    // Validate and sanitize path
-    const sanitizedPath = validatePath(path);
-    if (sanitizedPath === null) {
-        return false; // Fail safe - reject invalid paths
-    }
-
-    // Validate settings
-    const pathFilters = validateSettings(settings);
-    if (pathFilters === null) {
-        return true; // Default to allowing when settings are invalid (backward compatible)
-    }
-
-    // Early return for no filters (backward compatible behavior)
-    if (pathFilters.length === 0) {
-        return true; // No filters, so everything is allowed
-    }
-
-    // Process filters with maximum error tolerance
-    let hasMatch = false;
-    try {
-        hasMatch = pathFilters.some(pattern => {
-            const regex = getRegex(pattern);
-            return regex ? regex.test(sanitizedPath) : false;
+    // Phase 1: Input validation
+    const pathValidation = validatePath(path);
+    if (!pathValidation.isValid) {
+        // Fail-safe: reject invalid paths
+        console.debug('Version Control: Path validation failed', {
+            error: pathValidation.error,
+            sanitized: pathValidation.sanitized
         });
+        return false;
+    }
+    
+    const sanitizedPath = pathValidation.value!;
+    
+    // Phase 2: Settings validation
+    const settingsValidation = validateSettings(settings);
+    if (!settingsValidation.isValid) {
+        // Backward compatibility: allow all when settings are invalid
+        console.debug('Version Control: Settings validation failed, defaulting to allow-all', {
+            error: settingsValidation.error
+        });
+        return true;
+    }
+    
+    const pathFilters = settingsValidation.value!;
+    
+    // Phase 3: Early return for no filters
+    if (pathFilters.length === 0) {
+        return true;
+    }
+    
+    // Phase 4: Filter processing with error boundaries
+    try {
+        let hasMatch = false;
+        
+        // Optimized iteration with early exit
+        for (const pattern of pathFilters) {
+            const regex = compileRegex(pattern);
+            if (regex && regex.test(sanitizedPath)) {
+                hasMatch = true;
+                break; // Early exit on first match
+            }
+        }
+        
+        // Apply blacklist logic: match means blocked
+        return !hasMatch;
+        
     } catch (error) {
-        // Log any unexpected errors during filter processing
+        // Ultimate safety net - log and return conservative default
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error('Version Control: Unexpected error during path filtering', {
+        
+        console.error('Version Control: Critical error in path filtering', {
             error: errorMessage,
             path: sanitizedPath,
             filterCount: pathFilters.length,
             timestamp: new Date().toISOString()
         });
-        // Fail safe - in case of errors, default to no match
-        hasMatch = false;
-    }
-
-    // Apply blacklist logic
-    try {
-        return !hasMatch; // In blacklist mode, a match means it's blocked
-    } catch (error) {
-        // Final safety net - log and return conservative default
-        console.error('Version Control: Critical error in final filter logic', error);
-        return false; // Fail safe - block when in doubt
+        
+        // Fail-safe: block when uncertain
+        return false;
     }
 }
 
+// ================================
+// PUBLIC UTILITIES
+// ================================
+
 /**
- * Cleanup function to be called when the module is unloaded
+ * Cleanup function to be called when the module is unloaded.
+ * Releases all cached resources and resets internal state.
  */
 export function cleanup(): void {
-    if (cleanupTimer) {
-        clearInterval(cleanupTimer);
-        cleanupTimer = null;
-    }
     regexCache.clear();
+}
+
+/**
+ * Get cache statistics for monitoring and debugging.
+ * 
+ * @returns Current cache statistics including size, hits, misses, and hit rate
+ */
+export function getCacheStats(): { size: number; hits: number; misses: number; hitRate: number } {
+    return regexCache.getStats();
+}
+
+/**
+ * Force cache invalidation and cleanup.
+ * Useful for testing or when patterns need to be recompiled.
+ */
+export function invalidateCache(): void {
+    regexCache.clear();
+}
+
+/**
+ * Validate and sanitize a single pattern without caching.
+ * Useful for testing pattern validity before adding to settings.
+ * 
+ * @param pattern - Pattern to validate
+ * @returns Validation result with sanitized pattern if valid
+ */
+export function validateSinglePattern(pattern: unknown): ValidationResult<string> {
+    return validatePattern(pattern);
+}
+
+/**
+ * Validate and sanitize a single path.
+ * Useful for testing path validity before processing.
+ * 
+ * @param path - Path to validate
+ * @returns Validation result with sanitized path if valid
+ */
+export function validateSinglePath(path: unknown): ValidationResult<string> {
+    return validatePath(path);
 }
