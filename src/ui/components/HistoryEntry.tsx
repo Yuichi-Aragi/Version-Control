@@ -1,16 +1,16 @@
 import { moment } from 'obsidian';
 import clsx from 'clsx';
-import { type FC, type MouseEvent, type KeyboardEvent, useCallback, useEffect, useRef, memo, useMemo, useState, useLayoutEffect, type FocusEvent, Fragment } from 'react';
+import { type FC, type MouseEvent, type KeyboardEvent, useCallback, useEffect, useRef, memo, useMemo, useState, useLayoutEffect, type FocusEvent } from 'react';
 import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
 import type { VersionHistoryEntry as VersionHistoryEntryType } from '../../types';
 import { formatFileSize } from '../utils/dom';
-import { escapeRegExp } from '../utils/strings';
 import { thunks } from '../../state/thunks';
 import { actions } from '../../state/appSlice';
 import { versionActions } from '../VersionActions';
 import { Icon } from './Icon';
 import type { AppStore } from '../../state/store';
 import { useTime } from '../contexts/TimeContext';
+import { HighlightedText } from './shared/HighlightedText';
 
 interface HistoryEntryProps {
     version: VersionHistoryEntryType;
@@ -20,27 +20,6 @@ interface HistoryEntryProps {
 
 const MAX_NAME_LENGTH = 256;
 const MAX_DESC_LENGTH = 2048;
-
-const HighlightedText: FC<{ text: string; highlight?: string; isCaseSensitive?: boolean }> = memo(({ text, highlight, isCaseSensitive }) => {
-    if (!highlight || !highlight.trim() || !text) {
-        return <>{text}</>;
-    }
-    try {
-        const escaped = escapeRegExp(highlight);
-        const regex = new RegExp(`(${escaped})`, isCaseSensitive ? 'g' : 'gi');
-        const parts = text.split(regex);
-        return (
-            <>
-                {parts.map((part, i) =>
-                    regex.test(part) ? <mark key={i}>{part}</mark> : <Fragment key={i}>{part}</Fragment>
-                )}
-            </>
-        );
-    } catch (e) {
-        return <>{text}</>;
-    }
-});
-HighlightedText.displayName = 'HighlightedText';
 
 export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery, isSearchCaseSensitive }) => {
     const dispatch = useAppDispatch();
@@ -63,19 +42,13 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
 
     const isNamingThisVersion = version.id === namingVersionId;
 
-    // Local state for controlled inputs, active only during editing
     const [nameValue, setNameValue] = useState('');
     const [descValue, setDescValue] = useState('');
 
-    // When editing starts, populate local state from props.
-    // This ensures the inputs always show the correct current data from the manifest.
     useEffect(() => {
         if (isNamingThisVersion) {
             setNameValue(version.name ?? '');
             setDescValue(version.description ?? '');
-            
-            // When editing starts (e.g., from an external context menu), ignore blur events for a short period.
-            // This prevents the blur caused by the context menu closing from immediately exiting edit mode.
             ignoreBlurRef.current = true;
             const timer = setTimeout(() => { ignoreBlurRef.current = false; }, 150);
             return () => clearTimeout(timer);
@@ -92,10 +65,7 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
         }
     }, [descValue, isNamingThisVersion]);
 
-    const handleMouseDown = useCallback((e: MouseEvent<HTMLDivElement>) => {
-        // If any version is being edited, prevent the subsequent click from triggering the preview.
-        // This ensures that clicking away from an active input only commits the change (via blur)
-        // and doesn't immediately navigate/open a panel.
+    const handleMouseDown = useCallback((_e: MouseEvent<HTMLDivElement>) => {
         if (namingVersionId !== null) {
             shouldIgnoreClickRef.current = true;
         } else {
@@ -157,7 +127,6 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
         }
     }, [dispatch, version.id, version.name, version.description, nameValue, descValue]);
 
-    // Handles clicks outside the component to save and exit editing mode.
     useEffect(() => {
         if (!isNamingThisVersion) return;
 
@@ -167,7 +136,6 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
             }
         };
 
-        // Add listener on next tick to avoid capturing the click that initiated the edit mode.
         const timer = setTimeout(() => {
             document.addEventListener('mousedown', handleClickOutside);
         }, 0);
@@ -179,16 +147,11 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
     }, [isNamingThisVersion, saveDetails]);
 
     const handleContainerBlur = useCallback((e: FocusEvent<HTMLDivElement>) => {
-        if (ignoreBlurRef.current) {
-            return;
-        }
-        // If the blur was caused by clicking the edit button, which disappears on re-render,
-        // we ignore the blur event once to prevent the editor from closing immediately.
+        if (ignoreBlurRef.current) return;
         if (isEditButtonAction.current) {
             isEditButtonAction.current = false;
             return;
         }
-        // If the new focused element is not a child of the entry, then save.
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
             saveDetails();
         }
@@ -253,17 +216,8 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
     const charCount = settings.includeMdSyntaxInCharacterCount ? version.charCountWithMd : version.charCount;
     const lineCount = settings.includeMdSyntaxInLineCount ? version.lineCount : version.lineCountWithoutMd;
 
-    // Logic for showing description in list/footer
-    // Show description if:
-    // 1. Search is active AND description exists (requirement: "renders name and description both... until search bar is active")
-    // 2. Setting is enabled AND description exists
     const hasDescription = !!version.description && version.description.trim().length > 0;
     const shouldShowDescription = hasDescription && (isSearchActive || settings.showDescriptionInList);
-    
-    // In search mode, we must show description if it exists.
-    // If settings.showDescriptionInList is ON, we replace buttons with description.
-    // If OFF but Search Active, we also show description.
-    // The requirement says "Replace the action buttons area".
     const showFooterDescription = shouldShowDescription && !settings.isListView;
     const showListDescription = shouldShowDescription && settings.isListView;
 
@@ -289,8 +243,8 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
                 <span className="v-version-id" aria-hidden>
                     <HighlightedText 
                         text={`V${String(version.versionNumber ?? '')}`} 
-                        {...(searchQuery && { highlight: searchQuery })}
-                        {...(isSearchCaseSensitive !== undefined && { isCaseSensitive: isSearchCaseSensitive })}
+                        {...(searchQuery && { query: searchQuery })}
+                        {...(isSearchCaseSensitive !== undefined && { caseSensitive: isSearchCaseSensitive })}
                     />
                 </span>
 
@@ -313,8 +267,8 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
                             <div className="v-version-name">
                                 <HighlightedText 
                                     text={version.name} 
-                                    {...(searchQuery && { highlight: searchQuery })}
-                                    {...(isSearchCaseSensitive !== undefined && { isCaseSensitive: isSearchCaseSensitive })}
+                                    {...(searchQuery && { query: searchQuery })}
+                                    {...(isSearchCaseSensitive !== undefined && { caseSensitive: isSearchCaseSensitive })}
                                 />
                             </div>
                         ) : (
@@ -326,8 +280,8 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
                 <span className="v-version-timestamp" title={tooltipTimestamp}>
                     <HighlightedText 
                         text={timestampText} 
-                        {...(searchQuery && { highlight: searchQuery })}
-                        {...(isSearchCaseSensitive !== undefined && { isCaseSensitive: isSearchCaseSensitive })}
+                        {...(searchQuery && { query: searchQuery })}
+                        {...(isSearchCaseSensitive !== undefined && { caseSensitive: isSearchCaseSensitive })}
                     />
                 </span>
             </div>
@@ -336,16 +290,16 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
                 <span>
                     Size: <HighlightedText 
                         text={formatFileSize(typeof version.size === 'number' ? version.size : 0)} 
-                        {...(searchQuery && { highlight: searchQuery })}
-                        {...(isSearchCaseSensitive !== undefined && { isCaseSensitive: isSearchCaseSensitive })}
+                        {...(searchQuery && { query: searchQuery })}
+                        {...(isSearchCaseSensitive !== undefined && { caseSensitive: isSearchCaseSensitive })}
                     />
                 </span>
                 {settings.enableWordCount && typeof wordCount === 'number' && (
                     <span>
                         Words: <HighlightedText 
                             text={String(wordCount)} 
-                            {...(searchQuery && { highlight: searchQuery })}
-                            {...(isSearchCaseSensitive !== undefined && { isCaseSensitive: isSearchCaseSensitive })}
+                            {...(searchQuery && { query: searchQuery })}
+                            {...(isSearchCaseSensitive !== undefined && { caseSensitive: isSearchCaseSensitive })}
                         />
                     </span>
                 )}
@@ -353,8 +307,8 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
                     <span>
                         Chars: <HighlightedText 
                             text={String(charCount)} 
-                            {...(searchQuery && { highlight: searchQuery })}
-                            {...(isSearchCaseSensitive !== undefined && { isCaseSensitive: isSearchCaseSensitive })}
+                            {...(searchQuery && { query: searchQuery })}
+                            {...(isSearchCaseSensitive !== undefined && { caseSensitive: isSearchCaseSensitive })}
                         />
                     </span>
                 )}
@@ -362,8 +316,8 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
                     <span>
                         Lines: <HighlightedText 
                             text={String(lineCount)} 
-                            {...(searchQuery && { highlight: searchQuery })}
-                            {...(isSearchCaseSensitive !== undefined && { isCaseSensitive: isSearchCaseSensitive })}
+                            {...(searchQuery && { query: searchQuery })}
+                            {...(isSearchCaseSensitive !== undefined && { caseSensitive: isSearchCaseSensitive })}
                         />
                     </span>
                 )}
@@ -384,13 +338,12 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
                 </div>
             )}
 
-            {/* Description display for List View */}
             {showListDescription && !isNamingThisVersion && (
                 <div className="v-history-description">
                     <HighlightedText 
                         text={version.description || ''} 
-                        {...(searchQuery && { highlight: searchQuery })}
-                        {...(isSearchCaseSensitive !== undefined && { isCaseSensitive: isSearchCaseSensitive })}
+                        {...(searchQuery && { query: searchQuery })}
+                        {...(isSearchCaseSensitive !== undefined && { caseSensitive: isSearchCaseSensitive })}
                     />
                 </div>
             )}
@@ -401,8 +354,8 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
                         <div className="v-history-description">
                             <HighlightedText 
                                 text={version.description || ''} 
-                                {...(searchQuery && { highlight: searchQuery })}
-                                {...(isSearchCaseSensitive !== undefined && { isCaseSensitive: isSearchCaseSensitive })}
+                                {...(searchQuery && { query: searchQuery })}
+                                {...(isSearchCaseSensitive !== undefined && { caseSensitive: isSearchCaseSensitive })}
                             />
                         </div>
                     ) : (
@@ -419,16 +372,12 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
                             {safeActions.map(action => {
                                 const handleAction = (e: React.SyntheticEvent) => {
                                     e.stopPropagation();
-                                    // If this is the edit action, set a flag. This prevents the onBlur handler
-                                    // from immediately closing the editor when the button disappears on re-render.
                                     if (action.id === 'edit') {
                                         isEditButtonAction.current = true;
                                     }
                                     try {
                                         if (typeof action.actionHandler === 'function') {
                                             action.actionHandler(version, { dispatch } as unknown as AppStore);
-                                        } else {
-                                            console.warn('HistoryEntry: action missing handler', action);
                                         }
                                     } catch (err) {
                                         console.error('HistoryEntry: action handler threw', err);
