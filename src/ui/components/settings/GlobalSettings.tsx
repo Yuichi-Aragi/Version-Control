@@ -1,102 +1,125 @@
-import { memo, useState, useEffect, useCallback } from 'react';
-import { isEqual } from 'lodash-es';
+import { memo, useCallback, useEffect, useMemo } from 'react';
+import { useForm, type SubmitHandler } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { debounce } from 'lodash-es';
 import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
 import { thunks } from '../../../state/thunks';
 import { SettingComponent } from '../SettingComponent';
-import { DebouncedTextarea } from './controls/DebouncedTextarea';
-import { validateString } from './settingsUtils';
+import { ValidatedInput, ValidatedTextarea } from './controls/ValidatedControls';
+import { 
+    DatabasePathSchema, 
+    FrontmatterKeySchema, 
+    NoteIdFormatSchema,
+    VersionIdFormatSchema,
+    RegexListSchema 
+} from './settingsUtils';
+import { z } from 'zod';
+
+// --- Database Path Setting ---
+
+const DatabasePathFormSchema = z.object({
+    databasePath: DatabasePathSchema
+});
+
+type DatabasePathFormValues = z.infer<typeof DatabasePathFormSchema>;
 
 const DatabasePathSetting: React.FC = memo(() => {
     const dispatch = useAppDispatch();
     const databasePath = useAppSelector(state => state.settings.databasePath);
-    const [dbPath, setDbPath] = useState(() => {
-        try {
-            return validateString(databasePath, 255);
-        } catch (error) {
-            console.error('Invalid database path:', error);
-            return '.versiondb';
-        }
-    });
-    
-    useEffect(() => {
-        try {
-            const validatedPath = validateString(databasePath, 255);
-            setDbPath(validatedPath);
-        } catch (error) {
-            console.error('Invalid database path from state:', error);
-        }
-    }, [databasePath]);
 
-    const handleDbPathApply = useCallback(() => {
-        try {
-            const validatedPath = validateString(dbPath, 255);
-            if (validatedPath.trim()) {
-                dispatch(thunks.renameDatabasePath(validatedPath));
-            }
-        } catch (error) {
-            console.error('Invalid database path on apply:', error);
-            dispatch(thunks.showNotice('Invalid database path', 3000));
+    const { control, handleSubmit, reset, formState: { isValid, isDirty } } = useForm<DatabasePathFormValues>({
+        mode: 'onChange',
+        resolver: zodResolver(DatabasePathFormSchema),
+        defaultValues: { databasePath }
+    });
+
+    // Sync external state changes
+    useEffect(() => {
+        reset({ databasePath });
+    }, [databasePath, reset]);
+
+    const onSubmit: SubmitHandler<DatabasePathFormValues> = (data) => {
+        if (data.databasePath !== databasePath) {
+            dispatch(thunks.renameDatabasePath(data.databasePath));
         }
-    }, [dispatch, dbPath]);
+    };
 
     return (
         <SettingComponent 
             name="Database path" 
             desc={`The vault-relative path for the version history database. Current: ${databasePath}`}
         >
-            <input 
-                type="text" 
-                value={dbPath} 
-                placeholder="e.g., .versiondb" 
-                onChange={e => setDbPath(e.target.value)}
-                maxLength={255}
-                aria-label="Database path input"
-            />
-            <button 
-                onClick={handleDbPathApply} 
-                aria-label="Apply database path change"
-                disabled={!dbPath.trim() || dbPath.trim() === databasePath}
-            >
-                Apply
-            </button>
+            <form onSubmit={handleSubmit(onSubmit)} className="v-setting-form" style={{ width: '100%' }}>
+                <ValidatedInput 
+                    name="databasePath" 
+                    control={control} 
+                    placeholder="e.g., .versiondb" 
+                    maxLength={255}
+                />
+                <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'flex-end' }}>
+                    <button 
+                        type="submit"
+                        aria-label="Apply database path change"
+                        disabled={!isValid || !isDirty}
+                    >
+                        Apply
+                    </button>
+                </div>
+            </form>
         </SettingComponent>
     );
 });
 DatabasePathSetting.displayName = 'DatabasePathSetting';
 
+// --- Key Update Filter Setting ---
+
+const KeyUpdateFilterFormSchema = z.object({
+    filters: RegexListSchema
+});
+
+type KeyUpdateFilterFormValues = z.infer<typeof KeyUpdateFilterFormSchema>;
+
 const KeyUpdateFilterSetting: React.FC = memo(() => {
     const dispatch = useAppDispatch();
-    const keyUpdatePathFilters = useAppSelector(state => state.settings.keyUpdatePathFilters, isEqual);
+    const keyUpdatePathFilters = useAppSelector(state => state.settings.keyUpdatePathFilters);
+    
+    const { control, watch, reset, formState: { isValid } } = useForm<KeyUpdateFilterFormValues>({
+        mode: 'onChange',
+        resolver: zodResolver(KeyUpdateFilterFormSchema),
+        defaultValues: { filters: keyUpdatePathFilters.join('\n') }
+    });
 
-    const handleFiltersChange = useCallback((value: string) => {
-        try {
-            const filterArray = value.split('\n')
-                .map(s => s.trim())
-                .filter(Boolean)
-                .filter(pattern => {
-                    try {
-                        new RegExp(pattern);
-                        return true;
-                    } catch {
-                        console.warn(`Invalid regex pattern: ${pattern}`);
-                        return false;
-                    }
-                });
-            dispatch(thunks.updateGlobalSettings({ keyUpdatePathFilters: filterArray }));
-        } catch (error) {
-            console.error('Error processing key update path filters:', error);
-        }
-    }, [dispatch]);
+    const debouncedSave = useMemo(() => debounce((value: string) => {
+        const filterArray = value.split('\n').map(s => s.trim()).filter(Boolean);
+        dispatch(thunks.updateGlobalSettings({ keyUpdatePathFilters: filterArray }));
+    }, 1000), [dispatch]);
+
+    // Sync external state changes
+    useEffect(() => {
+        reset({ filters: keyUpdatePathFilters.join('\n') });
+    }, [keyUpdatePathFilters, reset]);
+
+    useEffect(() => {
+        const subscription = watch((value) => {
+            if (isValid && value.filters !== undefined) {
+                debouncedSave(value.filters);
+            }
+        });
+        return () => {
+            subscription.unsubscribe();
+            debouncedSave.flush(); // Flush pending changes on unmount/cleanup
+        };
+    }, [watch, isValid, debouncedSave]);
 
     return (
         <>
             <p className="v-settings-info v-meta-label">
-                (Optional) Exclude paths from this key update. Enter one case-sensitive regular expression per line. Paths matching any pattern will be skipped.
+                (Optional) Exclude paths from this key update. Enter one case-sensitive regular expression per line.
             </p>
-            <DebouncedTextarea 
-                initialValue={keyUpdatePathFilters.join('\n')} 
-                onFinalChange={handleFiltersChange} 
-                rows={3} 
+            <ValidatedTextarea 
+                name="filters"
+                control={control}
+                rows={3}
                 placeholder={"^DoNotUpdateThisFolder/.*\n/path/to/specific-file.md"}
                 maxLength={1000}
             />
@@ -105,20 +128,33 @@ const KeyUpdateFilterSetting: React.FC = memo(() => {
 });
 KeyUpdateFilterSetting.displayName = 'KeyUpdateFilterSetting';
 
+// --- Frontmatter Key Setting ---
+
+const FrontmatterKeyFormSchema = z.object({
+    key: FrontmatterKeySchema
+});
+
+type FrontmatterKeyFormValues = z.infer<typeof FrontmatterKeyFormSchema>;
+
 const FrontmatterKeySetting: React.FC = memo(() => {
     const dispatch = useAppDispatch();
     const frontmatterKey = useAppSelector(state => state.settings.noteIdFrontmatterKey);
-    const [key, setKey] = useState(frontmatterKey);
+
+    const { control, handleSubmit, reset, formState: { isValid, isDirty } } = useForm<FrontmatterKeyFormValues>({
+        mode: 'onChange',
+        resolver: zodResolver(FrontmatterKeyFormSchema),
+        defaultValues: { key: frontmatterKey }
+    });
 
     useEffect(() => {
-        setKey(frontmatterKey);
-    }, [frontmatterKey]);
+        reset({ key: frontmatterKey });
+    }, [frontmatterKey, reset]);
 
-    const handleApply = useCallback(() => {
-        dispatch(thunks.requestKeyUpdate(key));
-    }, [dispatch, key]);
-
-    const isKeyDirty = key.trim() !== '' && key.trim() !== frontmatterKey;
+    const onSubmit: SubmitHandler<FrontmatterKeyFormValues> = (data) => {
+        if (data.key !== frontmatterKey) {
+            dispatch(thunks.requestKeyUpdate(data.key));
+        }
+    };
 
     return (
         <>
@@ -126,58 +162,145 @@ const FrontmatterKeySetting: React.FC = memo(() => {
                 name="Frontmatter key"
                 desc={`The key used in note frontmatter to store the version control ID. Current: ${frontmatterKey}`}
             >
-                <input
-                    type="text"
-                    value={key}
-                    placeholder="e.g., vc-id"
-                    onChange={e => setKey(e.target.value)}
-                    maxLength={50}
-                    aria-label="Frontmatter key input"
-                />
-                <button
-                    onClick={handleApply}
-                    aria-label="Apply frontmatter key change"
-                    disabled={!isKeyDirty}
-                >
-                    Apply
-                </button>
+                <form onSubmit={handleSubmit(onSubmit)} className="v-setting-form" style={{ width: '100%' }}>
+                    <ValidatedInput
+                        name="key"
+                        control={control}
+                        placeholder="e.g., vc-id"
+                        maxLength={50}
+                    />
+                    <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'flex-end' }}>
+                        <button
+                            type="submit"
+                            aria-label="Apply frontmatter key change"
+                            disabled={!isValid || !isDirty}
+                        >
+                            Apply
+                        </button>
+                    </div>
+                </form>
             </SettingComponent>
-            {isKeyDirty && <KeyUpdateFilterSetting />}
+            {isDirty && <KeyUpdateFilterSetting />}
         </>
     );
 });
 FrontmatterKeySetting.displayName = 'FrontmatterKeySetting';
 
+// --- ID Format Settings ---
+
+const IdFormatFormSchema = z.object({
+    noteIdFormat: NoteIdFormatSchema,
+    versionIdFormat: VersionIdFormatSchema
+});
+
+type IdFormatFormValues = z.infer<typeof IdFormatFormSchema>;
+
+const IdFormatSettings: React.FC = memo(() => {
+    const dispatch = useAppDispatch();
+    const noteIdFormat = useAppSelector(state => state.settings.noteIdFormat);
+    const versionIdFormat = useAppSelector(state => state.settings.versionIdFormat);
+    
+    const { control, handleSubmit, reset, formState: { isValid, isDirty } } = useForm<IdFormatFormValues>({
+        mode: 'onChange',
+        resolver: zodResolver(IdFormatFormSchema),
+        defaultValues: { noteIdFormat, versionIdFormat }
+    });
+
+    useEffect(() => {
+        reset({ noteIdFormat, versionIdFormat });
+    }, [noteIdFormat, versionIdFormat, reset]);
+
+    const onSubmit: SubmitHandler<IdFormatFormValues> = (data) => {
+        dispatch(thunks.requestUpdateIdFormats(data.noteIdFormat, data.versionIdFormat));
+    };
+
+    return (
+        <form onSubmit={handleSubmit(onSubmit)} style={{ width: '100%' }}>
+            <SettingComponent
+                name="Note ID Format"
+                desc="Format for generating Note IDs. Available variables: {path}, {name}, {timestamp}. Default: {path}"
+            >
+                <ValidatedInput
+                    name="noteIdFormat"
+                    control={control}
+                    placeholder="{path}"
+                    maxLength={100}
+                />
+            </SettingComponent>
+            
+            <SettingComponent
+                name="Version ID Format"
+                desc="Format for generating Version IDs. Available variables: {timestamp}, {version}, {name}. Default: {timestamp}_{version}"
+            >
+                <ValidatedInput
+                    name="versionIdFormat"
+                    control={control}
+                    placeholder="{timestamp}_{version}"
+                    maxLength={100}
+                />
+            </SettingComponent>
+
+            {isDirty && (
+                <div className="v-settings-action-row" style={{ marginTop: '12px' }}>
+                    <button
+                        type="submit"
+                        aria-label="Apply ID format changes"
+                        className="mod-cta"
+                        disabled={!isValid}
+                    >
+                        Apply ID Format Changes
+                    </button>
+                </div>
+            )}
+        </form>
+    );
+});
+IdFormatSettings.displayName = 'IdFormatSettings';
+
+// --- Auto Register Notes Setting ---
+
+const AutoRegisterFormSchema = z.object({
+    filters: RegexListSchema
+});
+
+type AutoRegisterFormValues = z.infer<typeof AutoRegisterFormSchema>;
+
 const AutoRegisterNotesSetting: React.FC = memo(() => {
     const dispatch = useAppDispatch();
-    const { autoRegisterNotes, pathFilters } = useAppSelector(state => ({
-        autoRegisterNotes: state.settings.autoRegisterNotes,
-        pathFilters: state.settings.pathFilters,
-    }), isEqual);
+    const autoRegisterNotes = useAppSelector(state => state.settings.autoRegisterNotes);
+    const pathFilters = useAppSelector(state => state.settings.pathFilters);
     
     const handleAutoRegisterToggle = useCallback((value: boolean) => {
         dispatch(thunks.updateGlobalSettings({ autoRegisterNotes: value }));
     }, [dispatch]);
     
-    const handleFiltersChange = useCallback((value: string) => {
-        try {
-            const filterArray = value.split('\n')
-                .map(s => s.trim())
-                .filter(Boolean)
-                .filter(pattern => {
-                    try {
-                        new RegExp(pattern);
-                        return true;
-                    } catch {
-                        console.warn(`Invalid regex pattern: ${pattern}`);
-                        return false;
-                    }
-                });
-            dispatch(thunks.updateGlobalSettings({ pathFilters: filterArray }));
-        } catch (error) {
-            console.error('Error processing path filters:', error);
-        }
-    }, [dispatch]);
+    const { control, watch, reset, formState: { isValid } } = useForm<AutoRegisterFormValues>({
+        mode: 'onChange',
+        resolver: zodResolver(AutoRegisterFormSchema),
+        defaultValues: { filters: pathFilters.join('\n') }
+    });
+
+    const debouncedSave = useMemo(() => debounce((value: string) => {
+        const filterArray = value.split('\n').map(s => s.trim()).filter(Boolean);
+        dispatch(thunks.updateGlobalSettings({ pathFilters: filterArray }));
+    }, 1000), [dispatch]);
+
+    // Sync external state changes
+    useEffect(() => {
+        reset({ filters: pathFilters.join('\n') });
+    }, [pathFilters, reset]);
+
+    useEffect(() => {
+        const subscription = watch((value) => {
+            if (isValid && value.filters !== undefined) {
+                debouncedSave(value.filters);
+            }
+        });
+        return () => {
+            subscription.unsubscribe();
+            debouncedSave.flush(); // Flush pending changes on unmount/cleanup
+        };
+    }, [watch, isValid, debouncedSave]);
 
     return (
         <>
@@ -197,10 +320,10 @@ const AutoRegisterNotesSetting: React.FC = memo(() => {
                     <p className="v-settings-info v-meta-label">
                         Enter one case-sensitive regular expression per line. Notes with paths matching any of these patterns will be excluded from auto-tracking.
                     </p>
-                    <DebouncedTextarea 
-                        initialValue={pathFilters.join('\n')} 
-                        onFinalChange={handleFiltersChange} 
-                        rows={3} 
+                    <ValidatedTextarea 
+                        name="filters"
+                        control={control}
+                        rows={3}
                         placeholder={"^Private/.*\n_templates/.*"}
                         maxLength={1000}
                     />
@@ -220,6 +343,7 @@ export const GlobalSettings: React.FC<GlobalSettingsProps> = memo(({ showTitle =
         {showTitle && <h2 id="global-settings-title">Global Plugin Settings</h2>}
         <DatabasePathSetting />
         <FrontmatterKeySetting />
+        <IdFormatSettings />
         <AutoRegisterNotesSetting />
     </div>
 ));
