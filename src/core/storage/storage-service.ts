@@ -63,4 +63,26 @@ export class StorageService {
             console.error(`VC: CRITICAL: Failed to permanently delete folder ${path}. Manual cleanup may be needed.`, error);
         }
     }
+
+    /**
+     * Renames a folder from an old path to a new path.
+     * @param oldPath The current path of the folder.
+     * @param newPath The desired new path for the folder.
+     * @throws Error if the old folder doesn't exist or the new path is occupied.
+     */
+    public async renameFolder(oldPath: string, newPath: string): Promise<void> {
+        const adapter = this.vault.adapter;
+        try {
+            if (!(await adapter.exists(oldPath))) {
+                throw new Error(`Source folder "${oldPath}" does not exist.`);
+            }
+            if (await adapter.exists(newPath)) {
+                throw new Error(`Destination path "${newPath}" already exists.`);
+            }
+            await adapter.rename(oldPath, newPath);
+        } catch (error) {
+            console.error(`VC: Failed to rename folder from "${oldPath}" to "${newPath}".`, error);
+            throw error;
+        }
+    }
 }
