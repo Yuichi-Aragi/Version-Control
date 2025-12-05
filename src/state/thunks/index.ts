@@ -3,6 +3,7 @@ import * as version from './version.thunks';
 import * as ui from './ui.thunks';
 import * as diff from './diff.thunks';
 import * as settings from './settings.thunks';
+import * as timeline from './timeline.thunks';
 
 /**
  * Aggregates all thunks from modularized files into a single `thunks` object.
@@ -15,4 +16,5 @@ export const thunks = {
     ...ui,
     ...diff,
     ...settings,
+    ...timeline,
 };
