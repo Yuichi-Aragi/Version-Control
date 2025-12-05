@@ -12,6 +12,7 @@ export const TYPES = {
   DiffManager: Symbol.for('DiffManager'),
   BackgroundTaskManager: Symbol.for('BackgroundTaskManager'),
   KeyUpdateManager: Symbol.for('KeyUpdateManager'),
+  TimelineManager: Symbol.for('TimelineManager'),
   // Services
   UIService: Symbol.for('UIService'),
   QueueService: Symbol.for('QueueService'),
@@ -24,4 +25,5 @@ export const TYPES = {
   CentralManifestRepo: Symbol.for('CentralManifestRepo'),
   NoteManifestRepo: Symbol.for('NoteManifestRepo'),
   VersionContentRepo: Symbol.for('VersionContentRepo'),
+  TimelineDatabase: Symbol.for('TimelineDatabase'),
 };
