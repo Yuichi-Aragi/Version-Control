@@ -4,7 +4,7 @@ import { injectable, inject } from 'inversify';
 import { diffLines } from 'diff';
 import { ManifestManager } from './manifest-manager';
 import { NoteManager } from './note-manager';
-import type { VersionControlSettings, VersionHistoryEntry, BranchState, Branch, NoteManifest } from '../types';
+import type { VersionControlSettings, VersionHistoryEntry, BranchState, Branch } from '../types';
 import { generateUniqueFilePath } from '../utils/file';
 import { PluginEvents } from './plugin-events';
 import { generateVersionId } from '../utils/id';
@@ -99,11 +99,10 @@ export class VersionManager {
     }
 
     // Determine version number for ID generation
-    const nextVersionNumber = (currentBranch.totalVersions || 0) + 1;
     const version_name = (name || '').trim();
     
     // Generate version ID using the configured format
-    const versionId = generateVersionId(settings, nextVersionNumber, version_name);
+    const versionId = generateVersionId();
 
     try {
       const { size } = await this.versionContentRepo.write(noteId, versionId, contentToSave);
@@ -178,7 +177,7 @@ export class VersionManager {
     }
   }
 
-  public async updateVersionDetails(noteId: string, versionId: string, details: { name?: string; description?: string }): Promise<string> {
+  public async updateVersionDetails(noteId: string, versionId: string, details: { name?: string; description?: string }): Promise<void> {
     if (!noteId || !versionId) {
       throw new Error('Invalid noteId or versionId for updateVersionDetails.');
     }
@@ -186,61 +185,12 @@ export class VersionManager {
     const version_name = details.name?.trim();
     const version_desc = details.description?.trim();
 
-    // 1. Load manifest to check current state and settings
-    const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
-    if (!noteManifest) throw new Error(`Manifest not found for note ${noteId}`);
-
-    const branchName = noteManifest.currentBranch;
-    const branch = noteManifest.branches[branchName];
-    if (!branch) throw new Error(`Current branch not found for note ${noteId}`);
-
-    const versionData = branch.versions[versionId];
-    if (!versionData) throw new Error(`Version ${versionId} not found in manifest for note ${noteId}.`);
-
-    // 2. Resolve effective settings to check ID format
-    const effectiveSettings = this.getEffectiveSettings(noteManifest);
-    const versionIdFormat = effectiveSettings.versionIdFormat;
-
-    // 3. Determine if rename is required
-    // Rename is required if the name changed AND the ID format uses {name}
-    const nameChanged = details.name !== undefined && version_name !== versionData.name;
-    const formatUsesName = versionIdFormat.includes('{name}');
-    
-    let newVersionId = versionId;
-
-    if (nameChanged && formatUsesName) {
-        // Calculate new ID
-        // We must preserve the original timestamp
-        const originalDate = new Date(versionData.timestamp);
-        newVersionId = generateVersionId(effectiveSettings, versionData.versionNumber, version_name, originalDate);
-
-        if (newVersionId !== versionId) {
-            try {
-                // Rename file on disk
-                await this.versionContentRepo.rename(noteId, versionId, newVersionId);
-            } catch (error) {
-                console.error(`VC: Failed to rename version file from ${versionId} to ${newVersionId}. Aborting update.`, error);
-                throw error;
-            }
-        }
-    }
-
-    // 4. Update manifest
     await this.manifestManager.updateNoteManifest(noteId, (manifest) => {
       const b = manifest.branches[manifest.currentBranch];
       if (!b) return;
       
-      // If ID changed, we need to move the data to the new key
-      if (newVersionId !== versionId) {
-          const data = b.versions[versionId];
-          if (data) {
-              delete b.versions[versionId];
-              b.versions[newVersionId] = data;
-          }
-      }
-
-      const targetVersionData = b.versions[newVersionId];
-      if (!targetVersionData) return; // Should not happen if logic is correct
+      const targetVersionData = b.versions[versionId];
+      if (!targetVersionData) return;
 
       if (details.name !== undefined) {
           if (version_name) {
@@ -260,26 +210,6 @@ export class VersionManager {
 
       manifest.lastModified = new Date().toISOString();
     });
-
-    return newVersionId;
-  }
-
-  private getEffectiveSettings(noteManifest: NoteManifest): VersionControlSettings {
-      const branch = noteManifest.branches[noteManifest.currentBranch];
-      const branchSettings = branch?.settings;
-      const isGlobal = branchSettings?.isGlobal !== false; // Default to true if undefined
-
-      if (isGlobal) {
-          return this.plugin.settings;
-      } else {
-          // Merge global settings with local overrides
-          // We filter out undefined values from branchSettings to allow defaults to shine through if needed,
-          // though typically local settings are fully populated when set.
-          const definedBranchSettings = Object.fromEntries(
-              Object.entries(branchSettings ?? {}).filter(([, v]) => v !== undefined)
-          );
-          return { ...this.plugin.settings, ...definedBranchSettings, isGlobal: false };
-      }
   }
 
   public async getVersionHistory(noteId: string): Promise<VersionHistoryEntry[]> {

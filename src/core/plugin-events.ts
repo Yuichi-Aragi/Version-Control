@@ -9,6 +9,7 @@ export interface VersionControlEvents {
     'version-saved': (noteId: string) => void;
     'version-deleted': (noteId: string) => void;
     'history-deleted': (noteId: string) => void;
+    'version-updated': (noteId: string, versionId: string, data: { name?: string; description?: string }) => void;
 }
 
 /**

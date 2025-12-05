@@ -116,7 +116,7 @@ export class NoteManager {
 
             // If no ID, generate one based on settings and write it to the file.
             // We use the new generateNoteId which respects the noteIdFormat setting.
-            const newId = generateNoteId(this.plugin.settings, file);
+            const newId = generateNoteId(file);
             
             try {
                 await this.writeNoteIdToFrontmatter(file, newId);
