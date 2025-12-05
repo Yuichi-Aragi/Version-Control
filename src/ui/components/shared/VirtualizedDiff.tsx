@@ -1,7 +1,6 @@
 import { useMemo, type FC, type Ref, useEffect } from 'react';
 import { Virtuoso, type VirtuosoHandle, type ListRange } from 'react-virtuoso';
-import type { Change } from 'diff';
-import type { DiffType } from '../../../types';
+import type { Change, DiffType } from '../../../types';
 import clsx from 'clsx';
 import { HighlightedText } from './HighlightedText';
 
