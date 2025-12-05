@@ -70,6 +70,9 @@ export const VersionControlSettingsSchema = z.object({
     includeMdSyntaxInCharacterCount: z.boolean().optional().default(false),
     enableLineCount: z.boolean().optional().default(false),
     includeMdSyntaxInLineCount: z.boolean().optional().default(false),
+    // ID Format Settings
+    noteIdFormat: z.string().min(1).optional().default('{uuid}'),
+    versionIdFormat: z.string().min(1).optional().default('{timestamp}_{version}'),
 });
 
 const PartialNoteSettingsSchema = VersionControlSettingsSchema.omit({
