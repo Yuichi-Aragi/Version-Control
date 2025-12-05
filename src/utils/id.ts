@@ -3,8 +3,9 @@
  * 
  * @module id-utils
  */
-import { v4 as uuidv4 } from 'uuid';
+
 import { TFile } from 'obsidian';
+import type { VersionControlSettings } from '../types';
 
 /**
  * Configuration constants for ID sanitization
@@ -59,10 +60,35 @@ const SANITIZATION_CONFIG = {
 } as const;
 
 /**
+ * File extension handling constants
+ */
+const FILE_EXTENSION_HANDLING = {
+    /**
+     * File extensions that need to be transformed at the end of paths
+     */
+    EXTENSIONS_TO_TRANSFORM: new Set(['.md', '.base']),
+    
+    /**
+     * Mapping of extensions to their transformed versions
+     */
+    EXTENSION_TRANSFORM_MAP: new Map([
+        ['.md', '_md'],
+        ['.base', '_base']
+    ]),
+    
+    /**
+     * Regex to match extensions at the end of a string
+     * Uses negative lookahead to ensure it's at the end and not part of a larger word
+     */
+    EXTENSION_AT_END_REGEX: /\.(?:md|base)$/
+} as const;
+
+/**
  * Validation and error messages
  */
 const VALIDATION = {
     ERRORS: {
+        SETTINGS_REQUIRED: 'Version Control: Settings parameter is required and cannot be null or undefined',
         FILE_REQUIRED: 'Version Control: File parameter is required and cannot be null or undefined',
         VERSION_NUM_INVALID: 'Version Control: versionNum must be a positive integer',
         CRYPTO_UNAVAILABLE: "Version Control: Global 'crypto' object is not available or malformed. Cannot generate secure unique IDs.",
@@ -72,10 +98,34 @@ const VALIDATION = {
         CRYPTO_FORMAT_INVALID: "Version Control: Generated ID does not conform to UUID v4 format."
     },
     REGEX: {
+        // Strict validation regex with anchors
         UUID_V4: /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-        POSITIVE_INTEGER: /^\d+$/
+        // Extraction regex without anchors
+        UUID_V4_EXTRACTION: /[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i,
+        POSITIVE_INTEGER: /^\d+$/,
+        // Matches a 13-digit timestamp (milliseconds) or 10-digit (seconds), surrounded by common delimiters or string boundaries
+        TIMESTAMP: /(?:^|[_.\- ])([0-9]{13}|[0-9]{10})(?:[_.\- ]|$)/
     }
 } as const;
+
+/**
+ * Type guard for VersionControlSettings
+ */
+function isVersionControlSettings(settings: unknown): settings is VersionControlSettings {
+    return settings !== null && 
+           typeof settings === 'object' && 
+           (settings as VersionControlSettings).noteIdFormat !== undefined;
+}
+
+/**
+ * Type guard for TFile
+ */
+function isTFile(file: unknown): file is TFile {
+    return file !== null && 
+           typeof file === 'object' && 
+           typeof (file as TFile).path === 'string' &&
+           typeof (file as TFile).basename === 'string';
+}
 
 /**
  * Type guard for crypto object
@@ -85,6 +135,16 @@ function isCryptoAvailable(cryptoObj: unknown): cryptoObj is Crypto {
            cryptoObj !== null && 
            'randomUUID' in cryptoObj && 
            typeof (cryptoObj as Crypto).randomUUID === 'function';
+}
+
+/**
+ * Validates and normalizes version number
+ */
+function validateVersionNumber(versionNum: unknown): number {
+    if (typeof versionNum !== 'number' || !Number.isInteger(versionNum) || versionNum < 1) {
+        throw new TypeError(VALIDATION.ERRORS.VERSION_NUM_INVALID);
+    }
+    return versionNum;
 }
 
 /**
@@ -105,6 +165,47 @@ function validateAndSanitizeString(input: unknown, _paramName: string): string {
     }
     
     return input;
+}
+
+/**
+ * Transforms file extensions at the end of a path string according to requirements
+ * Only transforms .md and .base extensions when they appear at the very end of the path
+ * 
+ * @param path - The file path to transform
+ * @returns Transformed path with extensions replaced
+ * 
+ * @remarks
+ * This function only affects the path used for ID generation, not the actual file path.
+ * It ensures that .md becomes _md and .base becomes _base at the end of the path.
+ * Does not affect the basename or any other parts of the path.
+ * 
+ * @example
+ * ```typescript
+ * transformFilePathExtensions('folder/note.md') // Returns 'folder/note_md'
+ * transformFilePathExtensions('folder/note.base') // Returns 'folder/note_base'
+ * transformFilePathExtensions('folder/note.md.bak') // Returns 'folder/note.md.bak' (not at end)
+ * transformFilePathExtensions('folder/.md/file.txt') // Returns 'folder/.md/file.txt' (not at end)
+ * ```
+ */
+function transformFilePathExtensions(path: string): string {
+    if (typeof path !== 'string' || path.length === 0) {
+        return path;
+    }
+    
+    // Check if the path ends with any of the extensions we need to transform
+    for (const [extension, replacement] of FILE_EXTENSION_HANDLING.EXTENSION_TRANSFORM_MAP) {
+        if (path.endsWith(extension)) {
+            // Ensure we only replace when it's exactly at the end (not part of a larger extension)
+            // This prevents replacing .md in the middle of a longer extension like .md.bak
+            const beforeExtension = path.slice(0, -extension.length);
+            
+            // Check that what we're removing is exactly the extension (no additional characters after)
+            // This is already ensured by endsWith, but we're being explicit
+            return beforeExtension + replacement;
+        }
+    }
+    
+    return path;
 }
 
 /**
@@ -171,22 +272,198 @@ export function sanitizeId(id: string): string {
 }
 
 /**
- * Generates a note ID.
+ * Extracts a UUID v4 from a given ID string if present.
+ * Useful for preserving UUIDs when regenerating IDs (e.g., during renames).
  * 
- * @param _file - The file for which to generate the ID (currently unused)
- * @returns A UUIDv4 string
+ * @param id - The ID string to search
+ * @returns The found UUID string or null if not found
  */
-export function generateNoteId(_file: TFile): string {
-    return uuidv4();
+export function extractUuidFromId(id: string): string | null {
+    if (!id || typeof id !== 'string') return null;
+    
+    const match = id.match(VALIDATION.REGEX.UUID_V4_EXTRACTION);
+    return match ? match[0] : null;
 }
 
 /**
- * Generates a version ID.
+ * Extracts a timestamp from a given ID string if present.
+ * Looks for 13-digit (ms) or 10-digit (sec) numbers surrounded by delimiters.
  * 
- * @returns A UUIDv4 string
+ * @param id - The ID string to search
+ * @returns The found timestamp string or null if not found
  */
-export function generateVersionId(): string {
-    return uuidv4();
+export function extractTimestampFromId(id: string): string | null {
+    if (!id || typeof id !== 'string') return null;
+
+    const match = id.match(VALIDATION.REGEX.TIMESTAMP);
+    // match[1] contains the captured digits
+    return match ? match[1] : null;
+}
+
+/**
+ * Generates a note ID based on the configured format and file properties.
+ * 
+ * @param settings - The plugin settings containing the noteIdFormat
+ * @param file - The file for which to generate the ID
+ * @param customTimestamp - Optional timestamp to use instead of current time (useful for preserving timestamps during renames)
+ * @param customUuid - Optional UUID to use instead of generating a new one (useful for preserving UUIDs during renames)
+ * @returns A sanitized note ID
+ * 
+ * @throws {TypeError} If settings or file parameters are invalid
+ * 
+ * @remarks
+ * Supported format variables:
+ * - {uuid}: A cryptographically secure random UUID
+ * - {path}: Full file path (with .md/.base extensions transformed at the end)
+ * - {timestamp}: Current timestamp in milliseconds (or customTimestamp if provided)
+ * 
+ * Note: File path extensions (.md/.base) are transformed to _md/_base at the end of the path
+ * only when used for the {path} variable.
+ * 
+ * @example
+ * ```typescript
+ * generateNoteId(settings, file) // Returns 'folder_note_md_1640995200000'
+ * ```
+ */
+export function generateNoteId(settings: VersionControlSettings, file: TFile, customTimestamp?: string | number, customUuid?: string | null): string {
+    // Defensive parameter validation
+    if (!isVersionControlSettings(settings)) {
+        throw new TypeError(VALIDATION.ERRORS.SETTINGS_REQUIRED);
+    }
+    
+    if (!isTFile(file)) {
+        throw new TypeError(VALIDATION.ERRORS.FILE_REQUIRED);
+    }
+    
+    // Safe access with defaults
+    const format = typeof settings.noteIdFormat === 'string' && settings.noteIdFormat.trim().length > 0
+        ? settings.noteIdFormat
+        : '{uuid}';
+    
+    // Validate file properties
+    const filePath = validateAndSanitizeString(file.path, 'file.path');
+    
+    // Apply extension transformation to the file path (only for the {path} variable)
+    // This ensures .md and .base at the end of the path become _md and _base
+    const transformedPath = transformFilePathExtensions(filePath);
+    
+    // Generate timestamp only when needed for performance
+    const hasTimestampVariable = format.includes('{timestamp}');
+    let timestamp = '';
+    
+    if (hasTimestampVariable) {
+        if (customTimestamp !== undefined && customTimestamp !== null) {
+            timestamp = String(customTimestamp);
+        } else {
+            timestamp = Date.now().toString();
+        }
+    }
+
+    // Generate UUID only when needed
+    const hasUuidVariable = format.includes('{uuid}');
+    let uuid = '';
+
+    if (hasUuidVariable) {
+        if (customUuid) {
+            uuid = customUuid;
+        } else {
+            uuid = generateUniqueId();
+        }
+    }
+    
+    // Build ID using efficient string replacement
+    let id = format;
+    
+    // Use index-based replacement for better performance than sequential replace
+    const replacements: Array<[string, string]> = [
+        ['{path}', transformedPath],
+        ['{uuid}', uuid],
+        ['{timestamp}', timestamp]
+    ];
+    
+    for (const [placeholder, value] of replacements) {
+        if (id.includes(placeholder)) {
+            id = id.split(placeholder).join(value);
+        }
+    }
+    
+    return sanitizeId(id);
+}
+
+/**
+ * Generates a version ID based on the configured format and version properties.
+ * 
+ * @param settings - The plugin settings containing the versionIdFormat
+ * @param versionNum - The sequential version number (must be positive integer)
+ * @param name - Optional name given to the version
+ * @param originalDate - Optional original date to preserve timestamp during renames
+ * @returns A sanitized version ID
+ * 
+ * @throws {TypeError} If settings parameter is invalid or versionNum is not a positive integer
+ * 
+ * @remarks
+ * Supported format variables:
+ * - {timestamp}: Sortable timestamp (YYYYMMDDHHmmss)
+ * - {version}: Version number
+ * - {name}: Optional version name
+ * 
+ * Note: Does NOT apply file extension transformation to any inputs.
+ * 
+ * @example
+ * ```typescript
+ * generateVersionId(settings, 5, 'initial') // Returns '20241225120000_5_initial'
+ * ```
+ */
+export function generateVersionId(settings: VersionControlSettings, versionNum: number, name?: string, originalDate?: Date): string {
+    // Defensive parameter validation
+    if (!isVersionControlSettings(settings)) {
+        throw new TypeError(VALIDATION.ERRORS.SETTINGS_REQUIRED);
+    }
+    
+    const validatedVersionNum = validateVersionNumber(versionNum);
+    const versionName = validateAndSanitizeString(name, 'name');
+    
+    // Safe access with defaults
+    const format = typeof settings.versionIdFormat === 'string' && settings.versionIdFormat.trim().length > 0
+        ? settings.versionIdFormat
+        : '{timestamp}_{version}';
+    
+    // Generate sortable timestamp: YYYYMMDDHHmmss (optimized for sorting)
+    const date = originalDate || new Date();
+    const timestamp = date.getFullYear().toString().padStart(4, '0') +
+                     (date.getMonth() + 1).toString().padStart(2, '0') +
+                     date.getDate().toString().padStart(2, '0') +
+                     date.getHours().toString().padStart(2, '0') +
+                     date.getMinutes().toString().padStart(2, '0') +
+                     date.getSeconds().toString().padStart(2, '0');
+    
+    // Build ID with efficient replacement
+    let id = format;
+    const versionStr = validatedVersionNum.toString();
+    
+    // Use index-based replacement with conditional checks
+    const replacements: Array<[string, string]> = [
+        ['{timestamp}', timestamp],
+        ['{version}', versionStr],
+        ['{name}', versionName]
+    ];
+    
+    for (const [placeholder, value] of replacements) {
+        if (id.includes(placeholder)) {
+            id = id.split(placeholder).join(value);
+        }
+    }
+    
+    // Clean up empty variables resulting in multiple underscores
+    id = id.replace(SANITIZATION_CONFIG.MULTIPLE_UNDERSCORES_REGEX, '_');
+    id = id.replace(SANITIZATION_CONFIG.EDGE_UNDERSCORES_REGEX, '');
+    
+    // Fallback if the resulting ID is empty after cleanup
+    if (!id || id.trim().length === 0) {
+        id = `${timestamp}_${versionStr}`;
+    }
+    
+    return sanitizeId(id);
 }
 
 /**
