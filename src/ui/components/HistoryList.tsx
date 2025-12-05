@@ -261,7 +261,7 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
                     );
                 }}
                 components={{
-                    ScrollSeekPlaceholder: ({ height }) => (
+                    ScrollSeekPlaceholder: ({ height }: { height: number }) => (
                         <div style={{ height }} aria-hidden />
                     ),
                 }}

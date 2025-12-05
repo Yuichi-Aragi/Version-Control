@@ -119,6 +119,11 @@ export const ActionBar: FC = () => {
         dispatch(thunks.showBranchSwitcher());
     }, [dispatch, status, isBusy, file]);
 
+    const handleOpenTimeline = useCallback(() => {
+        if (status !== AppStatus.READY || isBusy) return;
+        dispatch(thunks.openTimeline());
+    }, [dispatch, status, isBusy]);
+
     useEffect(() => {
         if (isSearchActive) {
             if (document.activeElement !== searchInputRef.current) {
@@ -167,6 +172,10 @@ export const ActionBar: FC = () => {
                                     <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenBranchDrawer}>
                                         <span>Branches</span>
                                         <Icon name="git-branch" />
+                                    </DropdownMenu.Item>
+                                    <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenTimeline}>
+                                        <span>Timeline</span>
+                                        <Icon name="history" />
                                     </DropdownMenu.Item>
                                 </DropdownMenu.Content>
                             </DropdownMenu.Portal>
