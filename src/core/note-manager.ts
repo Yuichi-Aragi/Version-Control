@@ -2,7 +2,7 @@ import { App, TFile, WorkspaceLeaf, MarkdownView, type FrontMatterCache, FileVie
 import { injectable, inject } from 'inversify';
 import { ManifestManager } from "./manifest-manager";
 import type { ActiveNoteInfo } from "../types";
-import { generateNoteId } from "../utils/id";
+import { generateNoteId, extractUuidFromId, extractTimestampFromId } from "../utils/id";
 import { TYPES } from "../types/inversify.types";
 import type VersionControlPlugin from "../main";
 
@@ -116,8 +116,11 @@ export class NoteManager {
 
             // If no ID, generate one based on settings and write it to the file.
             // We use the new generateNoteId which respects the noteIdFormat setting.
-            const newId = generateNoteId(file);
+            let newId = generateNoteId(this.plugin.settings, file);
             
+            // Ensure uniqueness
+            newId = await this.manifestManager.ensureUniqueNoteId(newId);
+
             try {
                 await this.writeNoteIdToFrontmatter(file, newId);
                 return newId;
@@ -143,12 +146,45 @@ export class NoteManager {
     }
 
     async handleNoteRename(file: TFile, oldPath: string): Promise<void> {
-        // This operation is now inherently safe because the underlying repository
-        // methods in ManifestManager are queued.
         try {
             const noteIdToUpdate = await this.manifestManager.getNoteIdByPath(oldPath);
 
             if (noteIdToUpdate) {
+                const settings = this.plugin.settings;
+                
+                // We need to update the ID to reflect the new path
+                // Try to preserve timestamp if possible.
+                let timestamp: string | undefined = extractTimestampFromId(noteIdToUpdate) ?? undefined;
+                
+                if (!timestamp) {
+                    // Fallback to manifest creation time if extraction fails
+                    const noteManifest = await this.manifestManager.loadNoteManifest(noteIdToUpdate);
+                    if (noteManifest && noteManifest.createdAt) {
+                        timestamp = new Date(noteManifest.createdAt).getTime().toString();
+                    }
+                }
+
+                // Try to preserve UUID if possible
+                const oldUuid = extractUuidFromId(noteIdToUpdate);
+
+                const candidateNewId = generateNoteId(settings, file, timestamp, oldUuid);
+
+                if (candidateNewId !== noteIdToUpdate) {
+                    const uniqueNewId = await this.manifestManager.ensureUniqueNoteId(candidateNewId);
+                    
+                    // Perform the rename operation (Folder rename + Manifest updates)
+                    await this.manifestManager.renameNoteEntry(noteIdToUpdate, uniqueNewId);
+                    
+                    // Update the frontmatter in the file
+                    await this.writeNoteIdToFrontmatter(file, uniqueNewId);
+                    
+                    // We also need to update the path in the manifest (which is now under new ID)
+                    await this.manifestManager.updateNotePath(uniqueNewId, file.path);
+                    
+                    return; // Done
+                }
+
+                // If ID didn't change, just update the path mapping
                 await this.manifestManager.updateNotePath(noteIdToUpdate, file.path);
             } else {
                 // If no ID was found for the old path, there's nothing to update in our DB,
@@ -158,6 +194,47 @@ export class NoteManager {
         } catch (error) {
             console.error(`VC: Failed to handle note rename from "${oldPath}" to "${file.path}".`, error);
             // Don't throw, just log. The system can recover on next load.
+        }
+    }
+
+    /**
+     * Checks if the current note ID matches the expected ID format based on the file path.
+     * If there's a mismatch, it triggers an update.
+     * @param file The active file.
+     * @param currentId The current ID found in frontmatter.
+     */
+    async verifyNoteIdMatchesPath(file: TFile, currentId: string): Promise<void> {
+        const settings = this.plugin.settings;
+
+        try {
+            // We need to see if the current ID matches what we'd expect for this path.
+            // We extract components from the current ID to reconstruct the expected ID.
+            
+            // Extract Timestamp
+            let timestamp: string | undefined = extractTimestampFromId(currentId) ?? undefined;
+            if (!timestamp) {
+                const noteManifest = await this.manifestManager.loadNoteManifest(currentId);
+                if (noteManifest && noteManifest.createdAt) {
+                    timestamp = new Date(noteManifest.createdAt).getTime().toString();
+                }
+            }
+
+            // Extract UUID
+            const currentUuid = extractUuidFromId(currentId);
+
+            const expectedId = generateNoteId(settings, file, timestamp, currentUuid);
+
+            // If the ID is different, we should update it to match the current path
+            if (currentId !== expectedId) {
+                console.log(`VC: Note ID mismatch detected for "${file.path}". Updating ID from "${currentId}" to "${expectedId}".`);
+                const uniqueNewId = await this.manifestManager.ensureUniqueNoteId(expectedId);
+                
+                await this.manifestManager.renameNoteEntry(currentId, uniqueNewId);
+                await this.writeNoteIdToFrontmatter(file, uniqueNewId);
+                await this.manifestManager.updateNotePath(uniqueNewId, file.path);
+            }
+        } catch (error) {
+            console.error(`VC: Error verifying note ID match for "${file.path}".`, error);
         }
     }
 

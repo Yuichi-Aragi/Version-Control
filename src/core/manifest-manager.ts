@@ -6,6 +6,7 @@ import { CentralManifestRepository } from "./storage/central-manifest-repository
 import { NoteManifestRepository } from "./storage/note-manifest-repository";
 import { TYPES } from "../types/inversify.types";
 import type { StorageService } from "./storage/storage-service";
+import { generateUniqueId } from '../utils/id';
 
 /**
  * A high-level facade that coordinates operations across the manifest repositories.
@@ -64,8 +65,6 @@ export class ManifestManager {
         }
     }
 
-
-
     public async deleteNoteEntry(noteId: string): Promise<void> {
         try {
             await this.centralManifestRepo.removeNoteEntry(noteId);
@@ -90,6 +89,82 @@ export class ManifestManager {
         });
 
         await this.centralManifestRepo.updateNotePath(noteId, newPath);
+    }
+
+    /**
+     * Renames a note entry in the database, moving the physical folder and updating manifests.
+     * @param oldId The current note ID.
+     * @param newId The new note ID.
+     */
+    public async renameNoteEntry(oldId: string, newId: string): Promise<void> {
+        if (oldId === newId) return;
+
+        const oldDbPath = this.pathService.getNoteDbPath(oldId);
+        const newDbPath = this.pathService.getNoteDbPath(newId);
+
+        try {
+            // 1. Rename the physical folder
+            await this.storageService.renameFolder(oldDbPath, newDbPath);
+
+            // 2. Update the note manifest (which is now at the new path)
+            // We need to clear the cache for the old ID first, as it's no longer valid
+            this.noteManifestRepo.invalidateCache(oldId);
+            
+            // We load from the new ID (which maps to the new path)
+            // The file content still has the old ID inside the JSON, so we must update it.
+            await this.noteManifestRepo.update(newId, (manifest) => {
+                manifest.noteId = newId;
+                manifest.lastModified = new Date().toISOString();
+            });
+
+            // 3. Update the central manifest
+            const centralManifest = await this.centralManifestRepo.load();
+            const noteEntry = centralManifest.notes[oldId];
+            
+            if (noteEntry) {
+                // Add new entry
+                await this.centralManifestRepo.addNoteEntry(
+                    newId, 
+                    noteEntry.notePath, 
+                    this.pathService.getNoteManifestPath(newId)
+                );
+                // Remove old entry
+                await this.centralManifestRepo.removeNoteEntry(oldId);
+            } else {
+                console.warn(`VC: Renaming note entry ${oldId} -> ${newId}, but old entry not found in central manifest.`);
+            }
+
+        } catch (error) {
+            console.error(`VC: Failed to rename note entry from ${oldId} to ${newId}.`, error);
+            throw new Error(`Failed to rename version history folder. Check console for details.`);
+        }
+    }
+
+    /**
+     * Ensures a generated note ID is unique within the central manifest.
+     * If collision occurs, appends a counter or UUID segment.
+     * @param candidateId The proposed ID.
+     * @returns A unique ID string.
+     */
+    public async ensureUniqueNoteId(candidateId: string): Promise<string> {
+        const centralManifest = await this.centralManifestRepo.load();
+        let uniqueId = candidateId;
+        let counter = 1;
+
+        while (centralManifest.notes[uniqueId]) {
+            // Collision detected.
+            // If the candidate already has a UUID, this is extremely rare.
+            // If it's path-based, we append a counter.
+            uniqueId = `${candidateId}_${counter}`;
+            counter++;
+            
+            // Safety break to prevent infinite loops in pathological cases
+            if (counter > 100) {
+                uniqueId = `${candidateId}_${generateUniqueId()}`;
+                break;
+            }
+        }
+        return uniqueId;
     }
 
     // --- Delegated Methods ---
