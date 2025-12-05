@@ -14,6 +14,7 @@ import type {
     DiffTargetSchema,
     DiffRequestSchema,
     ChangeSchema,
+    TimelineSettingsSchema,
 } from "./schemas";
 
 // --- Inferred Types from Zod Schemas ---
@@ -31,6 +32,7 @@ export type DiffType = z.infer<typeof DiffTypeSchema>;
 export type DiffTarget = z.infer<typeof DiffTargetSchema>;
 export type Change = z.infer<typeof ChangeSchema>;
 export type DiffRequest = z.infer<typeof DiffRequestSchema>;
+export type TimelineSettings = z.infer<typeof TimelineSettingsSchema>;
 
 // --- Other Types ---
 
@@ -48,4 +50,27 @@ export interface ActiveNoteInfo {
  */
 export interface DiffWorkerApi {
     computeDiff(type: DiffType, content1: string, content2: string): Change[];
+}
+
+// --- Timeline Types ---
+
+export interface TimelineStats {
+    additions: number;
+    deletions: number;
+}
+
+export interface TimelineEvent {
+    id?: number; // Auto-incrementing ID from IndexedDB
+    noteId: string;
+    branchName: string;
+    fromVersionId: string | null; // null indicates the start of history (creation)
+    toVersionId: string;
+    timestamp: string; // ISO string of the 'toVersion'
+    diffData: Change[];
+    stats: TimelineStats;
+    
+    // Metadata for display
+    toVersionName?: string;
+    toVersionNumber: number;
+    toVersionDescription?: string;
 }

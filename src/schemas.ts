@@ -28,6 +28,15 @@ export const BranchStateSchema = z.object({
     }),
 });
 
+// --- Timeline Settings Schema ---
+
+export const TimelineSettingsSchema = z.object({
+    showDescription: z.boolean().optional().default(false),
+    showName: z.boolean().optional().default(true),
+    showVersionNumber: z.boolean().optional().default(true),
+    expandByDefault: z.boolean().optional().default(false),
+});
+
 // --- Settings Schema ---
 
 export const VersionControlSettingsSchema = z.object({
@@ -61,9 +70,6 @@ export const VersionControlSettingsSchema = z.object({
     includeMdSyntaxInCharacterCount: z.boolean().optional().default(false),
     enableLineCount: z.boolean().optional().default(false),
     includeMdSyntaxInLineCount: z.boolean().optional().default(false),
-    // ID Format Settings
-    noteIdFormat: z.string().min(1).optional().default('{path}'),
-    versionIdFormat: z.string().min(1).optional().default('{timestamp}_{version}'),
 });
 
 const PartialNoteSettingsSchema = VersionControlSettingsSchema.omit({
@@ -95,6 +101,7 @@ export const BranchSchema = z.object({
     totalVersions: z.number().int(),
     settings: PartialNoteSettingsSchema.optional(),
     state: BranchStateSchema.optional(),
+    timelineSettings: TimelineSettingsSchema.optional(),
 });
 
 export const NoteManifestSchema = z.object({

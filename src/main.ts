@@ -10,6 +10,7 @@ import type { UIService } from './services/ui-service';
 import type { ManifestManager } from './core/manifest-manager';
 import type { DiffManager } from './services/diff-manager';
 import type { BackgroundTaskManager } from './core/tasks/BackgroundTaskManager';
+import type { TimelineManager } from './core/timeline-manager';
 import { configureServices } from './inversify.config';
 import { registerViews, addRibbonIcon, registerCommands } from './setup/UISetup';
 import { registerSystemEventListeners } from './setup/EventSetup';
@@ -94,11 +95,12 @@ export default class VersionControlPlugin extends Plugin {
             const manifestManager = this.container.get<ManifestManager>(TYPES.ManifestManager);
             const diffManager = this.container.get<DiffManager>(TYPES.DiffManager);
             this.backgroundTaskManager = this.container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
+            const timelineManager = this.container.get<TimelineManager>(TYPES.TimelineManager);
             const eventBus = this.container.get<PluginEvents>(TYPES.EventBus);
 
             // Validate critical services
             if (!this.store || !this.cleanupManager || !uiService || !manifestManager || 
-                !diffManager || !this.backgroundTaskManager || !eventBus) {
+                !diffManager || !this.backgroundTaskManager || !timelineManager || !eventBus) {
                 throw new Error("One or more critical services failed to initialize");
             }
 
@@ -106,6 +108,8 @@ export default class VersionControlPlugin extends Plugin {
             this.addSettingTab(new VersionControlSettingTab(this.app, this, this.store));
 
             this.cleanupManager.initialize();
+            timelineManager.initialize();
+            
             this.addChild(this.cleanupManager);
             this.addChild(uiService); 
             this.addChild(diffManager);

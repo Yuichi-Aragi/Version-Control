@@ -10,10 +10,12 @@ import { QueueService } from './services/queue-service';
 import { CentralManifestRepository } from './core/storage/central-manifest-repository';
 import { NoteManifestRepository } from './core/storage/note-manifest-repository';
 import { VersionContentRepository } from './core/storage/version-content-repository';
+import { TimelineDatabase } from './core/storage/timeline-database';
 import { ManifestManager } from './core/manifest-manager';
 import { NoteManager } from './core/note-manager';
 import { CleanupManager } from './core/tasks/cleanup-manager';
 import { VersionManager } from './core/version-manager';
+import { TimelineManager } from './core/timeline-manager';
 import { ExportManager } from './services/export-manager';
 import { DiffManager } from './services/diff-manager';
 import { UIService } from './services/ui-service';
@@ -42,10 +44,14 @@ export function configureServices(plugin: VersionControlPlugin): Container {
   container.bind<CentralManifestRepository>(TYPES.CentralManifestRepo).to(CentralManifestRepository);
   container.bind<NoteManifestRepository>(TYPES.NoteManifestRepo).to(NoteManifestRepository);
   container.bind<VersionContentRepository>(TYPES.VersionContentRepo).to(VersionContentRepository);
+  container.bind<TimelineDatabase>(TYPES.TimelineDatabase).to(TimelineDatabase);
+  
   // High-level Managers
   container.bind<ManifestManager>(TYPES.ManifestManager).to(ManifestManager);
   container.bind<NoteManager>(TYPES.NoteManager).to(NoteManager);
   container.bind<VersionManager>(TYPES.VersionManager).to(VersionManager);
+  container.bind<TimelineManager>(TYPES.TimelineManager).to(TimelineManager);
+  
   // Task Managers
   container.bind<CleanupManager>(TYPES.CleanupManager).to(CleanupManager);
   container.bind<BackgroundTaskManager>(TYPES.BackgroundTaskManager).to(BackgroundTaskManager);

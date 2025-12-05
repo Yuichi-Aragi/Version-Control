@@ -39,6 +39,4 @@ export const DEFAULT_SETTINGS: VersionControlSettings = VersionControlSettingsSc
   includeMdSyntaxInCharacterCount: false,
   enableLineCount: false,
   includeMdSyntaxInLineCount: false,
-  noteIdFormat: '{path}',
-  versionIdFormat: '{timestamp}_{version}',
 });
