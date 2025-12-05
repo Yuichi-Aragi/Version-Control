@@ -524,7 +524,7 @@ const createIdFormatSchema = (allowedVariables: readonly string[], contextName: 
         });
 };
 
-export const NoteIdFormatSchema = createIdFormatSchema(['path', 'name', 'timestamp'] as const, 'Note ID');
+export const NoteIdFormatSchema = createIdFormatSchema(['path', 'uuid', 'timestamp'] as const, 'Note ID');
 export const VersionIdFormatSchema = createIdFormatSchema(['timestamp', 'version', 'name'] as const, 'Version ID');
 
 // --- Enhanced Legacy/Shared Validation Functions ---

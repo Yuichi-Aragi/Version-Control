@@ -8,7 +8,9 @@ import { SettingComponent } from '../SettingComponent';
 import { ValidatedInput, ValidatedTextarea } from './controls/ValidatedControls';
 import { 
     DatabasePathSchema, 
-    FrontmatterKeySchema,
+    FrontmatterKeySchema, 
+    NoteIdFormatSchema,
+    VersionIdFormatSchema,
     RegexListSchema 
 } from './settingsUtils';
 import { z } from 'zod';
@@ -184,6 +186,77 @@ const FrontmatterKeySetting: React.FC = memo(() => {
 });
 FrontmatterKeySetting.displayName = 'FrontmatterKeySetting';
 
+// --- ID Format Settings ---
+
+const IdFormatFormSchema = z.object({
+    noteIdFormat: NoteIdFormatSchema,
+    versionIdFormat: VersionIdFormatSchema
+});
+
+type IdFormatFormValues = z.infer<typeof IdFormatFormSchema>;
+
+const IdFormatSettings: React.FC = memo(() => {
+    const dispatch = useAppDispatch();
+    const noteIdFormat = useAppSelector(state => state.settings.noteIdFormat);
+    const versionIdFormat = useAppSelector(state => state.settings.versionIdFormat);
+    
+    const { control, handleSubmit, reset, formState: { isValid, isDirty } } = useForm<IdFormatFormValues>({
+        mode: 'onChange',
+        resolver: zodResolver(IdFormatFormSchema),
+        defaultValues: { noteIdFormat, versionIdFormat }
+    });
+
+    useEffect(() => {
+        reset({ noteIdFormat, versionIdFormat });
+    }, [noteIdFormat, versionIdFormat, reset]);
+
+    const onSubmit: SubmitHandler<IdFormatFormValues> = (data) => {
+        dispatch(thunks.requestUpdateIdFormats(data.noteIdFormat, data.versionIdFormat));
+    };
+
+    return (
+        <form onSubmit={handleSubmit(onSubmit)} style={{ width: '100%' }}>
+            <SettingComponent
+                name="Note ID Format"
+                desc="Format for generating Note IDs. Available variables: {path}, {uuid}, {timestamp}. Default: {uuid}"
+            >
+                <ValidatedInput
+                    name="noteIdFormat"
+                    control={control}
+                    placeholder="{uuid}"
+                    maxLength={100}
+                />
+            </SettingComponent>
+            
+            <SettingComponent
+                name="Version ID Format"
+                desc="Format for generating Version IDs. Available variables: {timestamp}, {version}, {name}. Default: {timestamp}_{version}"
+            >
+                <ValidatedInput
+                    name="versionIdFormat"
+                    control={control}
+                    placeholder="{timestamp}_{version}"
+                    maxLength={100}
+                />
+            </SettingComponent>
+
+            {isDirty && (
+                <div className="v-settings-action-row" style={{ marginTop: '12px' }}>
+                    <button
+                        type="submit"
+                        aria-label="Apply ID format changes"
+                        className="mod-cta"
+                        disabled={!isValid}
+                    >
+                        Apply ID Format Changes
+                    </button>
+                </div>
+            )}
+        </form>
+    );
+});
+IdFormatSettings.displayName = 'IdFormatSettings';
+
 // --- Auto Register Notes Setting ---
 
 const AutoRegisterFormSchema = z.object({
@@ -270,6 +343,7 @@ export const GlobalSettings: React.FC<GlobalSettingsProps> = memo(({ showTitle =
         {showTitle && <h2 id="global-settings-title">Global Plugin Settings</h2>}
         <DatabasePathSetting />
         <FrontmatterKeySetting />
+        <IdFormatSettings />
         <AutoRegisterNotesSetting />
     </div>
 ));
