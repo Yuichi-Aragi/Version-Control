@@ -10,7 +10,7 @@ import type { TimelineSettings } from '../../../types';
 import { Icon } from '../Icon';
 import { usePanelClose } from '../../hooks/usePanelClose';
 import { useBackdropClick } from '../../hooks/useBackdropClick';
-import { VirtualizedDiff, processLineChanges } from '../shared/VirtualizedDiff';
+import { VirtualizedDiff, StaticDiff, processLineChanges } from '../shared/VirtualizedDiff';
 import { usePanelSearch } from '../../hooks/usePanelSearch';
 import { escapeRegExp } from '../../utils/strings';
 import { HighlightedText } from '../shared/HighlightedText';
@@ -30,7 +30,6 @@ interface MatchController {
     matches: TimelineMatch[];
     activeIndex: number;
     isLoading: boolean;
-    pendingExpansion: Set<number>;
 }
 
 const useMatchController = (
@@ -41,8 +40,7 @@ const useMatchController = (
     const [controller, setController] = useState<MatchController>({
         matches: [],
         activeIndex: -1,
-        isLoading: false,
-        pendingExpansion: new Set()
+        isLoading: false
     });
 
     const calculationIdRef = useRef(0);
@@ -52,8 +50,7 @@ const useMatchController = (
             setController({
                 matches: [],
                 activeIndex: -1,
-                isLoading: false,
-                pendingExpansion: new Set()
+                isLoading: false
             });
             return undefined;
         }
@@ -118,10 +115,7 @@ const useMatchController = (
             setController({
                 matches,
                 activeIndex: matches.length > 0 ? 0 : -1,
-                isLoading: false,
-                pendingExpansion: new Set(
-                    matches.length > 0 ? [matches[0]!.eventIndex] : []
-                )
+                isLoading: false
             });
         });
 
@@ -147,22 +141,10 @@ const useMatchController = (
                 newActiveIndex = (prev.activeIndex + delta + prev.matches.length) % prev.matches.length;
             }
 
-            const newPendingExpansion = new Set(prev.pendingExpansion);
-            newPendingExpansion.add(prev.matches[newActiveIndex]?.eventIndex ?? 0);
-
             return {
                 ...prev,
-                activeIndex: newActiveIndex,
-                pendingExpansion: newPendingExpansion
+                activeIndex: newActiveIndex
             };
-        });
-    }, []);
-
-    const completeExpansion = useCallback((eventIndex: number) => {
-        setController(prev => {
-            const newPendingExpansion = new Set(prev.pendingExpansion);
-            newPendingExpansion.delete(eventIndex);
-            return { ...prev, pendingExpansion: newPendingExpansion };
         });
     }, []);
 
@@ -171,9 +153,7 @@ const useMatchController = (
         activeMatch: controller.matches[controller.activeIndex] || null,
         activeIndex: controller.activeIndex,
         isLoading: controller.isLoading,
-        pendingExpansion: controller.pendingExpansion,
         navigateToMatch,
-        completeExpansion,
         totalMatches: controller.matches.length
     };
 };
@@ -185,8 +165,7 @@ interface TimelineCardProps {
     searchQuery: string;
     isCaseSensitive: boolean;
     activeMatch: TimelineMatch | null;
-    needsExpansion: boolean;
-    onExpansionComplete: () => void;
+    isAutoExpanded: boolean;
 }
 
 const TimelineCard: FC<TimelineCardProps> = memo(({ 
@@ -196,14 +175,14 @@ const TimelineCard: FC<TimelineCardProps> = memo(({
     searchQuery, 
     isCaseSensitive,
     activeMatch,
-    needsExpansion,
-    onExpansionComplete
+    isAutoExpanded
 }) => {
     const [isExpanded, setIsExpanded] = useState(false);
-    const [isExpanding, setIsExpanding] = useState(false);
+    const [renderMode, setRenderMode] = useState<'virtual' | 'static'>('virtual');
     const virtuosoRef = useRef<VirtuosoHandle>(null);
     const expansionTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
+    // Handle default expansion
     useEffect(() => {
         if (!settings.expandByDefault) {
             setIsExpanded(false);
@@ -222,47 +201,19 @@ const TimelineCard: FC<TimelineCardProps> = memo(({
         };
     }, [settings.expandByDefault, index]);
 
+    // Handle auto-expansion from search navigation
     useEffect(() => {
-        if (!needsExpansion) return undefined;
-
-        let isCancelled = false;
-        
-        const performExpansion = () => {
-            if (isCancelled) return;
-            
-            setIsExpanding(true);
-            
-            if (!isExpanded) {
-                setIsExpanded(true);
-            }
-            
-            const scrollDelay = activeMatch?.type === 'diff' ? 150 : 50;
-            
-            expansionTimeoutRef.current = setTimeout(() => {
-                if (isCancelled) return;
-                
-                if (activeMatch?.type === 'diff' && activeMatch.lineIndex !== undefined) {
-                    virtuosoRef.current?.scrollToIndex({
-                        index: activeMatch.lineIndex,
-                        align: 'center',
-                        behavior: 'smooth'
-                    });
-                }
-                
-                setIsExpanding(false);
-                onExpansionComplete();
-            }, scrollDelay);
-        };
-
-        performExpansion();
-
-        return () => {
-            isCancelled = true;
-            if (expansionTimeoutRef.current) {
-                clearTimeout(expansionTimeoutRef.current);
-            }
-        };
-    }, [needsExpansion, activeMatch, isExpanded, onExpansionComplete]);
+        if (isAutoExpanded) {
+            setIsExpanded(true);
+            setRenderMode('static');
+        } else if (renderMode === 'static') {
+            // If it was auto-expanded (static mode) and is no longer the target, close it.
+            // This satisfies "Max one card should be expanded (in automatic scenario only)"
+            // and "Automatically close the cards...".
+            setIsExpanded(false);
+            setRenderMode('virtual');
+        }
+    }, [isAutoExpanded]);
 
     const timestampText = useMemo(() => {
         return (moment as any)(event.timestamp).format('MMM D, YYYY h:mm A');
@@ -270,7 +221,14 @@ const TimelineCard: FC<TimelineCardProps> = memo(({
 
     const handleToggle = (e: React.MouseEvent) => {
         e.stopPropagation();
-        setIsExpanded(prev => !prev);
+        setIsExpanded(prev => {
+            const newState = !prev;
+            // If manually toggling, revert to virtual mode
+            if (renderMode === 'static') {
+                setRenderMode('virtual');
+            }
+            return newState;
+        });
     };
 
     const showVersion = settings.showVersionNumber;
@@ -286,7 +244,6 @@ const TimelineCard: FC<TimelineCardProps> = memo(({
     return (
         <div className={clsx("v-timeline-card", { 
             "is-expanded": isExpanded,
-            "is-expanding": isExpanding,
             "has-active-match": !!activeMatch 
         })} onClick={handleToggle}>
             <div className="v-timeline-card-header">
@@ -339,23 +296,40 @@ const TimelineCard: FC<TimelineCardProps> = memo(({
                 <div className="v-timeline-diff-inner">
                     <div className="v-timeline-diff-content" onClick={e => e.stopPropagation()}>
                         {isExpanded && (
-                            <VirtualizedDiff
-                                changes={event.diffData}
-                                diffType="smart"
-                                virtuosoHandleRef={virtuosoRef}
-                                activeMatchInfo={
-                                    activeMatch?.type === 'diff' 
-                                        ? { 
-                                            lineIndex: activeMatch.lineIndex ?? 0, 
-                                            matchIndexInLine: activeMatch.matchIndexInLine ?? 0
-                                          } 
-                                        : null
-                                }
-                                activeUnifiedMatchIndex={-1}
-                                searchQuery={searchQuery}
-                                isCaseSensitive={isCaseSensitive}
-                                highlightedIndex={activeMatch?.type === 'diff' ? (activeMatch.lineIndex ?? null) : null}
-                            />
+                            renderMode === 'static' ? (
+                                <StaticDiff
+                                    changes={event.diffData}
+                                    diffType="smart"
+                                    activeMatchInfo={
+                                        activeMatch?.type === 'diff' 
+                                            ? { 
+                                                lineIndex: activeMatch.lineIndex ?? 0, 
+                                                matchIndexInLine: activeMatch.matchIndexInLine ?? 0
+                                              } 
+                                            : null
+                                    }
+                                    searchQuery={searchQuery}
+                                    isCaseSensitive={isCaseSensitive}
+                                />
+                            ) : (
+                                <VirtualizedDiff
+                                    changes={event.diffData}
+                                    diffType="smart"
+                                    virtuosoHandleRef={virtuosoRef}
+                                    activeMatchInfo={
+                                        activeMatch?.type === 'diff' 
+                                            ? { 
+                                                lineIndex: activeMatch.lineIndex ?? 0, 
+                                                matchIndexInLine: activeMatch.matchIndexInLine ?? 0
+                                              } 
+                                            : null
+                                    }
+                                    activeUnifiedMatchIndex={-1}
+                                    searchQuery={searchQuery}
+                                    isCaseSensitive={isCaseSensitive}
+                                    highlightedIndex={activeMatch?.type === 'diff' ? (activeMatch.lineIndex ?? null) : null}
+                                />
+                            )
                         )}
                     </div>
                 </div>
@@ -385,6 +359,7 @@ export const TimelinePanel: FC<TimelinePanelProps> = ({ panelState }) => {
 
     useEffect(() => {
         if (matchController.activeMatch && virtuosoRef.current) {
+            // Scroll the main list to show the card
             const scrollTimer = setTimeout(() => {
                 virtuosoRef.current?.scrollToIndex({
                     index: matchController.activeMatch!.eventIndex,
@@ -525,8 +500,13 @@ export const TimelinePanel: FC<TimelinePanelProps> = ({ panelState }) => {
                                                     ? matchController.activeMatch 
                                                     : null
                                             }
-                                            needsExpansion={matchController.pendingExpansion.has(index)}
-                                            onExpansionComplete={() => matchController.completeExpansion(index)}
+                                            isAutoExpanded={
+                                                // Only auto-expand if search is active, match is found in this card,
+                                                // and the match is of type 'diff'
+                                                search.isSearchActive &&
+                                                matchController.activeMatch?.eventIndex === index &&
+                                                matchController.activeMatch?.type === 'diff'
+                                            }
                                         />
                                     </div>
                                 )}
