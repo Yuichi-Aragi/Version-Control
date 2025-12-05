@@ -59,57 +59,6 @@ export const autoRegisterNote = (file: TFile): AppThunk => async (dispatch, getS
     }
 };
 
-export const updateVersionDetails = (versionId: string, details: { name: string; description: string }): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const uiService = container.get<UIService>(TYPES.UIService);
-    const state = getState();
-    if (state.isRenaming) {
-        uiService.showNotice("Cannot edit version while database is being renamed.");
-        return;
-    }
-
-    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
-
-    if (state.status !== AppStatus.READY) {
-        return;
-    }
-    const noteId = state.noteId;
-    const file = state.file;
-    if (!noteId || !file) {
-        return;
-    }
-
-    const updatePayload = {
-        name: details.name.trim(),
-        description: details.description.trim(),
-    };
-
-    // Optimistically update the UI for the current version ID
-    dispatch(actions.updateVersionDetailsInState({ versionId, ...updatePayload }));
-
-    // Also update the timeline panel if it's open, so changes reflect immediately
-    dispatch(actions.updateTimelineEventInState({ versionId, ...updatePayload }));
-
-    try {
-        await versionManager.updateVersionDetails(noteId, versionId, updatePayload);
-
-        // Trigger event to update IndexedDB timeline metadata
-        const eventBus = container.get<PluginEvents>(TYPES.EventBus);
-        eventBus.trigger('version-updated', noteId, versionId, updatePayload);
-
-    } catch (error) {
-        console.error(`VC: Failed to save details update for version ${versionId}. Reverting UI.`, error);
-        uiService.showNotice("VC: Error, could not save version details. Reverting changes.", 5000);
-        if (!isPluginUnloading(container)) {
-            dispatch(loadHistoryForNoteId(file, noteId));
-        }
-    } finally {
-        if (!isPluginUnloading(container)) {
-            dispatch(actions.stopVersionEditing());
-        }
-    }
-};
-
 export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     const { isAuto = false } = options;
@@ -190,6 +139,63 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => 
             if (finalState.status === AppStatus.READY) {
                 dispatch(actions.setProcessing(false));
             }
+        }
+    }
+};
+
+export const updateVersionDetails = (versionId: string, details: { name: string; description: string }): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
+    const uiService = container.get<UIService>(TYPES.UIService);
+    const state = getState();
+    if (state.isRenaming) {
+        uiService.showNotice("Cannot edit version while database is being renamed.");
+        return;
+    }
+
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+
+    if (state.status !== AppStatus.READY) {
+        return;
+    }
+    const noteId = state.noteId;
+    const file = state.file;
+    if (!noteId || !file) {
+        return;
+    }
+
+    const updatePayload = {
+        name: details.name.trim(),
+        description: details.description.trim(),
+    };
+
+    // Optimistically update the UI for the current version ID
+    dispatch(actions.updateVersionDetailsInState({ versionId, ...updatePayload }));
+    
+    // Also update the timeline panel if it's open, so changes reflect immediately
+    dispatch(actions.updateTimelineEventInState({ versionId, ...updatePayload }));
+
+    try {
+        const newVersionId = await versionManager.updateVersionDetails(noteId, versionId, updatePayload);
+        
+        // Trigger event to update IndexedDB timeline metadata
+        const eventBus = container.get<PluginEvents>(TYPES.EventBus);
+        eventBus.trigger('version-updated', noteId, versionId, updatePayload);
+
+        // If the ID changed due to renaming, we must reload the history to reflect the new ID in the state
+        if (newVersionId !== versionId) {
+             if (!isPluginUnloading(container)) {
+                dispatch(loadHistoryForNoteId(file, noteId));
+            }
+        }
+    } catch (error) {
+        console.error(`VC: Failed to save details update for version ${versionId}. Reverting UI.`, error);
+        uiService.showNotice("VC: Error, could not save version details. Reverting changes.", 5000);
+        if (!isPluginUnloading(container)) {
+            dispatch(loadHistoryForNoteId(file, noteId));
+        }
+    } finally {
+        if (!isPluginUnloading(container)) {
+            dispatch(actions.stopVersionEditing());
         }
     }
 };

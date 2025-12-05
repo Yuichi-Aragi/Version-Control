@@ -83,6 +83,44 @@ const confirmKeyUpdate = (oldKey: string, newKey: string): AppThunk => async (di
     dispatch(updateGlobalSettings({ noteIdFrontmatterKey: newKey }));
 };
 
+export const requestUpdateIdFormats = (newNoteIdFormat: string, newVersionIdFormat: string): AppThunk => (dispatch, _getState, container) => {
+    if (isPluginUnloading(container)) return;
+    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
+    const uiService = container.get<UIService>(TYPES.UIService);
+
+    const oldNoteIdFormat = plugin.settings.noteIdFormat;
+    const oldVersionIdFormat = plugin.settings.versionIdFormat;
+
+    if (newNoteIdFormat === oldNoteIdFormat && newVersionIdFormat === oldVersionIdFormat) {
+        return;
+    }
+
+    // Validate inputs
+    const noteIdValidation = VersionControlSettingsSchema.shape.noteIdFormat.safeParse(newNoteIdFormat);
+    const versionIdValidation = VersionControlSettingsSchema.shape.versionIdFormat.safeParse(newVersionIdFormat);
+
+    if (!noteIdValidation.success || !versionIdValidation.success) {
+        uiService.showNotice("Invalid ID format settings.", 3000);
+        return;
+    }
+
+    dispatch(actions.openPanel({
+        type: 'confirmation',
+        title: 'Update ID Formats?',
+        message: `You are about to change the ID generation formats. This will affect how new notes and versions are identified. Existing IDs will remain unchanged. \n\nNew Note ID Format: ${newNoteIdFormat}\nNew Version ID Format: ${newVersionIdFormat}\n\nAre you sure you want to apply these changes?`,
+        onConfirmAction: confirmUpdateIdFormats(newNoteIdFormat, newVersionIdFormat),
+    }));
+};
+
+const confirmUpdateIdFormats = (newNoteIdFormat: string, newVersionIdFormat: string): AppThunk => async (dispatch, _getState, container) => {
+    if (isPluginUnloading(container)) return;
+    dispatch(actions.closePanel());
+    dispatch(updateGlobalSettings({ 
+        noteIdFormat: newNoteIdFormat, 
+        versionIdFormat: newVersionIdFormat 
+    }));
+};
+
 export const toggleGlobalSettings = (applyGlobally: boolean): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     const state = getState();
@@ -111,7 +149,7 @@ export const toggleGlobalSettings = (applyGlobally: boolean): AppThunk => async 
             await manifestManager.updateNoteManifest(noteId, (manifest) => {
                 const branch = manifest.branches[manifest.currentBranch];
                 if (branch) {
-                    const { databasePath, centralManifest, autoRegisterNotes, pathFilters, noteIdFrontmatterKey, keyUpdatePathFilters, ...localSettings } = currentGlobalSettings;
+                    const { databasePath, centralManifest, autoRegisterNotes, pathFilters, noteIdFrontmatterKey, keyUpdatePathFilters, noteIdFormat, versionIdFormat, ...localSettings } = currentGlobalSettings;
                     branch.settings = { ...localSettings, isGlobal: false };
                 }
             });

@@ -79,6 +79,15 @@ export const initializeView = (leaf?: WorkspaceLeaf | null): AppThunk => async (
 
         const activeNoteInfo = await noteManager.getActiveNoteState(targetLeaf);
         
+        // --- Context Change Check: Verify ID matches Path if required ---
+        if (activeNoteInfo.file && activeNoteInfo.noteId) {
+             await noteManager.verifyNoteIdMatchesPath(activeNoteInfo.file, activeNoteInfo.noteId);
+             // Re-fetch state in case ID was updated
+             const updatedInfo = await noteManager.getActiveNoteState(targetLeaf);
+             if (updatedInfo.noteId) activeNoteInfo.noteId = updatedInfo.noteId;
+        }
+        // ----------------------------------------------------------------
+
         if (activeNoteInfo.file && !activeNoteInfo.noteId && plugin.settings.autoRegisterNotes) {
             if (isPathAllowed(activeNoteInfo.file.path, plugin.settings)) {
                 dispatch(autoRegisterNote(activeNoteInfo.file));
@@ -245,9 +254,12 @@ export const handleFileRename = (file: TFile, oldPath: string): AppThunk => asyn
     }
 
     const oldNoteId = await manifestManager.getNoteIdByPath(oldPath);
+    
+    // Handle the rename, which may involve updating the ID if it depends on the path
     await noteManager.handleNoteRename(file, oldPath);
     
     const state = getState();
+    // Re-initialize view if the active file was the one renamed
     if (state.file?.path === oldPath || (oldNoteId && state.noteId === oldNoteId)) {
         dispatch(initializeView());
     }
