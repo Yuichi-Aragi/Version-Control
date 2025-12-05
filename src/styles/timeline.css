@@ -167,22 +167,25 @@
     white-space: pre-wrap;
     word-break: break-word;
     
-    /* CHANGED: Use primary background for contrast against secondary card (Inset look) */
-    background-color: var(--background-primary);
+    /* Light mode: slightly darker than card to distinguish it */
+    background-color: rgba(0, 0, 0, 0.03);
     
     padding: var(--size-4-2);
     
     /* Left side styling */
     border-left: 2px solid var(--interactive-accent);
-    border-top-left-radius: var(--radius-s);
-    border-bottom-left-radius: var(--radius-s);
     
-    /* Right side flush styling */
-    margin-right: calc(var(--size-4-3) * -1); 
-    padding-right: var(--size-4-3); 
+    /* Rounded corners on all sides */
+    border-radius: var(--radius-s);
     
-    border-top-right-radius: 0;
-    border-bottom-right-radius: 0;
+    /* Spacing from elements above */
+    margin-top: var(--size-4-1);
+}
+
+.theme-dark .v-timeline-description {
+    /* Dark mode: slightly lighter than card to create a subtle highlight/shadow effect
+       Using 4% white opacity is much subtler than modifier-hover (usually ~10-15%) */
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
 .v-timeline-stats-row {
