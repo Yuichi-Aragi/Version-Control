@@ -1,0 +1,283 @@
+/* src/styles/timeline.css */
+
+/* Timeline Panel Layout */
+/* Increased specificity to override default drawer background from panels.css */
+.v-inline-panel.v-timeline-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    /* CHANGED: Use primary background to match the main view/history list container */
+    background-color: var(--background-primary);
+}
+
+.v-timeline-content {
+    flex-grow: 1;
+    overflow-y: hidden; /* Virtuoso handles scrolling */
+    padding: var(--size-4-2); /* Reduced padding */
+    display: flex;
+    flex-direction: column;
+}
+
+.v-timeline-loading,
+.v-timeline-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+    gap: var(--size-4-2);
+}
+
+/* Timeline List Container for Virtuoso */
+.v-timeline-list-container {
+    height: 100%;
+    width: 100%;
+}
+
+/* Wrapper for virtualized items to provide gap */
+.v-timeline-item-wrapper {
+    padding-bottom: var(--size-4-2);
+}
+
+/* Timeline Card */
+.v-timeline-card {
+    /* CHANGED: Use secondary background to match History Entry cards */
+    background-color: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    overflow: hidden;
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    transform: translateZ(0); 
+}
+
+.v-timeline-card:hover {
+    border-color: var(--interactive-accent);
+    box-shadow: var(--shadow-s);
+}
+
+.v-timeline-card.is-expanded {
+    border-color: var(--interactive-accent);
+    box-shadow: var(--shadow-m);
+}
+
+/* --- Card Header Layout --- */
+.v-timeline-card-header {
+    padding: var(--size-4-3);
+    position: relative; /* Anchor for absolute icon */
+    min-height: auto;
+    display: block; 
+}
+
+.v-timeline-content-column {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-2);
+}
+
+/* Header Row: Flex container for LeftGroup, Spacer, Timestamp */
+.v-timeline-header-row {
+    display: flex;
+    align-items: baseline;
+    width: 100%;
+    /* Safe zone for absolute icon */
+    padding-right: var(--size-4-8); 
+}
+
+/* Left Group: Contains Version Badge and Name */
+.v-timeline-header-left {
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-2);
+    flex-wrap: wrap;
+    
+    /* Animation Properties */
+    max-width: 300px; 
+    opacity: 1;
+    transition: max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
+                opacity 0.2s ease-out,
+                margin-right 0.3s ease;
+    margin-right: var(--size-4-2);
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.v-timeline-header-left.is-collapsed {
+    max-width: 0;
+    opacity: 0;
+    margin-right: 0;
+}
+
+/* Spacer: Pushes timestamp to right */
+.v-timeline-spacer {
+    flex-grow: 1;
+    transition: flex-grow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    min-width: 0;
+}
+
+.v-timeline-spacer.is-collapsed {
+    flex-grow: 0;
+}
+
+/* --- Header Elements --- */
+.v-timeline-version-badge {
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+    font-size: var(--font-ui-smaller);
+    font-weight: var(--font-bold);
+    padding: 2px 6px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    line-height: 1.2;
+}
+
+.v-timeline-title {
+    font-weight: var(--font-semibold);
+    font-size: var(--font-ui-small);
+    color: var(--text-normal);
+    word-break: break-word;
+    line-height: 1.3;
+}
+
+.v-timeline-time {
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: font-size 0.3s ease, color 0.3s ease, transform 0.3s ease;
+    transform-origin: left center;
+}
+
+/* Timestamp Focus Mode */
+.v-timeline-time.is-focused {
+    font-size: var(--font-ui-medium);
+    font-weight: var(--font-bold);
+    color: var(--text-normal);
+}
+
+/* Description Container */
+.v-timeline-description {
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    
+    /* CHANGED: Use primary background for contrast against secondary card (Inset look) */
+    background-color: var(--background-primary);
+    
+    padding: var(--size-4-2);
+    
+    /* Left side styling */
+    border-left: 2px solid var(--interactive-accent);
+    border-top-left-radius: var(--radius-s);
+    border-bottom-left-radius: var(--radius-s);
+    
+    /* Right side flush styling */
+    margin-right: calc(var(--size-4-3) * -1); 
+    padding-right: var(--size-4-3); 
+    
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.v-timeline-stats-row {
+    display: flex;
+    align-items: center;
+}
+
+.v-timeline-stats {
+    display: flex;
+    gap: var(--size-4-3);
+    font-size: var(--font-ui-smaller);
+    font-family: var(--font-monospace);
+}
+
+.v-stat-add {
+    color: var(--color-green);
+}
+
+.v-stat-del {
+    color: var(--color-red);
+}
+
+/* Absolute positioned expand icon */
+.v-timeline-expand-icon {
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 20px; 
+    width: 20px;
+    
+    position: absolute;
+    top: var(--size-4-3);
+    right: var(--size-4-3);
+    
+    transition: transform 0.2s ease;
+}
+
+/* --- Expansion Animation (Accordion) --- */
+.v-timeline-card-diff-container {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: grid-template-rows;
+    border-top: 1px solid transparent;
+}
+
+.v-timeline-card.is-expanded .v-timeline-card-diff-container {
+    grid-template-rows: 1fr;
+    border-top-color: var(--background-modifier-border);
+}
+
+.v-timeline-diff-inner {
+    overflow: hidden;
+    min-height: 0;
+}
+
+/* Diff Content in Card */
+.v-timeline-diff-content {
+    /* CHANGED: Use primary background for content well */
+    background-color: var(--background-primary);
+    height: 400px; 
+    display: flex;
+    flex-direction: column;
+    cursor: default; 
+}
+
+/* Override virtualized container inside the card */
+.v-timeline-diff-content .v-virtuoso-container {
+    height: 100%;
+}
+
+/* --- Scrollbar Hiding Protocol --- */
+.v-panel-container.is-drawer-like .v-timeline-panel.is-drawer .v-timeline-list-container .v-virtuoso-container::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+    background: transparent;
+}
+
+.v-panel-container.is-drawer-like .v-timeline-panel.is-drawer .v-timeline-list-container .v-virtuoso-container {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.v-panel-container.is-drawer-like .v-timeline-panel.is-drawer .v-timeline-card .v-timeline-diff-content .v-virtuoso-container::-webkit-scrollbar,
+.v-panel-container.is-drawer-like .v-timeline-panel.is-drawer .v-timeline-card .v-timeline-diff-content .v-diff-content-wrapper::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+    background: transparent;
+}
+
+.v-panel-container.is-drawer-like .v-timeline-panel.is-drawer .v-timeline-card .v-timeline-diff-content .v-virtuoso-container,
+.v-panel-container.is-drawer-like .v-timeline-panel.is-drawer .v-timeline-card .v-timeline-diff-content .v-diff-content-wrapper {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}

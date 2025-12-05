@@ -9,13 +9,11 @@
     height: 100%;
     z-index: 50;
     display: none;
-    /* FIX: Default to primary background. This is correct for light mode. */
     background-color: var(--background-primary);
     padding: 0;
     animation: v-fade-in 0.25s ease;
 }
 
-/* NEW: In dark mode, use the secondary background to match other UI elements like the history list. */
 .theme-dark .v-panel-container {
     background-color: var(--background-secondary);
 }
@@ -25,7 +23,6 @@
     flex-direction: column;
 }
 
-/* This rule applies to full-screen panels like Preview and Diff */
 .v-panel-container > .v-inline-panel {
     width: 100%;
     height: 100%;
@@ -34,11 +31,8 @@
     animation: v-fade-in 0.2s ease;
 }
 
-/* FIX: Add :not(.is-drawer-like) to make modal and drawer styles mutually exclusive. */
 .v-panel-container.is-modal-like:not(.is-drawer-like) {
-    /* Semi-transparent backdrop */
     background-color: rgba(var(--background-primary-rgb), 0.7);
-    /* Center the inline panel. Display is handled by .is-active to prevent blocking. */
     justify-content: center;
     align-items: center;
     padding: var(--size-4-4);
@@ -51,7 +45,6 @@
     max-width: 600px;
     max-height: 80vh;
     animation: v-fade-in 0.2s ease;
-    /* Override full-screen styles */
     box-shadow: var(--shadow-l);
     border-radius: var(--radius-l);
     background-color: var(--background-secondary);
@@ -59,42 +52,32 @@
     flex-direction: column;
 }
 
-
-/* FIX: Consolidate drawer styles into a single rule that overrides the .is-active defaults. */
 .v-panel-container.is-drawer-like {
     background-color: rgba(var(--background-primary-rgb), 0.7);
     animation: v-fade-in 0.25s ease;
     flex-direction: row;
     justify-content: flex-start;
     align-items: stretch;
-    padding: 0;
-    /* NEW: Add a gap between the drawer and the left edge of the view. */
-    padding-left: var(--size-4-4);
+    padding-top: var(--size-4-8);
+    padding-left: var(--size-4-2);
+    padding-bottom: var(--size-4-2);
+    padding-right: var(--size-4-2);
 }
 
 .v-panel-container.is-drawer-like > .v-inline-panel.is-drawer {
-    /* NEW: Mobile-first width */
-    width: 60%;
-    max-width: 400px; /* Max width for large screens */
+    width: 100%;
+    max-width: none;
     height: 100%;
     min-width: auto;
     max-height: none;
     animation: v-slide-in-left 0.25s ease-out;
     box-shadow: var(--shadow-l);
-    border-radius: 0;
+    border-radius: var(--radius-m);
     background-color: var(--background-secondary);
     display: flex;
     flex-direction: column;
 }
 
-/* NEW: Media query for desktop width */
-@media (min-width: 768px) {
-    .v-panel-container.is-drawer-like > .v-inline-panel.is-drawer {
-        width: 50%;
-    }
-}
-
-/* NEW: Animation for drawer panel */
 @keyframes v-slide-in-left {
     from {
         transform: translateX(-100%);
@@ -109,8 +92,8 @@
     display: flex;
     flex-direction: column;
     gap: 0;
-    overflow: hidden; /* Let inner content scroll */
-    background-color: transparent; /* Default for full-screen panels */
+    overflow: hidden;
+    background-color: transparent;
     border-radius: 0;
     box-shadow: none;
 }
@@ -149,12 +132,10 @@
     gap: var(--size-4-1);
 }
 
-/* NEW: Adjustments for list inside a drawer */
 .is-drawer .v-action-panel-list {
-    gap: 0; /* Remove gap for virtuoso */
+    gap: 0;
 }
 
-/* NEW: Wrapper for virtualized items to provide spacing */
 .v-action-panel-list-item-wrapper {
     padding-bottom: var(--size-4-2);
 }
@@ -168,14 +149,10 @@
     cursor: pointer;
     transition: background-color 0.15s ease;
     outline: none;
-    /* FIX: Removed fixed min-height to allow items to grow vertically with wrapped text, preventing overlap. */
 }
 
-/* NEW: Card style for items in a drawer */
 .is-drawer .v-action-panel-item {
-    /* FIX: Use a transparent background */
     background-color: transparent;
-    /* FIX: Use a consistent border for the outline effect */
     border: 1px solid var(--background-modifier-border);
 }
 
@@ -184,14 +161,12 @@
     background-color: var(--background-modifier-hover);
 }
 
-/* NEW: Hover/focus for drawer cards */
 .is-drawer .v-action-panel-item:hover,
 .is-drawer .v-action-panel-item:focus {
     border-color: var(--interactive-accent);
     background-color: var(--background-modifier-hover);
 }
 
-/* FIX: Add active state for consistent click feedback on drawer items */
 .is-drawer .v-action-panel-item:active {
     border-color: var(--interactive-accent-hover);
     background-color: var(--background-modifier-active);
@@ -209,7 +184,7 @@
 .v-action-item-text-wrapper {
     flex-grow: 1;
     min-width: 0;
-    word-break: break-word; /* Allow long paths to wrap */
+    word-break: break-word;
 }
 
 .v-action-item-text {
@@ -227,8 +202,6 @@
     color: var(--text-faint);
 }
 
-
-/* NEW: Override styles for preview and diff panels to make them look integrated */
 .v-inline-panel.v-preview-panel,
 .v-inline-panel.v-diff-panel {
     background-color: transparent;
@@ -277,8 +250,7 @@
 }
 
 /* --- Panel Search Bar --- */
-.v-panel-header-content,
-.v-panel-search-bar-container {
+.v-panel-header-content {
     position: absolute;
     width: calc(100% - var(--size-4-2) * 2);
     top: 50%;
@@ -287,19 +259,29 @@
     align-items: center;
     transform: translateY(-50%);
     transition: opacity 0.2s ease-in-out;
-}
-.v-panel-header-content {
     justify-content: space-between;
     opacity: 1;
     pointer-events: auto;
     z-index: 1;
 }
+
 .v-panel-search-bar-container {
+    position: absolute;
+    /* Use left/right anchoring instead of width calc for robustness */
+    left: var(--size-4-2);
+    right: var(--size-4-2);
+    width: auto;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
     gap: var(--size-4-2);
     opacity: 0;
     pointer-events: none;
     z-index: 2;
+    transition: opacity 0.2s ease-in-out;
 }
+
 .v-panel-header.is-searching .v-panel-header-content {
     opacity: 0;
     pointer-events: none;
@@ -308,17 +290,22 @@
     opacity: 1;
     pointer-events: auto;
 }
+
+/* Search Input Wrapper: Flexbox layout to handle long text and buttons */
 .v-panel-search-bar-container .v-search-input-wrapper {
     flex-grow: 1;
     position: relative;
     display: flex;
     align-items: center;
+    border-bottom: 1px solid var(--background-modifier-border);
+    /* Ensure it doesn't overflow the container */
+    min-width: 0; 
 }
+
+/* Search Icon: Static position inside flex container */
 .v-panel-search-bar-container .v-search-icon {
-    position: absolute;
-    left: var(--size-4-2);
-    top: 50%;
-    transform: translateY(-50%);
+    position: static !important;
+    transform: none !important;
     color: var(--text-muted);
     z-index: 2;
     cursor: pointer;
@@ -328,36 +315,65 @@
     align-items: center;
     justify-content: center;
     transition: background-color 0.2s ease, color 0.2s ease;
+    margin-left: var(--size-4-2);
+    margin-right: var(--size-4-1);
+    flex-shrink: 0;
 }
 .v-panel-search-bar-container .v-search-icon:hover {
     background-color: var(--background-modifier-hover);
     color: var(--text-error);
 }
+
+/* Search Input: Flex grow to fill available space, no border (moved to wrapper) */
 .v-panel-search-bar-container input[type="search"] {
-    width: 100%;
-    padding-left: calc(var(--size-4-2) + var(--icon-size) + var(--size-4-2));
-    padding-right: calc(var(--size-4-2) * 2 + var(--icon-size) * 2);
+    flex-grow: 1;
+    width: auto;
+    min-width: 0; /* Allow shrinking */
+    padding-left: 0;
+    padding-right: var(--size-4-2);
     background-color: transparent;
     border: none;
-    border-bottom: 1px solid var(--background-modifier-border);
     border-radius: 0;
     box-shadow: none;
     outline: none;
-    transition: border-color 0.2s ease;
+    transition: none; /* Border transition handled by ::after */
 }
 .v-panel-search-bar-container input[type="search"]:focus {
-    border-color: var(--interactive-accent);
     box-shadow: none;
 }
-.v-panel-search-bar-container .v-search-input-buttons {
+
+/* Animated bottom border */
+.v-panel-search-bar-container .v-search-input-wrapper::after {
+    content: '';
     position: absolute;
-    right: var(--size-4-2);
-    top: 50%;
-    transform: translateY(-50%);
+    bottom: -1px; /* Overlap the wrapper border */
+    left: 0;
+    width: 0;
+    height: 2px;
+    background-color: var(--interactive-accent);
+    transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+    z-index: 3;
+}
+.v-panel-search-bar-container input[type="search"]:focus + .v-search-input-buttons,
+.v-panel-search-bar-container input[type="search"]:focus ~ .v-search-input-buttons {
+    /* No-op, just to keep selector specificity if needed later */
+}
+/* Trigger animation when input is focused (handled via JS class usually, or :focus-within) */
+.v-panel-search-bar-container .v-search-input-wrapper:focus-within::after {
+    width: 100%;
+}
+
+/* Buttons Container: Static position, prevent shrinking */
+.v-panel-search-bar-container .v-search-input-buttons {
+    position: static !important; /* Override any absolute positioning from global styles */
+    transform: none !important;
     display: flex;
     align-items: center;
     gap: var(--size-4-1);
+    margin-right: var(--size-4-2);
+    flex-shrink: 0;
 }
+
 .v-panel-search-bar-container .clickable-icon {
     color: var(--text-muted);
 }
@@ -370,12 +386,12 @@
     color: var(--color-purple);
 }
 
-/* NEW: Styles for search navigation */
 .v-search-match-count {
     font-size: var(--font-ui-smaller);
     color: var(--text-muted);
     padding: 0 var(--size-4-1);
     user-select: none;
+    white-space: nowrap;
 }
 .v-panel-search-bar-container .v-search-nav-button:disabled {
     color: var(--text-faint);
@@ -407,33 +423,28 @@
     background-color: var(--background-secondary);
     padding: var(--size-4-4);
     border-radius: var(--radius-m);
-    /* Default to auto scrolling for rendered Markdown. */
     overflow-y: auto;
-    /* Prevent this container from scrolling horizontally, forcing children to handle it. */
     overflow-x: hidden;
     flex-grow: 1;
     line-height: 1.5;
     animation: v-fade-in 0.3s ease;
-    user-select: text; /* NEW: Ensure content is selectable */
+    user-select: text;
 }
 .v-version-content-preview.is-plaintext {
-    /* For virtualized plaintext, hide the container's scrollbar. */
     overflow-y: hidden;
-    white-space: normal; /* Let virtualized lines wrap themselves */
-    font-family: inherit; /* Font is set on the line itself */
+    white-space: normal;
+    font-family: inherit;
     padding: var(--size-4-3);
 }
 
-/* NEW: Styles for virtualized plaintext lines */
 .v-plaintext-line {
     white-space: pre-wrap;
     font-family: var(--font-monospace);
     font-size: var(--font-ui-smaller);
     line-height: 1.5;
-    min-height: 1.5em; /* For empty lines */
+    min-height: 1.5em;
 }
 
-/* NEW: Styles for search result highlighting */
 .v-version-content-preview mark,
 .v-diff-content-wrapper mark {
     background-color: var(--text-highlight-bg);
@@ -444,27 +455,26 @@
     will-change: background-color, box-shadow;
 }
 
-/* NEW: Style for the currently active search match */
+/* Active Match Highlight: High contrast but readable */
 .v-version-content-preview mark.is-active-match,
 .v-diff-content-wrapper mark.is-active-match {
-    background-color: var(--color-purple-alpha);
-    color: var(--color-purple);
-    box-shadow: 0 0 0 2px var(--color-purple-alpha);
+    /* Lighter background to not obscure text */
+    background-color: rgba(var(--interactive-accent-rgb), 0.25);
+    color: inherit;
+    /* Strong border to make it noticeable */
+    box-shadow: 0 0 0 2px var(--interactive-accent);
+    border-radius: 2px;
 }
 
-
-/* Make code blocks scroll horizontally instead of wrapping */
 .v-version-content-preview pre {
-    white-space: pre; /* Use 'pre' to prevent wrapping */
-    word-break: normal; /* Reset word-break */
-    overflow-x: auto; /* Enable horizontal scroll */
+    white-space: pre;
+    word-break: normal;
+    overflow-x: auto;
     background-color: var(--background-primary);
     padding: var(--size-4-3);
     border-radius: var(--radius-s);
 }
 
-/* Target the wrapper Obsidian's MarkdownRenderer creates around tables
-   to enable horizontal scrolling for wide tables. */
 .v-version-content-preview .table-wrapper {
     overflow-x: auto;
     width: 100%;
@@ -473,11 +483,9 @@
     margin-bottom: 1em;
 }
 
-/* Let the table inside the wrapper have its natural width,
-   which is the key to enabling horizontal scrolling on the wrapper. */
 .v-version-content-preview .table-wrapper table {
-    width: auto; /* Allow table to expand to its content */
-    min-width: 100%; /* Ensure it fills the container if content is narrow */
+    width: auto;
+    min-width: 100%;
     border: none;
     margin: 0;
 }

@@ -46,14 +46,12 @@
 
 .v-diff-meta-container {
     background-color: var(--background-secondary);
-    /* Border removed from container to prevent visibility when collapsed */
     flex-shrink: 0;
     will-change: grid-template-rows;
     display: grid;
     grid-template-rows: 0fr;
     transition: grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     overflow: hidden;
-    /* FIX: Ensure container allows shrinking to 0 */
     min-height: 0;
 }
 
@@ -61,7 +59,6 @@
     grid-template-rows: 1fr;
 }
 
-/* FIX: Ensure visibility is toggled to handle cases where 0fr doesn't fully collapse */
 .v-diff-meta-container:not(.is-open) {
     visibility: hidden;
     transition: grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear 0.3s;
@@ -78,9 +75,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--size-4-1);
-    /* Border moved to wrapper so it hides completely when collapsed */
     border-bottom: 1px solid var(--background-modifier-border);
-    /* FIX: Ensure content doesn't overflow during animation */
     overflow: hidden;
     box-sizing: border-box;
 }
@@ -114,7 +109,6 @@
     flex: 1 1 0;
     min-height: 0;
     position: relative;
-    /* Ensure tab size is reasonable for code */
     tab-size: 4;
 }
 
@@ -160,9 +154,8 @@
 .diff-line {
     display: flex;
     width: 100%;
-    min-height: 1.5em; /* Ensure empty lines have height */
+    min-height: 1.5em;
     box-sizing: border-box;
-    /* Border on the left for change indication */
     border-left: 3px solid transparent; 
     transition: background-color 0.1s ease;
 }
@@ -180,7 +173,6 @@
 .diff-line-gutter {
     display: flex;
     flex-shrink: 0;
-    /* Fixed width for stability, adjusted for 2 columns of numbers */
     min-width: 4rem; 
     user-select: none;
     padding: 0 var(--size-4-2);
@@ -189,7 +181,7 @@
     color: var(--text-muted);
     justify-content: flex-end;
     gap: var(--size-4-2);
-    align-items: flex-start; /* Align numbers to top of line */
+    align-items: flex-start;
 }
 
 .diff-line-num {
@@ -207,10 +199,10 @@
     flex-grow: 1;
     white-space: pre-wrap;
     word-break: break-all;
-    padding: 0 var(--size-4-3); /* Comfortable padding */
+    padding: 0 var(--size-4-3);
     user-select: text;
     position: relative;
-    display: flex; /* To align marker and text */
+    display: flex;
 }
 
 /* Marker (+/-) */
@@ -313,7 +305,7 @@
     color: var(--text-normal);
     border-bottom: 2px solid rgba(var(--color-green-rgb), 0.4);
     text-decoration: none;
-    border-left: none; /* Reset line style */
+    border-left: none;
     padding: 1px 2px;
     border-radius: var(--radius-s);
 }
@@ -322,16 +314,16 @@
     background-color: rgba(var(--color-red-rgb), 0.15);
     color: var(--text-muted);
     text-decoration: line-through;
-    border-left: none; /* Reset line style */
+    border-left: none;
     padding: 1px 2px;
     border-radius: var(--radius-s);
 }
 
 /* --- Search Highlighting --- */
 mark.is-active-match {
-    background-color: var(--color-yellow);
-    color: var(--text-on-accent);
-    box-shadow: 0 0 0 2px var(--color-yellow);
+    background-color: rgba(var(--interactive-accent-rgb), 0.25);
+    color: inherit;
+    box-shadow: 0 0 0 2px var(--interactive-accent);
     border-radius: 2px;
 }
 
@@ -349,7 +341,7 @@ mark.is-active-match {
     padding: var(--size-4-1);
     box-shadow: var(--shadow-l);
     border: 1px solid var(--background-modifier-border);
-    z-index: 10002; /* FIX: Increased z-index to appear above DiffWindow (9999) */
+    z-index: 10002;
 }
 
 .v-diff-dropdown-item {
