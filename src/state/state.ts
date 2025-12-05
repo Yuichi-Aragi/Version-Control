@@ -1,5 +1,6 @@
 import { TFile } from 'obsidian';
-import type { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, DiffRequest, DiffType, Change } from '../types';
+import type { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, DiffRequest, DiffType, Change, TimelineEvent, TimelineSettings } from '../types';
+export type { TimelineEvent } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
 import type { AppThunk } from './store';
 
@@ -59,6 +60,12 @@ export interface ChangelogPanel {
     content: string | null; // null while loading
 }
 
+export interface TimelinePanel {
+    type: 'timeline';
+    events: TimelineEvent[] | null; // null while loading
+    settings: TimelineSettings;
+}
+
 /** A generic item for the ActionPanel. */
 export interface ActionItem<T> {
     id: string;
@@ -88,7 +95,7 @@ export interface StackedPanel {
     overlay: ActionPanel<any> | ConfirmationPanel;
 }
 
-export type PanelState = ConfirmationPanel | PreviewPanel | DiffPanel | SettingsPanel | ActionPanel<any> | ChangelogPanel | DescriptionPanel | StackedPanel | null;
+export type PanelState = ConfirmationPanel | PreviewPanel | DiffPanel | SettingsPanel | ActionPanel<any> | ChangelogPanel | DescriptionPanel | TimelinePanel | StackedPanel | null;
 
 // --- Core Application State ---
 

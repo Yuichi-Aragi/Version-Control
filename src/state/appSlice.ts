@@ -3,7 +3,7 @@ import type { PayloadAction } from '@reduxjs/toolkit';
 import { TFile } from 'obsidian';
 import { AppStatus, getInitialState } from './state';
 import type { AppState, PanelState, SortOrder } from './state';
-import type { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, ActiveNoteInfo, DiffType, Change } from '../types';
+import type { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, ActiveNoteInfo, DiffType, Change, TimelineEvent, TimelineSettings } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
 
 const initialState: AppState = getInitialState(DEFAULT_SETTINGS);
@@ -35,9 +35,9 @@ export const appSlice = createSlice({
                     state.panel = null;
                 }
             } else {
+                // Timeline panel should NOT persist on context change (switching notes), similar to diff/preview.
                 const shouldPreservePanel =
-                    (state.panel?.type === 'diff' || state.panel?.type === 'preview' || state.panel?.type === 'description' || state.panel?.type === 'stacked') &&
-                    state.file?.path === file.path;
+                    (state.panel?.type === 'diff' || state.panel?.type === 'preview' || state.panel?.type === 'description' || state.panel?.type === 'stacked');
 
                 // Avoid unnecessary loading states if the view is already correct
                 if (state.status === AppStatus.READY && state.file?.path === file.path && !state.isProcessing) {
@@ -60,8 +60,9 @@ export const appSlice = createSlice({
         },
         historyLoadedSuccess(state, action: PayloadAction<{ file: TFile; noteId: string | null; history: VersionHistoryEntry[], currentBranch: string, availableBranches: string[] }>) {
             if (state.file?.path === action.payload.file.path) {
+                // If we are just refreshing the same note (e.g. post-save), we DO preserve the timeline.
                 const shouldPreservePanel =
-                    (state.panel?.type === 'diff' || state.panel?.type === 'preview' || state.panel?.type === 'description' || state.panel?.type === 'stacked');
+                    (state.panel?.type === 'diff' || state.panel?.type === 'preview' || state.panel?.type === 'description' || state.panel?.type === 'stacked' || state.panel?.type === 'timeline');
 
                 state.status = AppStatus.READY;
                 state.noteId = action.payload.noteId;
@@ -290,6 +291,28 @@ export const appSlice = createSlice({
         reDiffingFailed(state) {
             if (state.panel?.type === 'diff') {
                 state.panel.isReDiffing = false;
+            }
+        },
+
+        // --- Timeline Actions ---
+        setTimelineData(state, action: PayloadAction<TimelineEvent[]>) {
+            if (state.panel?.type === 'timeline') {
+                state.panel.events = action.payload;
+            }
+        },
+        setTimelineSettings(state, action: PayloadAction<TimelineSettings>) {
+            if (state.panel?.type === 'timeline') {
+                state.panel.settings = action.payload;
+            }
+        },
+        updateTimelineEventInState(state, action: PayloadAction<{ versionId: string; name?: string; description?: string }>) {
+            if (state.panel?.type === 'timeline' && state.panel.events) {
+                state.panel.events.forEach(event => {
+                    if (event.toVersionId === action.payload.versionId) {
+                        if (action.payload.name !== undefined) event.toVersionName = action.payload.name;
+                        if (action.payload.description !== undefined) event.toVersionDescription = action.payload.description;
+                    }
+                });
             }
         },
 
