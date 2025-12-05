@@ -1,4 +1,4 @@
-import { useMemo, type FC, type Ref, useEffect } from 'react';
+import { useMemo, type FC, type Ref, useEffect, useRef, useLayoutEffect } from 'react';
 import { Virtuoso, type VirtuosoHandle, type ListRange } from 'react-virtuoso';
 import type { Change, DiffType } from '../../../types';
 import clsx from 'clsx';
@@ -143,7 +143,7 @@ interface DiffLineProps {
     onClick?: (lineData: DiffLineData) => void;
 }
 
-const DiffLine: FC<DiffLineProps> = ({ 
+export const DiffLine: FC<DiffLineProps> = ({ 
     data, 
     isHighlighted, 
     searchQuery, 
@@ -255,6 +255,51 @@ const LineDiffViewer: FC<LineDiffViewerProps> = ({
                 />
             )}
         />
+    );
+};
+
+export const StaticDiff: FC<{
+    changes: Change[];
+    diffType: DiffType;
+    searchQuery?: string;
+    isCaseSensitive?: boolean;
+    activeMatchInfo: { lineIndex: number; matchIndexInLine: number } | null;
+    onLineClick?: (lineData: DiffLineData) => void;
+}> = ({
+    changes,
+    diffType,
+    searchQuery,
+    isCaseSensitive,
+    activeMatchInfo,
+    onLineClick
+}) => {
+    const lines = useMemo(() => processLineChanges(changes, diffType), [changes, diffType]);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    useLayoutEffect(() => {
+        if (activeMatchInfo && containerRef.current) {
+            const targetLine = containerRef.current.children[activeMatchInfo.lineIndex];
+            if (targetLine) {
+                targetLine.scrollIntoView({ block: 'center', behavior: 'auto' });
+            }
+        }
+    }, [activeMatchInfo]);
+
+    return (
+        <div className="v-static-diff-container" ref={containerRef} style={{ height: '100%', overflowY: 'auto' }}>
+            {lines.map((data, index) => (
+                <DiffLine 
+                    key={data.key}
+                    data={data}
+                    isHighlighted={activeMatchInfo?.lineIndex === index}
+                    searchQuery={searchQuery}
+                    isCaseSensitive={isCaseSensitive}
+                    isTargetLine={activeMatchInfo?.lineIndex === index}
+                    targetMatchIndexInLine={activeMatchInfo?.lineIndex === index ? activeMatchInfo.matchIndexInLine : -1}
+                    onClick={onLineClick}
+                />
+            ))}
+        </div>
     );
 };
 
