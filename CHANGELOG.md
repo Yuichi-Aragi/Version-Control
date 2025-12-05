@@ -1,5 +1,13 @@
 ***
 
+**Version: 1.9.29**
+
+#### ✨ New Features
+
+* **Timeline:** You can now view all of the diffs in one panel, allowing you to see and search all of the changes in one place. Forgot in which version you had changed any text? Just search in the timeline.
+
+***
+
 **Version: 1.9.27**
 
 #### 🎨 Improvements & UX
