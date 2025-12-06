@@ -77,10 +77,12 @@ export const generateAndShowDiffInPanel = (version1: VersionHistoryEntry, versio
     const { noteId } = initialState;
 
     uiService.showNotice("Generating diff...", 2000);
+    const decoder = new TextDecoder('utf-8');
 
     try {
-        const content1 = await diffManager.getContent(noteId, version1);
-        const content2 = await diffManager.getContent(noteId, version2);
+        // Fetch content (potentially ArrayBuffer)
+        const rawContent1 = await diffManager.getContent(noteId, version1);
+        const rawContent2 = await diffManager.getContent(noteId, version2);
         
         const stateAfterContentFetch = getState();
         if (isPluginUnloading(container) || stateAfterContentFetch.status !== AppStatus.READY || stateAfterContentFetch.noteId !== noteId || !stateAfterContentFetch.file) {
@@ -88,9 +90,21 @@ export const generateAndShowDiffInPanel = (version1: VersionHistoryEntry, versio
             return;
         }
 
+        // Decode contents for UI state (strings required for display)
+        const content1Str = typeof rawContent1 === 'string' ? rawContent1 : decoder.decode(rawContent1);
+        const content2Str = typeof rawContent2 === 'string' ? rawContent2 : decoder.decode(rawContent2);
+
         // --- Panel Mode Logic ---
-        dispatch(actions.startDiffGeneration({ version1, version2, content1, content2 }));
-        const diffChanges = await diffManager.computeDiff(noteId, version1.id, version2.id, content1, content2, 'lines');
+        dispatch(actions.startDiffGeneration({ 
+            version1, 
+            version2, 
+            content1: content1Str, 
+            content2: content2Str 
+        }));
+
+        // Pass raw content (potentially ArrayBuffer) to manager. 
+        // Manager handles cloning/transferring to worker.
+        const diffChanges = await diffManager.computeDiff(noteId, version1.id, version2.id, rawContent1, rawContent2, 'lines');
         
         const finalState = getState();
         if (isPluginUnloading(container) || finalState.status !== AppStatus.READY || finalState.noteId !== noteId) {
@@ -155,6 +169,8 @@ export const recomputeDiff = (newDiffType: DiffType): AppThunk => async (dispatc
 
     dispatch(actions.startReDiffing({ newDiffType }));
     try {
+        // Here we only have strings in state.panel, so we pass strings.
+        // The worker handles strings as well.
         const diffChanges = await diffManager.computeDiff(noteId, version1.id, version2.id, content1, content2, newDiffType);
         dispatch(actions.reDiffingSucceeded({ diffChanges }));
     } catch (error) {
