@@ -98,6 +98,42 @@ export class VersionContentRepository {
   }
 
   /**
+   * Reads version content as an ArrayBuffer for efficient transfer to workers.
+   * @param noteId - The unique identifier of the note
+   * @param versionId - The unique identifier of the version
+   * @returns Promise resolving to ArrayBuffer or null if not found
+   */
+  public async readBinary(
+    noteId: string,
+    versionId: string
+  ): Promise<ArrayBuffer | null> {
+    if (typeof noteId !== 'string' || noteId.trim() === '') return null;
+    if (typeof versionId !== 'string' || versionId.trim() === '') return null;
+
+    const versionFilePath = this.pathService.getNoteVersionPath(noteId, versionId);
+
+    return this.executeWithRetryAndTimeout(
+      async () => {
+        try {
+          const exists = await this.app.vault.adapter.exists(versionFilePath);
+          if (!exists) return null;
+          
+          return await this.app.vault.adapter.readBinary(versionFilePath);
+        } catch (error) {
+          console.error(
+            `VC: Failed to read binary content for note ${noteId}, version ${versionId}.`,
+            error instanceof Error ? error.message : String(error)
+          );
+          throw error;
+        }
+      },
+      `readBinary_${noteId}_${versionId}`,
+      this.MAX_RETRIES,
+      this.RETRY_DELAY_MS
+    ).catch(() => null);
+  }
+
+  /**
    * Writes version content with strict validation, atomic operations, and resource efficiency.
    * @param noteId - The unique identifier of the note
    * @param versionId - The unique identifier of the version
