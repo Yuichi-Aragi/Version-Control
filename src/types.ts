@@ -49,7 +49,42 @@ export interface ActiveNoteInfo {
  * This interface is used by Comlink to create a typed proxy.
  */
 export interface DiffWorkerApi {
-    computeDiff(type: DiffType, content1: string, content2: string): Change[];
+    /**
+     * Computes diff between two contents.
+     * Accepts string or ArrayBuffer.
+     * Returns ArrayBuffer (serialized Change[]) via transfer.
+     */
+    computeDiff(type: DiffType, content1: string | ArrayBuffer, content2: string | ArrayBuffer): Promise<ArrayBuffer>;
+}
+
+/**
+ * Defines the API exposed by the timeline web worker.
+ * Handles both IndexedDB interactions and diff computation for timeline events.
+ * 
+ * Note: Data-heavy methods return ArrayBuffer (serialized JSON) to allow 
+ * zero-copy transfer of ownership from worker to main thread.
+ */
+export interface TimelineWorkerApi {
+    /** Returns ArrayBuffer containing serialized TimelineEvent[] */
+    getTimeline(noteId: string, branchName: string): Promise<ArrayBuffer>;
+    
+    /** Returns ArrayBuffer containing serialized TimelineEvent */
+    generateAndStoreEvent(
+        noteId: string,
+        branchName: string,
+        fromVersionId: string | null,
+        toVersionId: string,
+        toVersionTimestamp: string,
+        toVersionNumber: number,
+        content1: string | ArrayBuffer,
+        content2: string | ArrayBuffer,
+        metadata?: { name?: string; description?: string }
+    ): Promise<ArrayBuffer>;
+
+    updateEventMetadata(noteId: string, versionId: string, data: { name?: string; description?: string }): Promise<void>;
+    removeEventByVersion(noteId: string, branchName: string, versionId: string): Promise<void>;
+    clearTimelineForNote(noteId: string): Promise<void>;
+    clearAll(): Promise<void>;
 }
 
 // --- Timeline Types ---
