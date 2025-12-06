@@ -1,38 +1,52 @@
 /// <reference lib="webworker" />
 
-import { expose } from 'comlink';
+import { expose, transfer } from 'comlink';
 import { diffLines, diffWordsWithSpace, diffChars, type Change } from 'diff';
 import type { DiffType } from '../types';
 
+const decoder = new TextDecoder('utf-8');
+const encoder = new TextEncoder();
+
 /**
  * A stateless and simple diff engine that performs diffing operations.
- * All validation, sanitization, and complex logic is handled by the DiffManager in the main thread.
- * This worker assumes all inputs are valid and sanitized.
+ * Handles ArrayBuffer inputs and outputs via transfer for zero-copy communication.
  */
 const diffEngine = {
     /**
-     * Calculates the differences between two strings using a specified algorithm.
+     * Calculates the differences between two contents using a specified algorithm.
      * @param type The type of diff to perform ('lines', 'words', 'chars', 'smart').
-     * @param content1 The first string for comparison.
-     * @param content2 The second string for comparison.
-     * @returns An array of Change objects representing the differences.
-     * @throws {Error} If the diffing algorithm fails.
+     * @param content1 The first content (string or ArrayBuffer).
+     * @param content2 The second content (string or ArrayBuffer).
+     * @returns Promise resolving to ArrayBuffer (serialized Change[]).
      */
-    computeDiff(type: DiffType, content1: string, content2: string): Change[] {
+    async computeDiff(type: DiffType, content1: string | ArrayBuffer, content2: string | ArrayBuffer): Promise<ArrayBuffer> {
+        // Decode inputs if they are buffers
+        const str1 = typeof content1 === 'string' ? content1 : decoder.decode(content1);
+        const str2 = typeof content2 === 'string' ? content2 : decoder.decode(content2);
+
+        // Sanitize inputs (remove control characters)
+        const clean1 = str1.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
+        const clean2 = str2.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
+
+        let changes: Change[];
+
         switch (type) {
             case 'lines':
-                return diffLines(content1, content2, { 
+                changes = diffLines(clean1, clean2, { 
                     ignoreWhitespace: false,
                 });
+                break;
             case 'words':
-                return diffWordsWithSpace(content1, content2, {
+                changes = diffWordsWithSpace(clean1, clean2, {
                     ignoreCase: false
                 });
+                break;
             case 'chars':
-                return diffChars(content1, content2);
+                changes = diffChars(clean1, clean2);
+                break;
             case 'smart': {
                 // Smart diff: Perform line diff, then perform word diff on adjacent removed/added blocks
-                const changes = diffLines(content1, content2, {
+                changes = diffLines(clean1, clean2, {
                     ignoreWhitespace: false,
                 });
 
@@ -47,8 +61,6 @@ const diffEngine = {
                         });
                         
                         // Attach the word-level diffs to both the removed and added line blocks.
-                        // The UI will use these to highlight specific words within the lines.
-                        // We cast to any to attach the 'parts' property which is defined in our extended Change schema.
                         (current as any).parts = wordChanges;
                         (next as any).parts = wordChanges;
                         
@@ -56,11 +68,18 @@ const diffEngine = {
                         i++;
                     }
                 }
-                return changes;
+                break;
             }
             default:
                 throw new Error(`Unsupported diff type: ${type}`);
         }
+
+        // Serialize output to JSON and transfer buffer
+        const json = JSON.stringify(changes);
+        const uint8Array = encoder.encode(json);
+        // Cast to ArrayBuffer to satisfy TypeScript's Transferable requirement
+        const buffer = uint8Array.buffer as ArrayBuffer;
+        return transfer(buffer, [buffer]);
     }
 };
 
