@@ -76,12 +76,14 @@ const SECURITY_CONFIG = {
 
 /**
  * Regex patterns for security validation
+ * NOTE: XSS prevention is intentionally NOT implemented via input pattern matching.
+ * Proper XSS defense requires context-aware output encoding and Content Security Policy (CSP) headers.
+ * These patterns focus on other security concerns like prototype pollution and resource exhaustion.
  */
 const SECURITY_PATTERNS = {
   PROTO_POLLUTION: /(?:__proto__|constructor\.prototype|constructor\["prototype"\]|constructor\.constructor)/i,
   CONTROL_CHARS: /[\x00-\x1F\x7F-\x9F]/,
   EXCESSIVE_WHITESPACE: /\s{100,}/,
-  POTENTIAL_XSS: /<script|javascript:|on\w+\s*=|data:text\/html/i,
 } as const;
 
 /**
@@ -148,13 +150,6 @@ function validateAndSanitizeString(
   if (SECURITY_PATTERNS.PROTO_POLLUTION.test(str)) {
     throw new SecurityError(
       `Prototype pollution attempt detected in parameter: "${paramName}"`
-    );
-  }
-
-  // SECURITY: Potential XSS detection
-  if (SECURITY_PATTERNS.POTENTIAL_XSS.test(str)) {
-    throw new SecurityError(
-      `Potential XSS attempt detected in parameter: "${paramName}"`
     );
   }
 
