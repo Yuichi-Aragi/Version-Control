@@ -4,7 +4,7 @@
 
 #### 🐞 Bug Fixes
 
-* Fixed a bug where the plugin was not working because of a Dexie version conflict with another plugin.
+* Fixed a bug where the plugin was not working because of a Dexie version conflict with another plugin. Make sure to restart obsidian after updating this plugin.
 
 ***
 
