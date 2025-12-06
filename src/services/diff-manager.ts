@@ -1,6 +1,6 @@
 import { App, TFile, Component, MarkdownView } from 'obsidian';
 import { injectable, inject } from 'inversify';
-import { wrap, releaseProxy, type Remote } from 'comlink';
+import { wrap, releaseProxy, transfer, type Remote } from 'comlink';
 import { z } from 'zod';
 import { VersionManager } from '../core/version-manager';
 import type { DiffTarget, DiffWorkerApi, DiffType, Change } from '../types';
@@ -8,6 +8,7 @@ import { ChangeSchema } from '../schemas';
 import { PluginEvents } from '../core/plugin-events';
 import { TYPES } from '../types/inversify.types';
 import { LruCache } from '../utils/lru-cache';
+import { VersionContentRepository } from '../core/storage/version-content-repository';
 
 const DIFF_CACHE_CAPACITY = 50;
 const MAX_CONTENT_SIZE = 10 * 1024 * 1024; // 10MB limit
@@ -83,10 +84,12 @@ export class DiffManager extends Component {
     private isInitializing = false;
     private workerHealthMonitor = new WorkerHealthMonitor();
     private pendingOperations = new Set<Promise<any>>();
+    private decoder = new TextDecoder('utf-8');
 
     constructor(
         @inject(TYPES.App) private readonly app: App, 
-        @inject(TYPES.VersionManager) private readonly versionManager: VersionManager, 
+        @inject(TYPES.VersionManager) private readonly versionManager: VersionManager,
+        @inject(TYPES.VersionContentRepo) private readonly contentRepo: VersionContentRepository,
         @inject(TYPES.EventBus) private readonly eventBus: PluginEvents
     ) {
         super();
@@ -162,7 +165,10 @@ export class DiffManager extends Component {
         }
 
         try {
-            await this.workerProxy.computeDiff('lines', 'test', 'test');
+            const resultBuffer = await this.workerProxy.computeDiff('lines', 'test', 'test');
+            const json = this.decoder.decode(resultBuffer);
+            const changes = JSON.parse(json);
+            if (!Array.isArray(changes)) throw new Error("Worker returned invalid data");
         } catch (error) {
             throw new DiffManagerError(
                 `Worker test failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -216,7 +222,7 @@ export class DiffManager extends Component {
         this.invalidateCacheForNote(noteId);
     }
 
-    public async getContent(noteId: string, target: DiffTarget): Promise<string> {
+    public async getContent(noteId: string, target: DiffTarget): Promise<string | ArrayBuffer> {
         if (typeof noteId !== 'string' || noteId.trim() === '') {
             throw new DiffManagerError("Invalid noteId: must be a non-empty string", 'INVALID_NOTE_ID');
         }
@@ -238,9 +244,15 @@ export class DiffManager extends Component {
             if (activeMarkdownView?.file?.path === file.path && activeMarkdownView.getMode() === 'source') {
                 return activeMarkdownView.editor.getValue();
             } else {
-                return await this.app.vault.read(file);
+                // Optimize reading file on disk as binary for transfer
+                return await this.app.vault.adapter.readBinary(file.path);
             }
         } else {
+            // Try reading binary first for optimization
+            const buffer = await this.contentRepo.readBinary(noteId, target.id);
+            if (buffer) return buffer;
+
+            // Fallback to string read via VersionManager if binary fails (e.g. legacy logic)
             const content = await this.versionManager.getVersionContent(noteId, target.id);
             if (content === null) {
                 throw new DiffManagerError(`Could not retrieve content for version ${target.id}`, 'VERSION_CONTENT_NOT_FOUND');
@@ -253,26 +265,26 @@ export class DiffManager extends Component {
         noteId: string,
         version1Id: string,
         version2Id: string,
-        content1: string,
-        content2: string,
+        content1: string | ArrayBuffer,
+        content2: string | ArrayBuffer,
         diffType: DiffType
     ): Promise<Change[]> {
-        const params = { noteId, version1Id, version2Id, content1, content2, diffType };
+        const params = { noteId, version1Id, version2Id, diffType };
         z.object({
             noteId: z.string().min(1),
             version1Id: z.string().min(1),
             version2Id: z.string().min(1),
-            content1: z.string(),
-            content2: z.string(),
             diffType: z.enum(['lines', 'words', 'chars', 'smart']),
         }).parse(params);
 
-        if (content1.length > MAX_CONTENT_SIZE || content2.length > MAX_CONTENT_SIZE) {
+        const len1 = typeof content1 === 'string' ? content1.length : content1.byteLength;
+        const len2 = typeof content2 === 'string' ? content2.length : content2.byteLength;
+
+        if (len1 > MAX_CONTENT_SIZE || len2 > MAX_CONTENT_SIZE) {
             throw new DiffManagerError('Content size exceeds maximum allowed size', 'CONTENT_TOO_LARGE');
         }
 
-        const sanitizedContent1 = this.sanitizeInput(content1);
-        const sanitizedContent2 = this.sanitizeInput(content2);
+        // We rely on the worker to sanitize, as we might be passing ArrayBuffers.
         const cacheKey = this.getCacheKey(noteId, version1Id, version2Id, diffType);
 
         if (version2Id !== 'current' && await this.diffCache.has(cacheKey)) {
@@ -294,7 +306,7 @@ export class DiffManager extends Component {
         });
 
         try {
-            const diffOperation = this.createDiffOperationWithRetry(version2Id, sanitizedContent1, sanitizedContent2, diffType, cacheKey);
+            const diffOperation = this.createDiffOperationWithRetry(version2Id, content1, content2, diffType, cacheKey);
             return await Promise.race([diffOperation, timeoutPromise]);
         } catch (error) {
             this.workerHealthMonitor.recordError();
@@ -304,8 +316,8 @@ export class DiffManager extends Component {
 
     private async createDiffOperationWithRetry(
         version2Id: string,
-        content1: string,
-        content2: string,
+        content1: string | ArrayBuffer,
+        content2: string | ArrayBuffer,
         diffType: DiffType,
         cacheKey: string
     ): Promise<Change[]> {
@@ -313,11 +325,43 @@ export class DiffManager extends Component {
         
         for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
+                // Prepare transferables for this attempt
+                let c1 = content1;
+                let c2 = content2;
+                
+                // We need separate transfer lists for each argument to avoid DataCloneError (duplicates in transfer list)
+                // if we were to use a shared list. Comlink handles arguments individually.
+                const c1Transfer: Transferable[] = [];
+                const c2Transfer: Transferable[] = [];
+
+                if (content1 instanceof ArrayBuffer) {
+                    // Create a copy for this attempt so the original buffer remains available for retries
+                    c1 = content1.slice(0);
+                    c1Transfer.push(c1 as ArrayBuffer);
+                }
+                if (content2 instanceof ArrayBuffer) {
+                    c2 = content2.slice(0);
+                    c2Transfer.push(c2 as ArrayBuffer);
+                }
+
                 const startTime = performance.now();
-                const changes = await this.workerProxy!.computeDiff(diffType, content1, content2);
+                
+                // Call worker with transfer
+                // Note: transfer() expects the value as first arg, and array of transferables as second.
+                // We pass distinct transfer lists for each argument to prevent ambiguity or duplication issues in Comlink.
+                const resultBuffer = await this.workerProxy!.computeDiff(
+                    diffType, 
+                    c1Transfer.length > 0 ? transfer(c1, c1Transfer) : c1, 
+                    c2Transfer.length > 0 ? transfer(c2, c2Transfer) : c2
+                );
+                
                 const duration = performance.now() - startTime;
                 this.workerHealthMonitor.recordOperation(duration);
                 
+                // Deserialize result
+                const json = this.decoder.decode(resultBuffer);
+                const changes = JSON.parse(json);
+
                 z.array(ChangeSchema).parse(changes);
                 
                 if (version2Id !== 'current') {
@@ -339,12 +383,7 @@ export class DiffManager extends Component {
         throw new DiffManagerError(`Diff operation failed after ${MAX_RETRIES} attempts`, 'DIFF_OPERATION_FAILED', { originalError: lastError });
     }
 
-    private sanitizeInput(input: string): string {
-        return input.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
-    }
-
     private getCacheKey(noteId: string, id1: string, id2: string, diffType: DiffType): string {
-        // The order of id1 and id2 is significant for a diff. Do not sort them.
         return `${noteId}:${id1}:${id2}:${diffType}`;
     }
 
