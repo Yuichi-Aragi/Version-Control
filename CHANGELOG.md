@@ -1,5 +1,13 @@
 ***
 
+**Version: 1.9.31**
+
+#### 🐞 Bug Fixes
+
+* Fixed: Failure to save version due to "potential xss attempt" 
+
+***
+
 **Version: 1.9.30**
 
 #### 🐞 Bug Fixes
