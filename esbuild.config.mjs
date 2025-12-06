@@ -19,19 +19,19 @@ const fileExists = (filePath) => {
 };
 
 /**
- * Builds the diff worker into a string.
+ * Builds a worker file into a string.
  * This is done in memory and the result is used in the main build.
+ * @param {string} entryPoint - The path to the worker entry file.
  * @returns {Promise<string>} A promise that resolves to the bundled worker code.
  */
-async function buildWorkerCode() {
-  const workerEntryPoint = 'src/workers/diff.worker.ts';
-  if (!fileExists(workerEntryPoint)) {
-    console.warn("Worker entry point not found, skipping worker build.");
+async function buildWorkerCode(entryPoint) {
+  if (!fileExists(entryPoint)) {
+    console.warn(`Worker entry point not found: ${entryPoint}, skipping worker build.`);
     return "";
   }
 
   const result = await esbuild.build({
-    entryPoints: [workerEntryPoint],
+    entryPoints: [entryPoint],
     bundle: true,
     minify: true,
     format: 'iife', // self-contained immediate-invoked function expression
@@ -41,7 +41,7 @@ async function buildWorkerCode() {
   if (result.outputFiles && result.outputFiles.length > 0) {
     return result.outputFiles[0].text;
   }
-  throw new Error('esbuild did not produce an output file for the worker.');
+  throw new Error(`esbuild did not produce an output file for the worker: ${entryPoint}`);
 }
 
 /**
@@ -49,8 +49,9 @@ async function buildWorkerCode() {
  * @returns {Promise<import('esbuild').BuildOptions>} A promise that resolves to the build options.
  */
 async function createBuildOptions() {
-  // 1. Build the worker and get its code as a string.
-  const workerCode = await buildWorkerCode();
+  // 1. Build the workers and get their code as strings.
+  const diffWorkerCode = await buildWorkerCode('src/workers/diff.worker.ts');
+  const timelineWorkerCode = await buildWorkerCode('src/workers/timeline.worker.ts');
 
   const entryPoints = ["src/main.ts"];
   if (fileExists("src/styles.css")) {
@@ -72,10 +73,11 @@ async function createBuildOptions() {
     minifyIdentifiers: true,
     minifySyntax: true,
     outdir: ".",
-    // 2. Define the global constant. `JSON.stringify` ensures the code is correctly
+    // 2. Define the global constants. `JSON.stringify` ensures the code is correctly
     // escaped and wrapped in quotes to be a valid string in the final bundle.
     define: {
-      "diffWorkerString": JSON.stringify(workerCode),
+      "diffWorkerString": JSON.stringify(diffWorkerCode),
+      "timelineWorkerString": JSON.stringify(timelineWorkerCode),
     },
   };
 }
