@@ -11,6 +11,7 @@ import type { ManifestManager } from './core/manifest-manager';
 import type { DiffManager } from './services/diff-manager';
 import type { BackgroundTaskManager } from './core/tasks/BackgroundTaskManager';
 import type { TimelineManager } from './core/timeline-manager';
+import type { CompressionManager } from './core/compression-manager';
 import { configureServices } from './inversify.config';
 import { registerViews, addRibbonIcon, registerCommands } from './setup/UISetup';
 import { registerSystemEventListeners } from './setup/EventSetup';
@@ -97,10 +98,11 @@ export default class VersionControlPlugin extends Plugin {
             this.backgroundTaskManager = this.container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
             const timelineManager = this.container.get<TimelineManager>(TYPES.TimelineManager);
             const eventBus = this.container.get<PluginEvents>(TYPES.EventBus);
+            const compressionManager = this.container.get<CompressionManager>(TYPES.CompressionManager);
 
             // Validate critical services
             if (!this.store || !this.cleanupManager || !uiService || !manifestManager || 
-                !diffManager || !this.backgroundTaskManager || !timelineManager || !eventBus) {
+                !diffManager || !this.backgroundTaskManager || !timelineManager || !eventBus || !compressionManager) {
                 throw new Error("One or more critical services failed to initialize");
             }
 
@@ -109,6 +111,7 @@ export default class VersionControlPlugin extends Plugin {
 
             this.cleanupManager.initialize();
             timelineManager.initialize();
+            compressionManager.initialize();
             
             this.addChild(this.cleanupManager);
             this.addChild(uiService); 
@@ -178,6 +181,11 @@ export default class VersionControlPlugin extends Plugin {
             //  - Event listeners registered in components.
             //  - Caches cleared via `component.register(() => cache.clear())`.
             //  - Intervals cleared in component `onunload` methods.
+
+            const compressionManager = this.container?.get<CompressionManager>(TYPES.CompressionManager);
+            if (compressionManager) {
+                compressionManager.terminate();
+            }
 
             // 4. Manually clean up the dependency injection container and its non-component services.
             await this.cleanupContainer();

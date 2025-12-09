@@ -22,6 +22,8 @@ import { UIService } from './services/ui-service';
 import { BackgroundTaskManager } from './core/tasks/BackgroundTaskManager';
 import { StorageService } from './core/storage/storage-service';
 import { EditHistoryManager } from './core/edit-history-manager';
+import { CompressionManager } from "./core/compression-manager";
+
 
 export function configureServices(plugin: VersionControlPlugin): Container {
   const container = new Container({
@@ -52,6 +54,8 @@ export function configureServices(plugin: VersionControlPlugin): Container {
   container.bind<VersionManager>(TYPES.VersionManager).to(VersionManager);
   container.bind<TimelineManager>(TYPES.TimelineManager).to(TimelineManager);
   container.bind<EditHistoryManager>(TYPES.EditHistoryManager).to(EditHistoryManager);
+  
+  container.bind<CompressionManager>(TYPES.CompressionManager).to(CompressionManager);
   
   // Task Managers
   container.bind<CleanupManager>(TYPES.CleanupManager).to(CleanupManager);

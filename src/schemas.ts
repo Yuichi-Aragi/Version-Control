@@ -77,6 +77,7 @@ export const VersionControlSettingsSchema = z.object({
     legacyNoteIdFrontmatterKeys: z.array(z.string()).optional().default([]),
     keyUpdatePathFilters: z.array(z.string()).optional().default([]),
     defaultExportFormat: z.enum(['md', 'json', 'ndjson', 'txt']).optional().default('md'),
+    enableCompression: z.boolean().optional().default(true),
     
     // Deprecated at top level, but kept for migration/compatibility if needed
     autoRegisterNotes: z.boolean().optional().default(false),
@@ -104,6 +105,8 @@ export const BranchSchema = z.object({
         name: z.string().optional(),
         description: z.string().optional(),
         size: z.number(),
+        compressedSize: z.number().optional(),
+        uncompressedSize: z.number().optional(),
         wordCount: z.number().optional(),
         wordCountWithMd: z.number().optional(),
         charCount: z.number().optional(),
@@ -139,6 +142,8 @@ export const VersionHistoryEntrySchema = z.object({
     name: z.string().optional(),
     description: z.string().optional(),
     size: z.number(),
+    compressedSize: z.number().optional(),
+    uncompressedSize: z.number().optional(),
     wordCount: z.number().optional(),
     wordCountWithMd: z.number().optional(),
     charCount: z.number().optional(),

@@ -62,6 +62,25 @@ export interface DiffWorkerApi {
 }
 
 /**
+ * Defines the API exposed by the compression web worker.
+ */
+export interface CompressionWorkerApi {
+    /**
+     * Compresses content using GZIP.
+     * Accepts string or ArrayBuffer.
+     * Returns ArrayBuffer (GZIP binary) via transfer.
+     */
+    compress(content: string | ArrayBuffer): Promise<ArrayBuffer>;
+
+    /**
+     * Decompresses GZIP content.
+     * Accepts ArrayBuffer.
+     * Returns string.
+     */
+    decompress(content: ArrayBuffer): Promise<string>;
+}
+
+/**
  * Defines the API exposed by the timeline web worker.
  * Handles both IndexedDB interactions and diff computation for timeline events.
  * 

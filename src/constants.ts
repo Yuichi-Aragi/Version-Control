@@ -21,6 +21,7 @@ export const DEFAULT_SETTINGS: VersionControlSettings = VersionControlSettingsSc
   defaultExportFormat: 'md',
   autoRegisterNotes: false, // Deprecated/Fallback
   pathFilters: [], // Deprecated/Fallback
+  enableCompression: true,
   centralManifest: {
     version: "1.0.0",
     notes: {},
