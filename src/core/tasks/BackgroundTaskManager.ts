@@ -2,248 +2,226 @@ import { injectable, inject } from 'inversify';
 import { Component } from 'obsidian';
 import type { AppStore } from '../../state/store';
 import { thunks } from '../../state/thunks';
-import { AppStatus, type AppState } from '../../state/state';
+import { AppStatus } from '../../state/state';
 import { actions } from '../../state/appSlice';
 import { TYPES } from '../../types/inversify.types';
+import type { ManifestManager } from '../manifest-manager';
+import type { EditHistoryManager } from '../edit-history-manager';
+import type VersionControlPlugin from '../../main';
+import type { HistorySettings } from '../../types';
 
 /**
- * Type-safe interval ID wrapper
- */
-class IntervalId {
-  private constructor(private readonly id: number) {}
-
-  public static from(id: number): IntervalId {
-    if (!Number.isInteger(id) || id < 0) {
-      throw new Error(`Invalid interval ID: ${id}`);
-    }
-    return new IntervalId(id);
-  }
-
-  public getValue(): number {
-    return this.id;
-  }
-}
-
-/**
- * Manages periodic background tasks for the plugin, such as
- * watch mode auto-saving. It is stateful and ensures that intervals are not
- * needlessly reset.
- * Extends Component to tie its lifecycle to the plugin's.
+ * Manages periodic background tasks for the plugin, specifically watch mode auto-saving.
+ * 
+ * It handles:
+ * 1. Dual-mode tracking: Runs separate timers for Version History and Edit History.
+ * 2. Context isolation: Only runs for the active note ID.
+ * 3. Settings isolation: Resolves settings specifically for the active note's active branch.
+ * 4. UI Feedback: Updates the countdown timer based on the currently active view mode.
  */
 @injectable()
 export class BackgroundTaskManager extends Component {
-  private watchModeIntervalId: IntervalId | null = null;
-  private watchModeCountdownIntervalId: IntervalId | null = null;
+  private timerId: number | null = null;
+  
+  // The note ID we are currently tracking
+  private activeNoteId: string | null = null;
+  
+  // Target timestamps for next save (in milliseconds)
+  private nextVersionSaveTime: number | null = null;
+  private nextEditSaveTime: number | null = null;
+  
+  // Cached intervals (in milliseconds) derived from settings
+  private versionInterval: number | null = null;
+  private editInterval: number | null = null;
 
-  // State to track the currently active interval's context
-  private activeIntervalNoteId: string | null = null;
-  private activeIntervalSeconds: number | null = null;
-  private lastSyncTime: number = 0;
-  private readonly MIN_SYNC_INTERVAL = 100; // Minimum time between syncs in ms
-
-  constructor(@inject(TYPES.Store) private readonly store: AppStore) {
+  constructor(
+    @inject(TYPES.Store) private readonly store: AppStore,
+    @inject(TYPES.ManifestManager) private readonly manifestManager: ManifestManager,
+    @inject(TYPES.EditHistoryManager) private readonly editHistoryManager: EditHistoryManager,
+    @inject(TYPES.Plugin) private readonly plugin: VersionControlPlugin
+  ) {
     super();
-    this.validateDependencies();
   }
 
-  /**
-   * Validates all injected dependencies
-   */
-  private validateDependencies(): void {
-    if (!this.store) {
-      throw new Error('AppStore dependency is required');
-    }
-    if (typeof this.store.getState !== 'function') {
-      throw new Error('AppStore must implement getState method');
-    }
-    if (typeof this.store.dispatch !== 'function') {
-      throw new Error('AppStore must implement dispatch method');
-    }
-  }
-
-  /**
-   * This method is called automatically by Obsidian when the plugin unloads.
-   */
   public override onunload(): void {
-    this.stopIntervals();
+    this.stopTimer();
   }
 
   /**
-   * Synchronizes the watch mode state. It checks the current app state and settings,
-   * and then starts, stops, or updates the watch mode interval to match.
-   * This is the main entry point to be called when context (active note, settings) might have changed.
+   * Synchronizes the watch mode state with the current application state.
+   * This should be called whenever:
+   * - The active note changes
+   * - Settings change
+   * - A save occurs (to reset timers)
    */
-  public syncWatchMode(): void {
-    // Throttle sync calls to prevent excessive processing
-    const now = Date.now();
-    if (now - this.lastSyncTime < this.MIN_SYNC_INTERVAL) {
+  public async syncWatchMode(): Promise<void> {
+    const state = this.store.getState();
+    const currentNoteId = state.noteId;
+
+    // If no active note or app not ready, stop everything
+    if (!currentNoteId || state.status !== AppStatus.READY) {
+      this.stopTimer();
+      this.activeNoteId = null;
+      this.store.dispatch(actions.setWatchModeCountdown(null));
       return;
     }
-    this.lastSyncTime = now;
 
-    try {
-      const state = this.store.getState() as any as AppState;
-      this.validateState(state);
+    // If the note context changed, reset all timers
+    if (this.activeNoteId !== currentNoteId) {
+      this.activeNoteId = currentNoteId;
+      this.nextVersionSaveTime = null;
+      this.nextEditSaveTime = null;
+    }
 
-      const shouldBeRunning = this.shouldWatchModeRun(state);
-      const isRunning = this.watchModeIntervalId !== null;
+    // Resolve settings for both modes independently for the active note
+    const versionSettings = await this.resolveSettings(currentNoteId, 'version');
+    const editSettings = await this.resolveSettings(currentNoteId, 'edit');
 
-      if (shouldBeRunning) {
-        const currentNoteId = state.noteId!; // Safe due to validation
-        const currentIntervalSeconds = state.effectiveSettings.watchModeInterval;
-
-        // Validate interval value
-        if (!Number.isInteger(currentIntervalSeconds) || currentIntervalSeconds <= 0) {
-          console.error('Invalid watch mode interval:', currentIntervalSeconds);
-          this.stopIntervals();
-          return;
-        }
-
-        // If it's already running for the correct note and with the correct interval, do nothing.
-        if (isRunning && 
-            this.activeIntervalNoteId === currentNoteId && 
-            this.activeIntervalSeconds === currentIntervalSeconds) {
-          return;
-        }
-
-        // Otherwise, the state is out of sync. Stop the old one (if any) and start the new one.
-        this.stopIntervals();
-        this.startIntervals(currentNoteId, currentIntervalSeconds);
-
-      } else {
-        // It should not be running. If it is, stop it.
-        if (isRunning) {
-          this.stopIntervals();
-        }
+    // --- Setup Version Watch ---
+    if (versionSettings.enableWatchMode) {
+      this.versionInterval = versionSettings.watchModeInterval * 1000;
+      // Initialize next save time if not already set
+      if (this.nextVersionSaveTime === null) {
+        this.nextVersionSaveTime = Date.now() + this.versionInterval;
       }
-    } catch (error) {
-      console.error('Error in syncWatchMode:', error);
-      // Ensure intervals are stopped on error
-      this.stopIntervals();
+    } else {
+      this.versionInterval = null;
+      this.nextVersionSaveTime = null;
     }
-  }
 
-  /**
-   * Validates the app state structure
-   */
-  private validateState(state: AppState): void {
-    if (!state) {
-      throw new Error('App state is undefined');
-    }
-    if (!state.effectiveSettings) {
-      throw new Error('Effective settings are undefined in app state');
-    }
-    if (typeof state.effectiveSettings.enableWatchMode !== 'boolean') {
-      throw new Error('enableWatchMode setting must be a boolean');
-    }
-    if (typeof state.effectiveSettings.watchModeInterval !== 'number') {
-      throw new Error('watchModeInterval setting must be a number');
-    }
-  }
-
-  /**
-   * Determines if watch mode should be running based on current state
-   */
-  private shouldWatchModeRun(state: AppState): boolean {
-    return state.effectiveSettings.enableWatchMode && 
-           state.status === AppStatus.READY && 
-           !!state.noteId;
-  }
-
-  private startIntervals(noteId: string, intervalSeconds: number): void {
-    try {
-      // Validate inputs
-      if (!noteId || typeof noteId !== 'string') {
-        throw new Error('Invalid note ID provided');
+    // --- Setup Edit Watch ---
+    if (editSettings.enableWatchMode) {
+      this.editInterval = editSettings.watchModeInterval * 1000;
+      // Initialize next save time if not already set
+      if (this.nextEditSaveTime === null) {
+        this.nextEditSaveTime = Date.now() + this.editInterval;
       }
-      if (!Number.isInteger(intervalSeconds) || intervalSeconds <= 0) {
-        throw new Error('Invalid interval seconds provided');
-      }
-
-      // Store the context of the new interval
-      this.activeIntervalNoteId = noteId;
-      this.activeIntervalSeconds = intervalSeconds;
-      const intervalMs = intervalSeconds * 1000;
-
-      // Validate intervalMs isn't too small (could cause performance issues)
-      if (intervalMs < 1000) {
-        console.warn('Watch mode interval is very small (< 1s), this may impact performance');
-      }
-
-      this.watchModeIntervalId = IntervalId.from(window.setInterval(() => {
-        this.handleWatchModeTick();
-      }, intervalMs));
-
-      // UI Countdown timer
-      this.startCountdownTimer(intervalSeconds);
-    } catch (error) {
-      console.error('Error starting intervals:', error);
-      this.stopIntervals();
+    } else {
+      this.editInterval = null;
+      this.nextEditSaveTime = null;
     }
-  }
 
-  private handleWatchModeTick(): void {
-    try {
-      // Re-check conditions inside the interval callback to ensure context hasn't changed.
-      const currentState = this.store.getState() as any as AppState;
-      
-      if (currentState.status === AppStatus.READY && 
-          !currentState.isProcessing && 
-          currentState.noteId === this.activeIntervalNoteId) {
-        this.store.dispatch(thunks.saveNewVersion({ isAuto: true }));
-      }
-    } catch (error) {
-      console.error('Error in watch mode tick:', error);
-      // Don't stop the interval on error, just log it
-    }
-  }
-
-  private startCountdownTimer(intervalSeconds: number): void {
-    let countdown = intervalSeconds;
-    this.store.dispatch(actions.setWatchModeCountdown(countdown)); // Initial value
-    
-    try {
-      this.watchModeCountdownIntervalId = IntervalId.from(window.setInterval(() => {
-        countdown--;
-        if (countdown < 0) {
-          // Use stored value to reset, in case settings changed but interval hasn't restarted yet
-          countdown = this.activeIntervalSeconds ?? intervalSeconds; 
-        }
-        this.store.dispatch(actions.setWatchModeCountdown(countdown));
-      }, 1000));
-    } catch (error) {
-      console.error('Error starting countdown timer:', error);
+    // Start or Stop the main tick timer
+    if (this.versionInterval !== null || this.editInterval !== null) {
+      this.startTimer();
+    } else {
+      this.stopTimer();
       this.store.dispatch(actions.setWatchModeCountdown(null));
     }
   }
 
-  private stopIntervals(): void {
-    try {
-      if (this.watchModeIntervalId !== null) {
-        window.clearInterval(this.watchModeIntervalId.getValue());
-        this.watchModeIntervalId = null;
-      }
-      if (this.watchModeCountdownIntervalId !== null) {
-        window.clearInterval(this.watchModeCountdownIntervalId.getValue());
-        this.watchModeCountdownIntervalId = null;
-      }
-      
-      // Reset tracking state
-      this.activeIntervalNoteId = null;
-      this.activeIntervalSeconds = null;
+  private startTimer() {
+    if (this.timerId !== null) return;
+    // Run tick every second to update UI and check triggers
+    this.timerId = window.setInterval(() => this.tick(), 1000);
+    this.tick(); // Immediate update
+  }
 
-      // Clear from UI if it hasn't been cleared already
-      const currentState = this.store.getState() as any as AppState;
-      if (currentState.watchModeCountdown !== null) {
-        this.store.dispatch(actions.setWatchModeCountdown(null));
-      }
-    } catch (error) {
-      console.error('Error stopping intervals:', error);
-      // Force reset state even if cleanup fails
-      this.watchModeIntervalId = null;
-      this.watchModeCountdownIntervalId = null;
-      this.activeIntervalNoteId = null;
-      this.activeIntervalSeconds = null;
+  private stopTimer() {
+    if (this.timerId !== null) {
+      window.clearInterval(this.timerId);
+      this.timerId = null;
+    }
+  }
+
+  private tick() {
+    const now = Date.now();
+    const state = this.store.getState();
+    
+    // Safety check: Ensure context hasn't drifted
+    if (state.noteId !== this.activeNoteId || state.status !== AppStatus.READY) {
+      this.stopTimer();
+      return;
+    }
+
+    // --- Handle Version Save Trigger ---
+    if (this.nextVersionSaveTime !== null && now >= this.nextVersionSaveTime) {
+      this.triggerVersionSave();
+      // Reset timer
+      this.nextVersionSaveTime = now + (this.versionInterval || 60000);
+    }
+
+    // --- Handle Edit Save Trigger ---
+    if (this.nextEditSaveTime !== null && now >= this.nextEditSaveTime) {
+      this.triggerEditSave();
+      // Reset timer
+      this.nextEditSaveTime = now + (this.editInterval || 60000);
+    }
+
+    // --- Update UI Countdown ---
+    // We only show the countdown for the *currently active* view mode.
+    let countdown: number | null = null;
+    
+    if (state.viewMode === 'versions' && this.nextVersionSaveTime !== null) {
+      countdown = Math.ceil((this.nextVersionSaveTime - now) / 1000);
+    } else if (state.viewMode === 'edits' && this.nextEditSaveTime !== null) {
+      countdown = Math.ceil((this.nextEditSaveTime - now) / 1000);
+    }
+    
+    // Dispatch only if changed to avoid Redux noise
+    if (state.watchModeCountdown !== countdown) {
+      this.store.dispatch(actions.setWatchModeCountdown(countdown));
+    }
+  }
+
+  private async triggerVersionSave() {
+    if (!this.activeNoteId) return;
+    
+    // Resolve fresh settings to ensure we pass the correct configuration to the thunk.
+    // This ensures that the save respects the active branch's settings.
+    const settings = await this.resolveSettings(this.activeNoteId, 'version');
+    
+    // Merge with global settings (for ID formats, etc.)
+    const hybridSettings = { ...this.plugin.settings, ...settings };
+    
+    this.store.dispatch(thunks.saveNewVersion({ isAuto: true, settings: hybridSettings }));
+  }
+
+  private async triggerEditSave() {
+    if (!this.activeNoteId) return;
+    // Edit save logic is simpler and mostly self-contained, but we trigger it as auto.
+    this.store.dispatch(thunks.saveNewEdit(true));
+  }
+
+  /**
+   * Resolves settings for a specific note and type, respecting the active branch
+   * and global/local overrides. This duplicates logic from settingsUtils to ensure
+   * isolation and independence from the global 'effectiveSettings' state.
+   */
+  private async resolveSettings(noteId: string, type: 'version' | 'edit'): Promise<HistorySettings> {
+    const globalDefaults = type === 'version' 
+        ? this.plugin.settings.versionHistorySettings 
+        : this.plugin.settings.editHistorySettings;
+
+    const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
+    if (!noteManifest) return { ...globalDefaults, isGlobal: true };
+
+    const currentBranch = noteManifest.currentBranch;
+    let perBranchSettings: Partial<HistorySettings> | undefined;
+
+    // Helper to filter out undefined values for exactOptionalPropertyTypes compatibility
+    const filterDefinedSettings = (settings: Record<string, unknown> | undefined): Partial<HistorySettings> | undefined => {
+        if (!settings) return undefined;
+        return Object.fromEntries(
+            Object.entries(settings).filter(([, v]) => v !== undefined)
+        ) as Partial<HistorySettings>;
+    };
+
+    if (type === 'version') {
+        perBranchSettings = filterDefinedSettings(noteManifest.branches[currentBranch]?.settings);
+    } else {
+        const editManifest = await this.editHistoryManager.getEditManifest(noteId);
+        perBranchSettings = filterDefinedSettings(editManifest?.branches[currentBranch]?.settings);
+    }
+
+    const isUnderGlobalInfluence = perBranchSettings?.isGlobal !== false;
+    if (isUnderGlobalInfluence) {
+        return { ...globalDefaults, isGlobal: true };
+    } else {
+         const definedBranchSettings = Object.fromEntries(
+            Object.entries(perBranchSettings ?? {}).filter(([, v]) => v !== undefined)
+        );
+        return { ...globalDefaults, ...definedBranchSettings, isGlobal: false };
     }
   }
 }
