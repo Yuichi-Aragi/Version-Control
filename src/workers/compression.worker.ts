@@ -20,7 +20,8 @@ const api = {
             const data = typeof content === 'string' ? strToU8(content) : new Uint8Array(content);
             // Use mtime: 0 for deterministic output (reproducible builds/hashes)
             const compressed = gzipSync(data, { mtime: 0 });
-            return transfer(compressed.buffer, [compressed.buffer]);
+            const buffer = compressed.buffer.slice(0) as ArrayBuffer;
+            return transfer(buffer, [buffer]);
         } catch (error) {
             console.error("Compression Worker: Failed to compress", error);
             throw new Error(`Compression failed: ${error instanceof Error ? error.message : String(error)}`);

@@ -53,8 +53,8 @@ class WorkerError extends Error {
     }
 }
 
-// Type-safe error codes
-type WorkerErrorCode = 
+// Type-safe error codes (exported for external use)
+export type WorkerErrorCode =
     | 'INVALID_INPUT'
     | 'CONTENT_TOO_LARGE'
     | 'DECODING_FAILED'
@@ -108,7 +108,7 @@ class InternalTimelineDB extends Dexie {
 
         // Performance optimization hooks
         this.on('populate', () => {
-            this.timeline.hook('creating', (primKey, obj) => {
+            this.timeline.hook('creating', (_primKey, obj) => {
                 // Validate during creation
                 validateStoredEventStructure(obj);
             });

@@ -4,16 +4,115 @@ import { expose, transfer } from 'comlink';
 import { Dexie, type Table } from 'dexie';
 import { createPatch, applyPatch } from 'diff';
 import { compressSync, decompressSync, strToU8, strFromU8 } from 'fflate';
+import { produce, freeze, enableMapSet } from 'immer';
+import * as v from 'valibot';
+import { isEqual, sortBy } from 'es-toolkit';
 import type { NoteManifest } from '../types';
 
-// --- Constants & Configuration ---
-const MAX_CHAIN_LENGTH = 50;
-const DIFF_SIZE_THRESHOLD = 0.8;
-const DB_NAME = 'VersionControlEditHistoryDB';
-const COMPRESSION_LEVEL = 9; // Balanced compression (0-9)
-const MAX_CONTENT_SIZE = 50 * 1024 * 1024; // 50MB safety limit
+// Enable immer Map/Set support for immutable collections
+enableMapSet();
 
-// --- Types & Interfaces ---
+// --- Constants & Configuration (Frozen) ---
+const CONFIG = freeze({
+    MAX_CHAIN_LENGTH: 50,
+    DIFF_SIZE_THRESHOLD: 0.8,
+    DB_NAME: 'VersionControlEditHistoryDB',
+    COMPRESSION_LEVEL: 9,
+    MAX_CONTENT_SIZE: 50 * 1024 * 1024,
+    MAX_ID_LENGTH: 255,
+    MAX_RETRIES: 3,
+    RETRY_BASE_DELAY_MS: 10,
+    HASH_ALGORITHM: 'SHA-256'
+} as const);
+
+// --- Valibot Schemas (Type-Safe Validation) ---
+const NoteIdSchema = v.pipe(
+    v.string('noteId must be a string'),
+    v.nonEmpty('noteId cannot be empty'),
+    v.maxLength(CONFIG.MAX_ID_LENGTH, `noteId cannot exceed ${CONFIG.MAX_ID_LENGTH} characters`),
+    v.transform((s: string): string => s.trim().replace(/\0/g, ''))
+);
+
+const BranchNameSchema = v.pipe(
+    v.string('branchName must be a string'),
+    v.nonEmpty('branchName cannot be empty'),
+    v.maxLength(CONFIG.MAX_ID_LENGTH, `branchName cannot exceed ${CONFIG.MAX_ID_LENGTH} characters`),
+    v.transform((s: string): string => s.trim().replace(/\0/g, ''))
+);
+
+const EditIdSchema = v.pipe(
+    v.string('editId must be a string'),
+    v.nonEmpty('editId cannot be empty'),
+    v.maxLength(CONFIG.MAX_ID_LENGTH, `editId cannot exceed ${CONFIG.MAX_ID_LENGTH} characters`),
+    v.transform((s: string): string => s.trim().replace(/\0/g, ''))
+);
+
+const PathSchema = v.pipe(
+    v.string('path must be a string'),
+    v.transform((s: string): string => s.trim())
+);
+
+const StringContentSchema = v.pipe(
+    v.string('content must be a string'),
+    v.maxLength(CONFIG.MAX_CONTENT_SIZE, `content cannot exceed ${CONFIG.MAX_CONTENT_SIZE} bytes`)
+);
+
+const ArrayBufferContentSchema = v.pipe(
+    v.instance(ArrayBuffer, 'content must be an ArrayBuffer'),
+    v.check(
+        (b: ArrayBuffer): boolean => b.byteLength <= CONFIG.MAX_CONTENT_SIZE,
+        `content cannot exceed ${CONFIG.MAX_CONTENT_SIZE} bytes`
+    )
+);
+
+const ContentSchema = v.union([StringContentSchema, ArrayBufferContentSchema]);
+
+const VersionInfoSchema = v.object({
+    versionNumber: v.number(),
+    timestamp: v.string(),
+    size: v.number(),
+    name: v.optional(v.string()),
+    description: v.optional(v.string()),
+    compressedSize: v.optional(v.number()),
+    uncompressedSize: v.optional(v.number()),
+    contentHash: v.optional(v.string()),
+    wordCount: v.optional(v.number()),
+    wordCountWithMd: v.optional(v.number()),
+    charCount: v.optional(v.number()),
+    charCountWithMd: v.optional(v.number()),
+    lineCount: v.optional(v.number()),
+    lineCountWithoutMd: v.optional(v.number()),
+});
+
+const TimelineSettingsSchema = v.object({
+    showDescription: v.boolean(),
+    showName: v.boolean(),
+    showVersionNumber: v.boolean(),
+    expandByDefault: v.boolean(),
+});
+
+const BranchInfoSchema = v.object({
+    versions: v.record(v.string(), VersionInfoSchema),
+    totalVersions: v.number(),
+    settings: v.optional(v.record(v.string(), v.unknown())),
+    state: v.optional(v.object({
+        content: v.string(),
+        cursor: v.object({ line: v.number(), ch: v.number() }),
+        scroll: v.object({ left: v.number(), top: v.number() }),
+    })),
+    timelineSettings: v.optional(TimelineSettingsSchema),
+});
+
+const ManifestSchema = v.object({
+    noteId: v.pipe(v.string(), v.nonEmpty()),
+    notePath: v.string(),
+    currentBranch: v.string(),
+    branches: v.record(v.string(), BranchInfoSchema),
+    createdAt: v.string(),
+    lastModified: v.string()
+});
+
+// --- Types & Interfaces (Immutable by convention) ---
 type StorageType = 'full' | 'diff';
 
 interface StoredEdit {
@@ -22,25 +121,59 @@ interface StoredEdit {
     branchName: string;
     editId: string;
     content: ArrayBuffer;
+    contentHash: string;
     storageType: StorageType;
     baseEditId?: string;
     previousEditId?: string;
     chainLength: number;
     createdAt: number;
     size: number;
+    uncompressedSize: number;
 }
 
 interface StoredManifest {
-    noteId: string;
-    manifest: NoteManifest;
-    updatedAt: number;
+    readonly noteId: string;
+    readonly manifest: NoteManifest;
+    readonly updatedAt: number;
 }
 
-// --- Validation & Security Utilities ---
+interface ReconstructionResult {
+    readonly content: string;
+    readonly hash: string;
+    readonly verified: boolean;
+}
+
+interface PreviousEditContext {
+    readonly editId: string;
+    readonly content: string;
+    readonly contentHash: string;
+    readonly baseEditId: string;
+    readonly chainLength: number;
+}
+
+interface DatabaseStats {
+    readonly editCount: number;
+    readonly manifestCount: number;
+    readonly activeKeys: readonly string[];
+}
+
+interface IntegrityCheckResult {
+    readonly valid: boolean;
+    readonly expectedHash: string;
+    readonly actualHash: string;
+}
+
+// --- Custom Error Classes (Immutable) ---
 class ValidationError extends Error {
-    constructor(message: string, public readonly field?: string) {
+    readonly field: string | undefined;
+    readonly issues: readonly v.BaseIssue<unknown>[] | undefined;
+
+    constructor(message: string, field?: string, issues?: readonly v.BaseIssue<unknown>[]) {
         super(message);
         this.name = 'ValidationError';
+        this.field = field;
+        this.issues = issues ? freeze([...issues]) : undefined;
+        Object.freeze(this);
     }
 }
 
@@ -48,6 +181,7 @@ class SecurityError extends Error {
     constructor(message: string) {
         super(message);
         this.name = 'SecurityError';
+        Object.freeze(this);
     }
 }
 
@@ -55,271 +189,283 @@ class StateConsistencyError extends Error {
     constructor(message: string) {
         super(message);
         this.name = 'StateConsistencyError';
+        Object.freeze(this);
     }
 }
 
-class InputValidator {
-    private static readonly MAX_ID_LENGTH = 255;
+class IntegrityError extends Error {
+    readonly expectedHash: string;
+    readonly actualHash: string;
 
-    static validateNoteId(noteId: unknown): string {
-        if (typeof noteId !== 'string') {
-            throw new ValidationError('noteId must be a string', 'noteId');
-        }
-        if (noteId.length === 0 || noteId.length > this.MAX_ID_LENGTH) {
-            throw new ValidationError(`noteId length must be between 1 and ${this.MAX_ID_LENGTH} characters`, 'noteId');
-        }
-        return noteId;
-    }
-
-    static validateBranchName(branchName: unknown): string {
-        if (typeof branchName !== 'string') {
-            throw new ValidationError('branchName must be a string', 'branchName');
-        }
-        if (branchName.length === 0 || branchName.length > this.MAX_ID_LENGTH) {
-            throw new ValidationError(`branchName length must be between 1 and ${this.MAX_ID_LENGTH} characters`, 'branchName');
-        }
-        return branchName;
-    }
-
-    static validateEditId(editId: unknown): string {
-        if (typeof editId !== 'string') {
-            throw new ValidationError('editId must be a string', 'editId');
-        }
-        if (editId.length === 0 || editId.length > this.MAX_ID_LENGTH) {
-            throw new ValidationError(`editId length must be between 1 and ${this.MAX_ID_LENGTH} characters`, 'editId');
-        }
-        return editId;
-    }
-
-    static validateContent(content: unknown): string | ArrayBuffer {
-        if (typeof content === 'string') {
-            if (content.length > MAX_CONTENT_SIZE) {
-                throw new ValidationError(`Content size exceeds maximum limit of ${MAX_CONTENT_SIZE} bytes`, 'content');
-            }
-            return content;
-        } else if (content instanceof ArrayBuffer) {
-            if (content.byteLength > MAX_CONTENT_SIZE) {
-                throw new ValidationError(`Content size exceeds maximum limit of ${MAX_CONTENT_SIZE} bytes`, 'content');
-            }
-            return content;
-        }
-        throw new ValidationError('content must be a string or ArrayBuffer', 'content');
-    }
-
-    static validateManifest(manifest: unknown): NoteManifest {
-        if (!manifest || typeof manifest !== 'object') {
-            throw new ValidationError('manifest must be an object', 'manifest');
-        }
-        // Basic structure validation - can be expanded based on NoteManifest type definition
-        const man = manifest as Partial<NoteManifest>;
-        if (!man.noteId || typeof man.noteId !== 'string') {
-            throw new ValidationError('manifest.noteId must be a non-empty string', 'manifest.noteId');
-        }
-        return manifest as NoteManifest;
-    }
-
-    static sanitizeString(input: string): string {
-        return input.trim().replace(/\0/g, ''); // Remove null characters
+    constructor(message: string, expectedHash: string, actualHash: string) {
+        super(message);
+        this.name = 'IntegrityError';
+        this.expectedHash = expectedHash;
+        this.actualHash = actualHash;
+        Object.freeze(this);
     }
 }
 
-// --- Database ---
+// --- Validation Utilities ---
+function validateInput<TSchema extends v.BaseSchema<unknown, unknown, v.BaseIssue<unknown>>>(
+    schema: TSchema,
+    input: unknown,
+    fieldName: string
+): v.InferOutput<TSchema> {
+    const result = v.safeParse(schema, input);
+    if (!result.success) {
+        const messages = result.issues.map((i) => i.message).join('; ');
+        throw new ValidationError(`Invalid ${fieldName}: ${messages}`, fieldName, result.issues);
+    }
+    return result.output;
+}
+
+// --- Hash Service (Cryptographic Integrity) ---
+class HashService {
+    private static readonly encoder = new TextEncoder();
+
+    static async computeHash(content: string): Promise<string> {
+        const data = this.encoder.encode(content);
+        const hashBuffer = await crypto.subtle.digest(CONFIG.HASH_ALGORITHM, data);
+        const hashArray = new Uint8Array(hashBuffer);
+        let hex = '';
+        for (let i = 0; i < hashArray.length; i++) {
+            hex += hashArray[i]!.toString(16).padStart(2, '0');
+        }
+        return hex;
+    }
+
+    static async verifyIntegrity(content: string, expectedHash: string): Promise<boolean> {
+        if (!expectedHash || expectedHash.length === 0) {
+            return true;
+        }
+        const actualHash = await this.computeHash(content);
+        return actualHash === expectedHash;
+    }
+}
+
+// --- Database (Dexie with Migrations) ---
 class EditHistoryDB extends Dexie {
-    public edits!: Table<StoredEdit, number>;
-    public manifests!: Table<StoredManifest, string>;
+    edits!: Table<StoredEdit, number>;
+    manifests!: Table<StoredManifest, string>;
 
     constructor() {
-        super(DB_NAME);
+        super(CONFIG.DB_NAME);
         this.configureDatabase();
     }
 
     private configureDatabase(): void {
-        // Version 1: Initial schema
         this.version(1).stores({
             edits: '++id, [noteId+editId], noteId',
             manifests: 'noteId'
         });
 
-        // Version 2: Add branch support
         this.version(2).stores({
             edits: '++id, [noteId+branchName+editId], [noteId+branchName], noteId, createdAt',
             manifests: 'noteId, updatedAt'
-        }).upgrade(tx => {
-            return tx.table('edits').toCollection().modify(edit => {
+        }).upgrade((tx) => {
+            return tx.table('edits').toCollection().modify((edit) => {
                 if (!edit.branchName) edit.branchName = 'main';
                 if (!edit.createdAt) edit.createdAt = Date.now();
                 if (!edit.storageType) edit.storageType = 'full';
-                if (!edit.chainLength) edit.chainLength = 0;
-                if (!edit.size) edit.size = edit.content.byteLength;
+                if (edit.chainLength === undefined) edit.chainLength = 0;
+                if (!edit.size) edit.size = edit.content?.byteLength ?? 0;
             });
         });
 
-        // Version 3: Add indices for better query performance
         this.version(3).stores({
             edits: '++id, [noteId+branchName+editId], [noteId+branchName], noteId, createdAt, [noteId+branchName+createdAt]',
             manifests: 'noteId, updatedAt'
         });
 
-        // Version 4: Add size index for cleanup operations
         this.version(4).stores({
             edits: '++id, [noteId+branchName+editId], [noteId+branchName], noteId, createdAt, size, [noteId+branchName+createdAt]',
             manifests: 'noteId, updatedAt'
+        });
+
+        this.version(5).stores({
+            edits: '++id, [noteId+branchName+editId], [noteId+branchName], noteId, createdAt, size, contentHash, [noteId+branchName+createdAt]',
+            manifests: 'noteId, updatedAt'
+        }).upgrade((tx) => {
+            return tx.table('edits').toCollection().modify((edit) => {
+                if (edit.contentHash === undefined) edit.contentHash = '';
+                if (edit.uncompressedSize === undefined) edit.uncompressedSize = 0;
+            });
         });
     }
 }
 
 const db = new EditHistoryDB();
 
-// --- Compression Utilities ---
+// --- Compression Service ---
 class CompressionService {
-    public static readonly textEncoder = new TextEncoder();
-    public static readonly textDecoder = new TextDecoder('utf-8');
+    static readonly textEncoder = new TextEncoder();
+    static readonly textDecoder = new TextDecoder('utf-8');
 
     static compressContent(content: string): ArrayBuffer {
+        if (content.length === 0) {
+            return new ArrayBuffer(0);
+        }
         try {
             const data = strToU8(content);
-            const compressed = compressSync(data, { level: COMPRESSION_LEVEL });
+            const compressed = compressSync(data, { level: CONFIG.COMPRESSION_LEVEL });
             return compressed.buffer.slice(
                 compressed.byteOffset,
                 compressed.byteOffset + compressed.byteLength
             ) as ArrayBuffer;
         } catch (error) {
-            throw new SecurityError(`Compression failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            const message = error instanceof Error ? error.message : 'Unknown compression error';
+            throw new SecurityError(`Compression failed: ${message}`);
         }
     }
 
     static decompressContent(buffer: ArrayBuffer): string {
+        if (buffer.byteLength === 0) {
+            return '';
+        }
         try {
-            if (buffer.byteLength === 0) {
-                throw new ValidationError('Cannot decompress empty buffer', 'buffer');
-            }
             const compressed = new Uint8Array(buffer);
             const decompressed = decompressSync(compressed);
             return strFromU8(decompressed);
         } catch (error) {
-            throw new SecurityError(`Decompression failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            const message = error instanceof Error ? error.message : 'Unknown decompression error';
+            throw new SecurityError(`Decompression failed: ${message}`);
         }
     }
 
     static async decompressLegacy(buffer: ArrayBuffer): Promise<string> {
+        if (buffer.byteLength === 0) {
+            return '';
+        }
         try {
-            if (buffer.byteLength === 0) {
-                throw new ValidationError('Cannot decompress empty legacy buffer', 'buffer');
-            }
             const stream = new Blob([buffer]).stream();
             const decompressed = stream.pipeThrough(new DecompressionStream('gzip'));
             const resultBuffer = await new Response(decompressed).arrayBuffer();
             return this.textDecoder.decode(resultBuffer);
         } catch (error) {
-            console.error("Legacy decompression failed", error);
-            throw new SecurityError("Failed to decompress legacy content");
+            const message = error instanceof Error ? error.message : 'Unknown legacy decompression error';
+            throw new SecurityError(`Legacy decompression failed: ${message}`);
         }
     }
 
     static async decompress(record: StoredEdit): Promise<string> {
         if (!record.storageType) {
-            // CRITICAL FIX: Wrap the async legacy decompression in Dexie.waitFor.
-            // This prevents the Dexie transaction from auto-committing when awaiting 
-            // the non-IndexedDB promise returned by decompressLegacy.
             return Dexie.waitFor(this.decompressLegacy(record.content));
         }
         return this.decompressContent(record.content);
     }
+
+    static getUncompressedSize(content: string): number {
+        return strToU8(content).length;
+    }
 }
 
-// --- Diff Utilities ---
+// --- Diff Service ---
 class DiffService {
     static createDiff(oldContent: string, newContent: string, editId: string): string {
-        if (!oldContent || !newContent) {
-            throw new ValidationError('Cannot create diff from empty content', 'content');
-        }
         try {
-            return createPatch(
-                `edit_${editId}`,
-                oldContent,
-                newContent,
-                '',
-                '',
-                { context: 3 }
-            );
+            return createPatch(`edit_${editId}`, oldContent, newContent, '', '', { context: 3 });
         } catch (error) {
-            throw new StateConsistencyError(`Diff creation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            const message = error instanceof Error ? error.message : 'Unknown diff creation error';
+            throw new StateConsistencyError(`Diff creation failed: ${message}`);
         }
     }
 
     static applyDiff(baseContent: string, patch: string): string {
-        if (!baseContent || !patch) {
-            throw new ValidationError('Cannot apply diff with empty parameters', 'parameters');
-        }
         try {
             const result = applyPatch(baseContent, patch);
             if (result === false) {
-                throw new StateConsistencyError("Failed to apply patch: mismatch or corruption detected");
+                throw new StateConsistencyError('Patch application failed: content mismatch or corruption');
             }
             return result;
         } catch (error) {
-            throw new StateConsistencyError(`Diff application failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            if (error instanceof StateConsistencyError) throw error;
+            const message = error instanceof Error ? error.message : 'Unknown diff application error';
+            throw new StateConsistencyError(`Diff application failed: ${message}`);
         }
+    }
+
+    static calculateDiffSize(diffPatch: string): number {
+        return strToU8(diffPatch).length;
     }
 }
 
-// --- Concurrency Control ---
+// --- Concurrency Control (Keyed Mutex) ---
 class KeyedMutex {
-    private locks = new Map<string, { promise: Promise<void>; resolve: () => void }>();
+    private readonly locks = new Map<string, Promise<void>>();
+    private readonly resolvers = new Map<string, () => void>();
 
     async run<T>(key: string, operation: () => Promise<T>): Promise<T> {
-        const currentLock = this.locks.get(key);
-        
-        if (currentLock) {
-            // Wait for existing lock
-            await currentLock.promise;
+        while (this.locks.has(key)) {
+            await this.locks.get(key);
         }
 
-        // Create new lock
-        let resolveFn: () => void;
-        const promise = new Promise<void>(resolve => {
-            resolveFn = resolve;
+        let resolver!: () => void;
+        const promise = new Promise<void>((resolve) => {
+            resolver = resolve;
         });
-        
-        this.locks.set(key, { promise, resolve: resolveFn! });
+
+        this.locks.set(key, promise);
+        this.resolvers.set(key, resolver);
 
         try {
             return await operation();
         } finally {
-            // Release lock
             this.locks.delete(key);
-            resolveFn!();
+            this.resolvers.delete(key);
+            resolver();
         }
     }
 
-    get isLocked(): Map<string, boolean> {
-        const status = new Map<string, boolean>();
-        for (const [key] of this.locks) {
-            status.set(key, true);
-        }
-        return status;
+    get activeKeys(): readonly string[] {
+        return freeze([...this.locks.keys()]);
     }
 }
 
 const mutex = new KeyedMutex();
 
-// --- Core Logic ---
+// --- Reconstruction Service ---
 class ReconstructionService {
     static async reconstructFromMap(
         targetEditId: string,
-        editMap: Map<string, StoredEdit>
-    ): Promise<string> {
-        if (!targetEditId || !editMap.has(targetEditId)) {
-            throw new ValidationError(`Target edit ${targetEditId} not found in map`, 'targetEditId');
+        editMap: Map<string, StoredEdit>,
+        verify: boolean = true
+    ): Promise<ReconstructionResult> {
+        const target = editMap.get(targetEditId);
+        if (!target) {
+            throw new ValidationError(`Target edit ${targetEditId} not found`, 'targetEditId');
         }
 
-        const chain: StoredEdit[] = [];
-        let currentId: string | undefined = targetEditId;
-        const visited = new Set<string>();
+        const chain = this.buildChain(targetEditId, editMap);
+        const content = await this.applyChain(chain);
+        const hash = await HashService.computeHash(content);
 
-        while (currentId) {
+        let verified = true;
+        if (verify && target.contentHash && target.contentHash.length > 0) {
+            verified = hash === target.contentHash;
+            if (!verified) {
+                throw new IntegrityError(
+                    `Content integrity check failed for edit ${targetEditId}`,
+                    target.contentHash,
+                    hash
+                );
+            }
+        }
+
+        return freeze({ content, hash, verified });
+    }
+
+    private static buildChain(
+        targetEditId: string,
+        editMap: Map<string, StoredEdit>
+    ): readonly StoredEdit[] {
+        const chain: StoredEdit[] = [];
+        const visited = new Set<string>();
+        let currentId: string | undefined = targetEditId;
+
+        while (currentId !== undefined) {
             if (visited.has(currentId)) {
-                throw new StateConsistencyError(`Circular reference detected in edit chain at ${currentId}`);
+                throw new StateConsistencyError(`Circular reference detected at ${currentId}`);
             }
             visited.add(currentId);
 
@@ -336,96 +482,165 @@ class ReconstructionService {
 
             currentId = record.previousEditId;
 
-            if (!currentId && record.storageType === 'diff') {
-                throw new StateConsistencyError(`Broken chain: diff entry ${record.editId} missing previousEditId`);
+            if (currentId === undefined && record.storageType === 'diff') {
+                throw new StateConsistencyError(`Broken chain: diff ${record.editId} missing previousEditId`);
             }
         }
 
-        const baseRecord = chain.pop();
-        if (!baseRecord) {
-            throw new StateConsistencyError("Chain empty - no base record found");
+        return freeze(chain);
+    }
+
+    private static async applyChain(chain: readonly StoredEdit[]): Promise<string> {
+        if (chain.length === 0) {
+            throw new StateConsistencyError('Empty chain - no base record found');
         }
 
-        const decompressionCache = new Map<number, string>();
-        let content = await this.decompressWithCache(baseRecord, decompressionCache);
+        const reversed = [...chain].reverse();
+        const baseRecord = reversed[0];
+        if (!baseRecord) {
+            throw new StateConsistencyError('No base record in chain');
+        }
 
-        while (chain.length > 0) {
-            const nextEdit = chain.pop()!;
-            const patch = await this.decompressWithCache(nextEdit, decompressionCache);
+        let content = await CompressionService.decompress(baseRecord);
+
+        for (let i = 1; i < reversed.length; i++) {
+            const edit = reversed[i];
+            if (!edit) continue;
+            const patch = await CompressionService.decompress(edit);
             content = DiffService.applyDiff(content, patch);
         }
 
         return content;
     }
-
-    private static async decompressWithCache(
-        record: StoredEdit,
-        cache: Map<number, string>
-    ): Promise<string> {
-        if (record.id === undefined) {
-            return await CompressionService.decompress(record);
-        }
-
-        const cached = cache.get(record.id);
-        if (cached !== undefined) {
-            return cached;
-        }
-
-        const content = await CompressionService.decompress(record);
-        cache.set(record.id, content);
-        return content;
-    }
 }
 
+// --- Context Service ---
 class ContextService {
     static async getPreviousEditContext(
         noteId: string,
         branchName: string
-    ): Promise<{ editId: string; content: string; baseEditId: string; chainLength: number } | null> {
+    ): Promise<PreviousEditContext | null> {
         const edits = await db.edits
             .where('[noteId+branchName]')
             .equals([noteId, branchName])
-            .sortBy('createdAt');
+            .toArray();
 
         if (edits.length === 0) {
             return null;
         }
 
-        const lastEdit = edits[edits.length - 1];
+        const sortedEdits = sortBy(edits, [(e) => e.createdAt]);
+        const lastEdit = sortedEdits[sortedEdits.length - 1];
         if (!lastEdit) {
-            throw new StateConsistencyError('Failed to retrieve last edit');
+            return null;
         }
 
-        const editMap = new Map(edits.map(e => [e.editId, e]));
+        const editMap = new Map(sortedEdits.map((e) => [e.editId, e]));
 
-        try {
-            const content = await ReconstructionService.reconstructFromMap(lastEdit.editId, editMap);
+        const result = await ReconstructionService.reconstructFromMap(lastEdit.editId, editMap, false);
 
-            let baseEditId = lastEdit.baseEditId;
-            if (lastEdit.storageType === 'full') {
-                baseEditId = lastEdit.editId;
-            } else if (!baseEditId) {
-                // Find nearest full snapshot
-                for (let i = edits.length - 1; i >= 0; i--) {
-                    const edit = edits[i];
-                    if (edit && edit.storageType === 'full') {
-                        baseEditId = edit.editId;
-                        break;
-                    }
+        let baseEditId = lastEdit.baseEditId;
+        if (lastEdit.storageType === 'full') {
+            baseEditId = lastEdit.editId;
+        } else if (!baseEditId) {
+            for (let i = sortedEdits.length - 1; i >= 0; i--) {
+                const edit = sortedEdits[i];
+                if (edit && edit.storageType === 'full') {
+                    baseEditId = edit.editId;
+                    break;
                 }
             }
-
-            return {
-                editId: lastEdit.editId,
-                content,
-                baseEditId: baseEditId || lastEdit.editId,
-                chainLength: lastEdit.chainLength
-            };
-        } catch (error) {
-            console.error("Failed to get previous context", error);
-            throw new StateConsistencyError(`Failed to reconstruct context: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
+
+        return freeze({
+            editId: lastEdit.editId,
+            content: result.content,
+            contentHash: result.hash,
+            baseEditId: baseEditId ?? lastEdit.editId,
+            chainLength: lastEdit.chainLength
+        });
     }
+}
+
+// --- Manifest Service (Immutable Updates with Immer) ---
+class ManifestService {
+    static updateManifestWithEditInfo(
+        manifest: NoteManifest,
+        branchName: string,
+        editId: string,
+        compressedSize: number,
+        uncompressedSize: number,
+        contentHash: string
+    ): NoteManifest {
+        return produce(manifest, (draft) => {
+            const branch = draft.branches[branchName];
+            if (branch) {
+                const version = branch.versions[editId] as {
+                    compressedSize?: number;
+                    uncompressedSize?: number;
+                    contentHash?: string;
+                } | undefined;
+                if (version) {
+                    version.compressedSize = compressedSize;
+                    version.uncompressedSize = uncompressedSize;
+                    version.contentHash = contentHash;
+                }
+            }
+        });
+    }
+
+    static updateManifestPath(manifest: NoteManifest, newPath: string): NoteManifest {
+        return produce(manifest, (draft) => {
+            draft.notePath = newPath;
+        });
+    }
+
+    static updateManifestNoteId(manifest: NoteManifest, newNoteId: string, newPath: string): NoteManifest {
+        return produce(manifest, (draft) => {
+            draft.noteId = newNoteId;
+            draft.notePath = newPath;
+        });
+    }
+}
+
+// --- Utility Functions ---
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function createEditRecord(params: {
+    noteId: string;
+    branchName: string;
+    editId: string;
+    content: ArrayBuffer;
+    contentHash: string;
+    storageType: StorageType;
+    chainLength: number;
+    uncompressedSize: number;
+    baseEditId?: string;
+    previousEditId?: string;
+}): StoredEdit {
+    const record: StoredEdit = {
+        noteId: params.noteId,
+        branchName: params.branchName,
+        editId: params.editId,
+        content: params.content,
+        contentHash: params.contentHash,
+        storageType: params.storageType,
+        chainLength: params.chainLength,
+        createdAt: Date.now(),
+        size: params.content.byteLength,
+        uncompressedSize: params.uncompressedSize
+    };
+
+    if (params.baseEditId !== undefined) {
+        (record as { baseEditId: string }).baseEditId = params.baseEditId;
+    }
+    if (params.previousEditId !== undefined) {
+        (record as { previousEditId: string }).previousEditId = params.previousEditId;
+    }
+
+    return freeze(record);
 }
 
 // --- Worker API Implementation ---
@@ -437,41 +652,32 @@ const editHistoryApi = {
         content: unknown,
         manifestUpdate: unknown
     ): Promise<void> {
-        // Input validation
-        const validatedNoteId = InputValidator.validateNoteId(noteId);
-        const validatedBranchName = InputValidator.validateBranchName(branchName);
-        const validatedEditId = InputValidator.validateEditId(editId);
-        const validatedContent = InputValidator.validateContent(content);
-        const validatedManifest = InputValidator.validateManifest(manifestUpdate);
+        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
+        const validBranchName = validateInput(BranchNameSchema, branchName, 'branchName');
+        const validEditId = validateInput(EditIdSchema, editId, 'editId');
+        const validContent = validateInput(ContentSchema, content, 'content');
+        const validManifest = validateInput(ManifestSchema, manifestUpdate, 'manifest') as NoteManifest;
 
-        return mutex.run(validatedNoteId, async () => {
-            // Decode content once
-            const contentStr = typeof validatedContent === 'string'
-                ? validatedContent
-                : CompressionService.textDecoder.decode(validatedContent);
+        return mutex.run(validNoteId, async () => {
+            const contentStr =
+                typeof validContent === 'string'
+                    ? validContent
+                    : CompressionService.textDecoder.decode(validContent);
 
-            // Optimistic Concurrency Control with Retry Loop
-            const MAX_RETRIES = 3;
-            for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-                
-                // 1. READ & COMPUTE PHASE (Outside Transaction)
-                // We perform the heavy lifting (reconstruction, diffing, compression) outside
-                // the transaction to prevent locking the DB and to avoid "commit too early" issues
-                // caused by async operations (like legacy decompression).
+            const contentHash = await HashService.computeHash(contentStr);
+            const uncompressedSize = CompressionService.getUncompressedSize(contentStr);
 
-                // Optimistic Idempotency Check
+            for (let attempt = 0; attempt < CONFIG.MAX_RETRIES; attempt++) {
                 const existsOptimistic = await db.edits
                     .where('[noteId+branchName+editId]')
-                    .equals([validatedNoteId, validatedBranchName, validatedEditId])
+                    .equals([validNoteId, validBranchName, validEditId])
                     .count();
-                
-                if (existsOptimistic > 0) return; // Already saved
 
-                // Get Context
-                const previousContext = await ContextService.getPreviousEditContext(
-                    validatedNoteId,
-                    validatedBranchName
-                );
+                if (existsOptimistic > 0) {
+                    return;
+                }
+
+                const previousContext = await ContextService.getPreviousEditContext(validNoteId, validBranchName);
 
                 let compressedContent: ArrayBuffer;
                 let storageType: StorageType;
@@ -480,30 +686,23 @@ const editHistoryApi = {
                 let chainLength: number;
 
                 if (!previousContext) {
-                    // First edit
                     compressedContent = CompressionService.compressContent(contentStr);
                     storageType = 'full';
                     chainLength = 0;
                 } else {
-                    const isChainTooLong = previousContext.chainLength >= MAX_CHAIN_LENGTH;
+                    const isChainTooLong = previousContext.chainLength >= CONFIG.MAX_CHAIN_LENGTH;
 
                     if (isChainTooLong) {
-                        // Force full snapshot
                         compressedContent = CompressionService.compressContent(contentStr);
                         storageType = 'full';
                         chainLength = 0;
                         previousEditId = previousContext.editId;
                     } else {
-                        // Try Diff
-                        const diffPatch = DiffService.createDiff(
-                            previousContext.content,
-                            contentStr,
-                            validatedEditId
-                        );
-                        const diffSize = strToU8(diffPatch).length;
-                        const fullSize = strToU8(contentStr).length;
+                        const diffPatch = DiffService.createDiff(previousContext.content, contentStr, validEditId);
+                        const diffSize = DiffService.calculateDiffSize(diffPatch);
+                        const fullSize = uncompressedSize;
 
-                        if (diffSize < fullSize * DIFF_SIZE_THRESHOLD) {
+                        if (diffSize < fullSize * CONFIG.DIFF_SIZE_THRESHOLD) {
                             compressedContent = CompressionService.compressContent(diffPatch);
                             storageType = 'diff';
                             baseEditId = previousContext.baseEditId;
@@ -518,40 +717,34 @@ const editHistoryApi = {
                     }
                 }
 
-                const editRecord: StoredEdit = {
-                    noteId: validatedNoteId,
-                    branchName: validatedBranchName,
-                    editId: validatedEditId,
+                const editRecord = createEditRecord({
+                    noteId: validNoteId,
+                    branchName: validBranchName,
+                    editId: validEditId,
                     content: compressedContent,
+                    contentHash,
                     storageType,
                     chainLength,
-                    createdAt: Date.now(),
-                    size: compressedContent.byteLength
-                };
+                    uncompressedSize,
+                    ...(baseEditId !== undefined && { baseEditId }),
+                    ...(previousEditId !== undefined && { previousEditId })
+                });
 
-                if (baseEditId !== undefined) editRecord.baseEditId = baseEditId;
-                if (previousEditId !== undefined) editRecord.previousEditId = previousEditId;
+                const updatedManifest = ManifestService.updateManifestWithEditInfo(
+                    validManifest,
+                    validBranchName,
+                    validEditId,
+                    compressedContent.byteLength,
+                    uncompressedSize,
+                    contentHash
+                );
 
-                // Update manifest with compressed/uncompressed sizes
-                const branch = validatedManifest.branches[validatedBranchName];
-                if (branch && branch.versions[validatedEditId]) {
-                    const versionEntry = branch.versions[validatedEditId];
-                    if (versionEntry) {
-                        versionEntry.compressedSize = compressedContent.byteLength;
-                        // Ensure uncompressedSize is set if not already (it should be set by thunk, but safety check)
-                        if (versionEntry.uncompressedSize === undefined) {
-                            versionEntry.uncompressedSize = strToU8(contentStr).length;
-                        }
-                    }
-                }
-
-                // 2. WRITE PHASE (Inside Transaction)
                 let committed = false;
+
                 await db.transaction('rw', db.edits, db.manifests, async () => {
-                    // Final Idempotency Check
                     const existing = await db.edits
                         .where('[noteId+branchName+editId]')
-                        .equals([validatedNoteId, validatedBranchName, validatedEditId])
+                        .equals([validNoteId, validBranchName, validEditId])
                         .count();
 
                     if (existing > 0) {
@@ -559,34 +752,38 @@ const editHistoryApi = {
                         return;
                     }
 
-                    // Consistency Check: Ensure the head of the branch hasn't moved
-                    // since we read the context.
                     const currentHead = await db.edits
                         .where('[noteId+branchName]')
-                        .equals([validatedNoteId, validatedBranchName])
+                        .equals([validNoteId, validBranchName])
                         .last();
 
                     const currentHeadId = currentHead?.editId;
                     const previousContextId = previousContext?.editId;
 
                     if (currentHeadId !== previousContextId) {
-                        // Conflict detected (concurrent write), abort transaction and retry loop
                         return;
                     }
 
-                    await db.edits.put(editRecord);
+                    await db.edits.put({ ...editRecord } as StoredEdit);
                     await db.manifests.put({
-                        noteId: validatedNoteId,
-                        manifest: validatedManifest,
+                        noteId: validNoteId,
+                        manifest: updatedManifest,
                         updatedAt: Date.now()
                     });
+
                     committed = true;
                 });
 
-                if (committed) return;
+                if (committed) {
+                    return;
+                }
+
+                if (attempt < CONFIG.MAX_RETRIES - 1) {
+                    await sleep(CONFIG.RETRY_BASE_DELAY_MS * Math.pow(2, attempt));
+                }
             }
-            
-            throw new StateConsistencyError("Failed to save edit after retries due to concurrent modifications");
+
+            throw new StateConsistencyError('Failed to save edit after maximum retries due to concurrent modifications');
         });
     },
 
@@ -595,162 +792,133 @@ const editHistoryApi = {
         branchName: unknown,
         editId: unknown
     ): Promise<ArrayBuffer | null> {
-        // Input validation
-        const validatedNoteId = InputValidator.validateNoteId(noteId);
-        const validatedBranchName = InputValidator.validateBranchName(branchName);
-        const validatedEditId = InputValidator.validateEditId(editId);
+        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
+        const validBranchName = validateInput(BranchNameSchema, branchName, 'branchName');
+        const validEditId = validateInput(EditIdSchema, editId, 'editId');
 
-        return mutex.run(validatedNoteId, async () => {
-            try {
-                const edits = await db.edits
-                    .where('[noteId+branchName]')
-                    .equals([validatedNoteId, validatedBranchName])
-                    .toArray();
+        return mutex.run(validNoteId, async () => {
+            const edits = await db.edits
+                .where('[noteId+branchName]')
+                .equals([validNoteId, validBranchName])
+                .toArray();
 
-                const editMap = new Map(edits.map(e => [e.editId, e]));
+            const editMap = new Map(edits.map((e) => [e.editId, e]));
 
-                if (!editMap.has(validatedEditId)) {
-                    return null;
-                }
-
-                const content = await ReconstructionService.reconstructFromMap(
-                    validatedEditId,
-                    editMap
-                );
-
-                const buffer = CompressionService.textEncoder.encode(content).buffer;
-                return transfer(buffer, [buffer]);
-            } catch (error) {
-                console.error("Reconstruction failed", error);
+            if (!editMap.has(validEditId)) {
                 return null;
             }
+
+            const result = await ReconstructionService.reconstructFromMap(validEditId, editMap, true);
+
+            const buffer = CompressionService.textEncoder.encode(result.content).buffer as ArrayBuffer;
+            return transfer(buffer, [buffer]);
         });
     },
 
     async getEditManifest(noteId: unknown): Promise<NoteManifest | null> {
-        const validatedNoteId = InputValidator.validateNoteId(noteId);
+        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
 
-        return mutex.run(validatedNoteId, async () => {
-            try {
-                const record = await db.manifests.get(validatedNoteId);
-                return record ? record.manifest : null;
-            } catch (error) {
-                console.error("Failed to get manifest", error);
-                return null;
-            }
+        return mutex.run(validNoteId, async () => {
+            const record = await db.manifests.get(validNoteId);
+            return record ? freeze(record.manifest) : null;
         });
     },
 
-    async saveEditManifest(
-        noteId: unknown,
-        manifest: unknown
-    ): Promise<void> {
-        const validatedNoteId = InputValidator.validateNoteId(noteId);
-        const validatedManifest = InputValidator.validateManifest(manifest);
+    async saveEditManifest(noteId: unknown, manifest: unknown): Promise<void> {
+        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
+        const validManifest = validateInput(ManifestSchema, manifest, 'manifest') as NoteManifest;
 
-        return mutex.run(validatedNoteId, async () => {
+        return mutex.run(validNoteId, async () => {
             await db.manifests.put({
-                noteId: validatedNoteId,
-                manifest: validatedManifest,
+                noteId: validNoteId,
+                manifest: validManifest,
                 updatedAt: Date.now()
             });
         });
     },
 
-    async deleteEdit(
-        noteId: unknown,
-        branchName: unknown,
-        editId: unknown
-    ): Promise<void> {
-        const validatedNoteId = InputValidator.validateNoteId(noteId);
-        const validatedBranchName = InputValidator.validateBranchName(branchName);
-        const validatedEditId = InputValidator.validateEditId(editId);
+    async deleteEdit(noteId: unknown, branchName: unknown, editId: unknown): Promise<void> {
+        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
+        const validBranchName = validateInput(BranchNameSchema, branchName, 'branchName');
+        const validEditId = validateInput(EditIdSchema, editId, 'editId');
 
-        return mutex.run(validatedNoteId, async () => {
+        return mutex.run(validNoteId, async () => {
             await db.transaction('rw', db.edits, async () => {
                 const branchEdits = await db.edits
                     .where('[noteId+branchName]')
-                    .equals([validatedNoteId, validatedBranchName])
+                    .equals([validNoteId, validBranchName])
                     .toArray();
 
-                const editMap = new Map(branchEdits.map(e => [e.editId, e]));
-                const targetEdit = editMap.get(validatedEditId);
+                const editMap = new Map(branchEdits.map((e) => [e.editId, e]));
+                const targetEdit = editMap.get(validEditId);
 
                 if (!targetEdit) {
-                    return; // Idempotent: already deleted
+                    return;
                 }
 
-                const children = branchEdits.filter(e => e.previousEditId === validatedEditId);
+                const children = branchEdits.filter((e) => e.previousEditId === validEditId);
                 const updates: StoredEdit[] = [];
 
-                // Heal Children
                 for (const child of children) {
-                    try {
-                        const content = await ReconstructionService.reconstructFromMap(child.editId, editMap);
+                    const result = await ReconstructionService.reconstructFromMap(child.editId, editMap, false);
+                    const childContentHash = await HashService.computeHash(result.content);
+                    const compressedContent = CompressionService.compressContent(result.content);
+                    const childUncompressedSize = CompressionService.getUncompressedSize(result.content);
 
-                        const updatedChild: StoredEdit = {
-                            ...child,
-                            storageType: 'full',
-                            content: CompressionService.compressContent(content),
-                            baseEditId: child.editId,
-                            chainLength: 0
-                        };
+                    const updatedChild = produce(child, (draft) => {
+                        draft.storageType = 'full';
+                        draft.content = compressedContent;
+                        draft.contentHash = childContentHash;
+                        draft.baseEditId = draft.editId;
+                        draft.chainLength = 0;
+                        draft.size = compressedContent.byteLength;
+                        draft.uncompressedSize = childUncompressedSize;
 
                         if (targetEdit.previousEditId) {
-                            updatedChild.previousEditId = targetEdit.previousEditId;
+                            draft.previousEditId = targetEdit.previousEditId;
                         } else {
-                            delete updatedChild.previousEditId;
+                            delete draft.previousEditId;
                         }
+                    });
 
-                        updates.push(updatedChild);
+                    updates.push(updatedChild);
 
-                        // Update descendants with BFS
-                        const queue = [child.editId];
-                        const visited = new Set([child.editId]);
+                    const queue = [child.editId];
+                    const visited = new Set([child.editId]);
 
-                        while (queue.length > 0) {
-                            const currentId = queue.shift()!;
-                            const descendants = branchEdits.filter(e => e.previousEditId === currentId);
+                    while (queue.length > 0) {
+                        const currentId = queue.shift()!;
+                        const descendants = branchEdits.filter((e) => e.previousEditId === currentId);
 
-                            for (const descendant of descendants) {
-                                if (!visited.has(descendant.editId)) {
-                                    visited.add(descendant.editId);
-                                    queue.push(descendant.editId);
+                        for (const descendant of descendants) {
+                            if (!visited.has(descendant.editId)) {
+                                visited.add(descendant.editId);
+                                queue.push(descendant.editId);
 
-                                    const updatedDescendant: StoredEdit = {
-                                        ...descendant,
-                                        baseEditId: child.editId
-                                    };
+                                const parentUpdate = updates.find((u) => u.editId === descendant.previousEditId);
+                                const parent = parentUpdate ?? editMap.get(descendant.previousEditId!);
+                                const newChainLength = parent ? parent.chainLength + 1 : 1;
 
-                                    // Recalculate chain length
-                                    const parentUpdate = updates.find(u => u.editId === updatedDescendant.previousEditId);
-                                    const parent = parentUpdate || editMap.get(updatedDescendant.previousEditId!);
+                                const updatedDescendant = produce(descendant, (draft) => {
+                                    draft.baseEditId = child.editId;
+                                    draft.chainLength = newChainLength;
+                                });
 
-                                    if (parent) {
-                                        updatedDescendant.chainLength = parent.chainLength + 1;
-                                    } else {
-                                        updatedDescendant.chainLength = 1;
-                                    }
-
-                                    const existingIndex = updates.findIndex(u => u.editId === updatedDescendant.editId);
-                                    if (existingIndex > -1) {
-                                        updates[existingIndex] = updatedDescendant;
-                                    } else {
-                                        updates.push(updatedDescendant);
-                                    }
+                                const existingIdx = updates.findIndex((u) => u.editId === updatedDescendant.editId);
+                                if (existingIdx >= 0) {
+                                    updates[existingIdx] = updatedDescendant;
+                                } else {
+                                    updates.push(updatedDescendant);
                                 }
                             }
                         }
-                    } catch (error) {
-                        console.error(`Failed to heal child ${child.editId}`, error);
-                        throw new StateConsistencyError(`Delete failed: graph healing error - ${error instanceof Error ? error.message : 'Unknown error'}`);
                     }
                 }
 
-                // Write updates and delete target
                 if (updates.length > 0) {
-                    await db.edits.bulkPut(updates);
+                    await db.edits.bulkPut(updates.map((u) => ({ ...u })));
                 }
+
                 if (targetEdit.id !== undefined) {
                     await db.edits.delete(targetEdit.id);
                 }
@@ -759,163 +927,211 @@ const editHistoryApi = {
     },
 
     async deleteNoteHistory(noteId: unknown): Promise<void> {
-        const validatedNoteId = InputValidator.validateNoteId(noteId);
+        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
 
-        return mutex.run(validatedNoteId, async () => {
+        return mutex.run(validNoteId, async () => {
             await db.transaction('rw', db.edits, db.manifests, async () => {
-                await db.edits.where('noteId').equals(validatedNoteId).delete();
-                await db.manifests.delete(validatedNoteId);
+                await db.edits.where('noteId').equals(validNoteId).delete();
+                await db.manifests.delete(validNoteId);
             });
         });
     },
 
-    async renameEdit(
-        noteId: unknown,
-        oldEditId: unknown,
-        newEditId: unknown
-    ): Promise<void> {
-        const validatedNoteId = InputValidator.validateNoteId(noteId);
-        const validatedOldEditId = InputValidator.validateEditId(oldEditId);
-        const validatedNewEditId = InputValidator.validateEditId(newEditId);
+    async renameEdit(noteId: unknown, oldEditId: unknown, newEditId: unknown): Promise<void> {
+        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
+        const validOldEditId = validateInput(EditIdSchema, oldEditId, 'oldEditId');
+        const validNewEditId = validateInput(EditIdSchema, newEditId, 'newEditId');
 
-        if (validatedOldEditId === validatedNewEditId) {
-            throw new ValidationError('oldEditId and newEditId must be different');
+        if (validOldEditId === validNewEditId) {
+            return;
         }
 
-        return mutex.run(validatedNoteId, async () => {
+        return mutex.run(validNoteId, async () => {
             await db.transaction('rw', db.edits, async () => {
-                // Check existence
                 const oldExists = await db.edits
-                    .where({ noteId: validatedNoteId, editId: validatedOldEditId })
+                    .where({ noteId: validNoteId, editId: validOldEditId })
                     .count();
 
                 if (oldExists === 0) {
-                    return; // Idempotent
+                    return;
                 }
 
                 const newExists = await db.edits
-                    .where({ noteId: validatedNoteId, editId: validatedNewEditId })
+                    .where({ noteId: validNoteId, editId: validNewEditId })
                     .count();
 
                 if (newExists > 0) {
-                    throw new ValidationError(`Rename failed: ${validatedNewEditId} already exists`);
+                    throw new ValidationError(`Edit ${validNewEditId} already exists`, 'newEditId');
                 }
 
-                // Update target records
                 const records = await db.edits
                     .where('noteId')
-                    .equals(validatedNoteId)
-                    .filter(e => e.editId === validatedOldEditId)
+                    .equals(validNoteId)
+                    .filter((e) => e.editId === validOldEditId)
                     .toArray();
 
                 for (const record of records) {
                     if (record.id !== undefined) {
-                        await db.edits.update(record.id, { editId: validatedNewEditId });
+                        await db.edits.update(record.id, { editId: validNewEditId });
                     }
                 }
 
-                // Update references
                 const dependentRecords = await db.edits
                     .where('noteId')
-                    .equals(validatedNoteId)
-                    .filter(e => e.baseEditId === validatedOldEditId || e.previousEditId === validatedOldEditId)
+                    .equals(validNoteId)
+                    .filter((e) => e.baseEditId === validOldEditId || e.previousEditId === validOldEditId)
                     .toArray();
 
                 for (const record of dependentRecords) {
                     if (record.id !== undefined) {
                         const updates: Partial<StoredEdit> = {};
-                        if (record.baseEditId === validatedOldEditId) {
-                            updates.baseEditId = validatedNewEditId;
+                        if (record.baseEditId === validOldEditId) {
+                            updates.baseEditId = validNewEditId;
                         }
-                        if (record.previousEditId === validatedOldEditId) {
-                            updates.previousEditId = validatedNewEditId;
+                        if (record.previousEditId === validOldEditId) {
+                            updates.previousEditId = validNewEditId;
                         }
-                        await db.edits.update(record.id, updates);
+                        if (Object.keys(updates).length > 0) {
+                            await db.edits.update(record.id, updates);
+                        }
                     }
                 }
             });
         });
     },
 
-    async renameNote(
-        oldNoteId: unknown,
-        newNoteId: unknown,
-        newPath: unknown
-    ): Promise<void> {
-        const validatedOldNoteId = InputValidator.validateNoteId(oldNoteId);
-        const validatedNewNoteId = InputValidator.validateNoteId(newNoteId);
-        // Path validation is loose as it's just a string storage
-        if (typeof newPath !== 'string') throw new ValidationError('newPath must be a string', 'newPath');
+    async renameNote(oldNoteId: unknown, newNoteId: unknown, newPath: unknown): Promise<void> {
+        const validOldNoteId = validateInput(NoteIdSchema, oldNoteId, 'oldNoteId');
+        const validNewNoteId = validateInput(NoteIdSchema, newNoteId, 'newNoteId');
+        const validNewPath = validateInput(PathSchema, newPath, 'newPath');
 
-        if (validatedOldNoteId === validatedNewNoteId) return;
+        if (validOldNoteId === validNewNoteId) {
+            return;
+        }
 
-        // We lock on both IDs to ensure consistency
-        // To avoid deadlocks, we could sort them, but since we are inside a worker and calls are serialized by Comlink/MessageQueue mostly,
-        // and we use a mutex inside, we just need to be careful.
-        // Actually, mutex.run takes a single key. We should lock the old ID as primary.
-        
-        return mutex.run(validatedOldNoteId, async () => {
+        return mutex.run(validOldNoteId, async () => {
             await db.transaction('rw', db.edits, db.manifests, async () => {
-                // 1. Update Edits
-                await db.edits.where('noteId').equals(validatedOldNoteId).modify({ noteId: validatedNewNoteId });
+                await db.edits.where('noteId').equals(validOldNoteId).modify({ noteId: validNewNoteId });
 
-                // 2. Update Manifest
-                const oldManifestRecord = await db.manifests.get(validatedOldNoteId);
+                const oldManifestRecord = await db.manifests.get(validOldNoteId);
                 if (oldManifestRecord) {
-                    const newManifest = { ...oldManifestRecord.manifest };
-                    newManifest.noteId = validatedNewNoteId;
-                    newManifest.notePath = newPath;
-                    
+                    const updatedManifest = ManifestService.updateManifestNoteId(
+                        oldManifestRecord.manifest,
+                        validNewNoteId,
+                        validNewPath
+                    );
+
                     await db.manifests.put({
-                        noteId: validatedNewNoteId,
-                        manifest: newManifest,
+                        noteId: validNewNoteId,
+                        manifest: updatedManifest,
                         updatedAt: Date.now()
                     });
-                    
-                    await db.manifests.delete(validatedOldNoteId);
+
+                    await db.manifests.delete(validOldNoteId);
                 }
             });
         });
     },
 
-    async updateNotePath(
-        noteId: unknown,
-        newPath: unknown
-    ): Promise<void> {
-        const validatedNoteId = InputValidator.validateNoteId(noteId);
-        if (typeof newPath !== 'string') throw new ValidationError('newPath must be a string', 'newPath');
+    async updateNotePath(noteId: unknown, newPath: unknown): Promise<void> {
+        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
+        const validNewPath = validateInput(PathSchema, newPath, 'newPath');
 
-        return mutex.run(validatedNoteId, async () => {
+        return mutex.run(validNoteId, async () => {
             await db.transaction('rw', db.manifests, async () => {
-                const record = await db.manifests.get(validatedNoteId);
+                const record = await db.manifests.get(validNoteId);
                 if (record) {
-                    record.manifest.notePath = newPath;
-                    record.updatedAt = Date.now();
-                    await db.manifests.put(record);
+                    const updatedManifest = ManifestService.updateManifestPath(record.manifest, validNewPath);
+
+                    await db.manifests.put({
+                        noteId: validNoteId,
+                        manifest: updatedManifest,
+                        updatedAt: Date.now()
+                    });
                 }
             });
         });
     },
 
-    // Utility method for diagnostics
-    async getDatabaseStats(): Promise<{
-        editCount: number;
-        manifestCount: number;
-        locks: Map<string, boolean>;
-    }> {
+    async getDatabaseStats(): Promise<DatabaseStats> {
         const editCount = await db.edits.count();
         const manifestCount = await db.manifests.count();
-        return {
+
+        return freeze({
             editCount,
             manifestCount,
-            locks: mutex.isLocked
-        };
+            activeKeys: mutex.activeKeys
+        });
+    },
+
+    async verifyEditIntegrity(
+        noteId: unknown,
+        branchName: unknown,
+        editId: unknown
+    ): Promise<IntegrityCheckResult> {
+        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
+        const validBranchName = validateInput(BranchNameSchema, branchName, 'branchName');
+        const validEditId = validateInput(EditIdSchema, editId, 'editId');
+
+        return mutex.run(validNoteId, async () => {
+            const edits = await db.edits
+                .where('[noteId+branchName]')
+                .equals([validNoteId, validBranchName])
+                .toArray();
+
+            const editMap = new Map(edits.map((e) => [e.editId, e]));
+            const targetEdit = editMap.get(validEditId);
+
+            if (!targetEdit) {
+                throw new ValidationError(`Edit ${validEditId} not found`, 'editId');
+            }
+
+            const result = await ReconstructionService.reconstructFromMap(validEditId, editMap, false);
+
+            const actualHash = result.hash;
+            const expectedHash = targetEdit.contentHash || '';
+            const valid = expectedHash === '' || isEqual(actualHash, expectedHash);
+
+            return freeze({ valid, expectedHash, actualHash });
+        });
+    },
+
+    async verifyBranchIntegrity(
+        noteId: unknown,
+        branchName: unknown
+    ): Promise<readonly IntegrityCheckResult[]> {
+        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
+        const validBranchName = validateInput(BranchNameSchema, branchName, 'branchName');
+
+        return mutex.run(validNoteId, async () => {
+            const edits = await db.edits
+                .where('[noteId+branchName]')
+                .equals([validNoteId, validBranchName])
+                .toArray();
+
+            const editMap = new Map(edits.map((e) => [e.editId, e]));
+            const results: IntegrityCheckResult[] = [];
+
+            for (const edit of edits) {
+                try {
+                    const result = await ReconstructionService.reconstructFromMap(edit.editId, editMap, false);
+                    const actualHash = result.hash;
+                    const expectedHash = edit.contentHash || '';
+                    const valid = expectedHash === '' || actualHash === expectedHash;
+
+                    results.push(freeze({ valid, expectedHash, actualHash }));
+                } catch {
+                    results.push(freeze({ valid: false, expectedHash: edit.contentHash || '', actualHash: '' }));
+                }
+            }
+
+            return freeze(results);
+        });
     }
 };
 
-// Export API for comlink
 expose(editHistoryApi);
 
-// Export types for TypeScript consumers
-export type { StoredEdit, StoredManifest, StorageType };
-export { ValidationError, SecurityError, StateConsistencyError };
+export type EditHistoryApi = typeof editHistoryApi;
+export type { StoredEdit, StoredManifest, StorageType, ReconstructionResult, PreviousEditContext, DatabaseStats, IntegrityCheckResult };
+export { ValidationError, SecurityError, StateConsistencyError, IntegrityError };
