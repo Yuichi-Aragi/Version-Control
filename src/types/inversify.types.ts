@@ -11,8 +11,8 @@ export const TYPES = {
   ExportManager: Symbol.for('ExportManager'),
   DiffManager: Symbol.for('DiffManager'),
   BackgroundTaskManager: Symbol.for('BackgroundTaskManager'),
-  KeyUpdateManager: Symbol.for('KeyUpdateManager'),
   TimelineManager: Symbol.for('TimelineManager'),
+  EditHistoryManager: Symbol.for('EditHistoryManager'),
   // Services
   UIService: Symbol.for('UIService'),
   QueueService: Symbol.for('QueueService'),
