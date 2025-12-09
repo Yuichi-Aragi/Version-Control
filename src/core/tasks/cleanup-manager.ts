@@ -15,6 +15,7 @@ const ORPHAN_CLEANUP_QUEUE_KEY = 'system:orphan-cleanup';
 const CLEANUP_DEBOUNCE_INTERVAL_MS = 5000;
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1000;
+const QUEUE_PREFIX = 'cleanup:';
 
 interface CleanupResult {
   deletedNoteDirs: number;
@@ -31,6 +32,12 @@ type CentralManifest = CoreCentralManifest;
  * retention policies and cleaning up data for orphaned (deleted) notes.
  * It operates in a decoupled manner by listening to events from the PluginEvents bus.
  * Extends Component to leverage automatic event listener cleanup.
+ * 
+ * DEADLOCK PROTECTION:
+ * Uses a 'cleanup:' prefix for per-note queue keys. This prevents deadlocks
+ * when the cleanup process (holding cleanup:noteId) calls into ManifestManager
+ * (which requests manifest:noteId). Since the keys are distinct, no circular
+ * dependency occurs.
  */
 @injectable()
 export class CleanupManager extends Component {
@@ -97,6 +104,10 @@ export class CleanupManager extends Component {
     }
   }
 
+  private getQueueKey(noteId: string): string {
+    return `${QUEUE_PREFIX}${noteId}`;
+  }
+
   private handleVersionSaved = (noteId: string): void => {
     if (!this.isValidNoteId(noteId) || this.isDestroyed) {
       return;
@@ -145,7 +156,7 @@ export class CleanupManager extends Component {
       return;
     }
 
-    const cleanupPromise = this.queueService.enqueue(noteId, () => this.performPerNoteCleanup(noteId))
+    const cleanupPromise = this.queueService.enqueue(this.getQueueKey(noteId), () => this.performPerNoteCleanup(noteId))
       .catch((err) => {
         console.error(`VC: Error during scheduled cleanup for note ${noteId}.`, err);
         throw err;
@@ -248,13 +259,12 @@ export class CleanupManager extends Component {
             }
         }
         manifest.lastModified = new Date().toISOString();
-      },
-      { bypassQueue: true }
+      }
     );
 
     const deleteFilesPromises = [...versionIds].map((id) =>
       this.versionContentRepo
-        .delete(noteId, id, { bypassQueue: true })
+        .delete(noteId, id)
         .catch((e) => console.error(`VC: Failed to delete version file for id ${id}`, e))
     );
 

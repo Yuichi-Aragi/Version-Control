@@ -2,28 +2,9 @@ import { injectable, inject } from 'inversify';
 import { Component } from 'obsidian';
 import type { AppStore } from '../../state/store';
 import { thunks } from '../../state/thunks';
-import { AppStatus } from '../../state/state';
+import { AppStatus, type AppState } from '../../state/state';
 import { actions } from '../../state/appSlice';
 import { TYPES } from '../../types/inversify.types';
-
-/**
- * Configuration interface for watch mode settings
- */
-interface WatchModeConfig {
-  readonly enableWatchMode: boolean;
-  readonly watchModeInterval: number;
-}
-
-/**
- * State interface for the app store
- */
-interface AppState {
-  readonly status: AppStatus;
-  readonly noteId: string | null;
-  readonly isProcessing: boolean;
-  readonly settings: WatchModeConfig;
-  readonly watchModeCountdown: number | null;
-}
 
 /**
  * Type-safe interval ID wrapper
@@ -101,7 +82,7 @@ export class BackgroundTaskManager extends Component {
     this.lastSyncTime = now;
 
     try {
-      const state = this.store.getState() as AppState;
+      const state = this.store.getState() as any as AppState;
       this.validateState(state);
 
       const shouldBeRunning = this.shouldWatchModeRun(state);
@@ -109,7 +90,7 @@ export class BackgroundTaskManager extends Component {
 
       if (shouldBeRunning) {
         const currentNoteId = state.noteId!; // Safe due to validation
-        const currentIntervalSeconds = state.settings.watchModeInterval;
+        const currentIntervalSeconds = state.effectiveSettings.watchModeInterval;
 
         // Validate interval value
         if (!Number.isInteger(currentIntervalSeconds) || currentIntervalSeconds <= 0) {
@@ -149,13 +130,13 @@ export class BackgroundTaskManager extends Component {
     if (!state) {
       throw new Error('App state is undefined');
     }
-    if (!state.settings) {
-      throw new Error('Settings are undefined in app state');
+    if (!state.effectiveSettings) {
+      throw new Error('Effective settings are undefined in app state');
     }
-    if (typeof state.settings.enableWatchMode !== 'boolean') {
+    if (typeof state.effectiveSettings.enableWatchMode !== 'boolean') {
       throw new Error('enableWatchMode setting must be a boolean');
     }
-    if (typeof state.settings.watchModeInterval !== 'number') {
+    if (typeof state.effectiveSettings.watchModeInterval !== 'number') {
       throw new Error('watchModeInterval setting must be a number');
     }
   }
@@ -164,7 +145,7 @@ export class BackgroundTaskManager extends Component {
    * Determines if watch mode should be running based on current state
    */
   private shouldWatchModeRun(state: AppState): boolean {
-    return state.settings.enableWatchMode && 
+    return state.effectiveSettings.enableWatchMode && 
            state.status === AppStatus.READY && 
            !!state.noteId;
   }
@@ -204,7 +185,7 @@ export class BackgroundTaskManager extends Component {
   private handleWatchModeTick(): void {
     try {
       // Re-check conditions inside the interval callback to ensure context hasn't changed.
-      const currentState = this.store.getState() as AppState;
+      const currentState = this.store.getState() as any as AppState;
       
       if (currentState.status === AppStatus.READY && 
           !currentState.isProcessing && 
@@ -252,7 +233,7 @@ export class BackgroundTaskManager extends Component {
       this.activeIntervalSeconds = null;
 
       // Clear from UI if it hasn't been cleared already
-      const currentState = this.store.getState() as AppState;
+      const currentState = this.store.getState() as any as AppState;
       if (currentState.watchModeCountdown !== null) {
         this.store.dispatch(actions.setWatchModeCountdown(null));
       }
