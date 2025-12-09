@@ -1,720 +1,739 @@
 /**
+ * @fileoverview Production-ready text processing module
+ * 
+ * Provides secure, validated, and performant text analysis utilities
+ * with comprehensive markdown stripping and statistics calculation.
+ * 
+ * Key features:
+ * - Schema-based validation with Valibot
+ * - Immutable outputs with Immer
+ * - Optimized utilities from es-toolkit
+ * - Non-blocking async processing for large inputs
+ * - Unicode-aware word and character counting
+ * - Comprehensive security checks
+ * - Fully idempotent operations
+ */
+
+import { freeze } from 'immer';
+import * as v from 'valibot';
+import { memoize, isNil } from 'es-toolkit';
+
+/**
+ * CONFIGURATION CONSTANTS
+ * ============================================================================
+ */
+
+const CONFIG = Object.freeze({
+  MAX_INPUT_BYTES: 10 * 1024 * 1024,
+  MAX_INPUT_LENGTH: 10_000_000,
+  MAX_OUTPUT_SIZE: 20 * 1024 * 1024,
+  MAX_PATTERN_LENGTH: 1000,
+  MAX_CACHE_SIZE: 100,
+  CHUNK_SIZE: 32768,
+  ASYNC_THRESHOLD: 50000,
+  YIELD_INTERVAL: 16,
+} as const);
+
+/**
  * CUSTOM ERROR CLASSES
  * ============================================================================
  */
 
-/**
- * SecurityError - For security-related violations
- */
 class SecurityError extends Error {
-  public readonly code = 'SECURITY_VIOLATION';
-  public readonly timestamp = Date.now();
-  
+  readonly code = 'SECURITY_VIOLATION' as const;
+  readonly timestamp: number;
+
   constructor(message: string) {
     super(message);
     this.name = 'SecurityError';
-    // Properly set prototype for ES5/ES6 compatibility
+    this.timestamp = Date.now();
     Object.setPrototypeOf(this, SecurityError.prototype);
-    // Capture stack trace properly
-    Error.captureStackTrace?.(this, SecurityError);
   }
 }
 
-/**
- * ValidationError - For input validation failures
- */
 class ValidationError extends Error {
-  public readonly code = 'VALIDATION_FAILURE';
-  public readonly paramName: string;
-  public readonly receivedValue: unknown;
-  
-  constructor(paramName: string, expected: string, received: unknown) {
-    const message = `INVALID_PARAMETER: "${paramName}" must be ${expected}. Received: ${String(received)}`;
+  readonly code = 'VALIDATION_FAILURE' as const;
+  readonly paramName: string;
+  readonly issues: readonly v.BaseIssue<unknown>[];
+
+  constructor(
+    paramName: string,
+    message: string,
+    issues: readonly v.BaseIssue<unknown>[] = []
+  ) {
     super(message);
     this.name = 'ValidationError';
     this.paramName = paramName;
-    this.receivedValue = received;
+    this.issues = freeze(issues);
     Object.setPrototypeOf(this, ValidationError.prototype);
-    Error.captureStackTrace?.(this, ValidationError);
   }
 }
 
-/**
- * ResourceError - For resource exhaustion prevention
- */
 class ResourceError extends Error {
-  public readonly code = 'RESOURCE_EXHAUSTION';
-  public readonly maxAllowed: number;
-  public readonly actual: number;
-  
-  constructor(resource: string, maxAllowed: number, actual: number) {
-    const message = `RESOURCE_EXCEEDED: "${resource}" exceeds maximum allowed size of ${maxAllowed}. Actual: ${actual}`;
-    super(message);
+  readonly code = 'RESOURCE_EXHAUSTION' as const;
+  readonly resource: string;
+  readonly limit: number;
+  readonly actual: number;
+
+  constructor(resource: string, limit: number, actual: number) {
+    super(`Resource "${resource}" exceeded: limit=${limit}, actual=${actual}`);
     this.name = 'ResourceError';
-    this.maxAllowed = maxAllowed;
+    this.resource = resource;
+    this.limit = limit;
     this.actual = actual;
     Object.setPrototypeOf(this, ResourceError.prototype);
-    Error.captureStackTrace?.(this, ResourceError);
   }
 }
 
 /**
- * CONSTANTS AND CONFIGURATION
+ * VALIBOT SCHEMAS
  * ============================================================================
  */
 
-/**
- * Security and resource configuration constants
- */
-const SECURITY_CONFIG = {
-  MAX_INPUT_SIZE: 10 * 1024 * 1024, // 10MB
-  MAX_INPUT_LENGTH: 10_000_000, // Character limit
-  MAX_PATTERN_LENGTH: 1000, // Regex pattern length limit
-  MAX_ITERATIONS: 100_000, // Loop iteration limit
-  MAX_OUTPUT_SIZE: 20 * 1024 * 1024, // 20MB output limit
-} as const;
+const SecurityPatternSchema = v.pipe(
+  v.string(),
+  v.check(
+    (input) => !/(?:__proto__|constructor\.prototype|constructor\["prototype"\]|constructor\.constructor)/i.test(input),
+    'Prototype pollution pattern detected'
+  )
+);
+
+const TextInputSchema = v.pipe(
+  v.string(),
+  v.maxLength(CONFIG.MAX_INPUT_LENGTH, `Input exceeds maximum length of ${CONFIG.MAX_INPUT_LENGTH}`),
+  SecurityPatternSchema
+);
+
+const TextInputOptionsSchema = v.object({
+  allowEmpty: v.optional(v.boolean(), true),
+  sanitizeControlChars: v.optional(v.boolean(), true),
+  maxLength: v.optional(v.number(), CONFIG.MAX_INPUT_LENGTH),
+});
+
+type TextInputOptions = Partial<v.InferOutput<typeof TextInputOptionsSchema>>;
 
 /**
- * Regex patterns for security validation
- * NOTE: XSS prevention is intentionally NOT implemented via input pattern matching.
- * Proper XSS defense requires context-aware output encoding and Content Security Policy (CSP) headers.
- * These patterns focus on other security concerns like prototype pollution and resource exhaustion.
- */
-const SECURITY_PATTERNS = {
-  PROTO_POLLUTION: /(?:__proto__|constructor\.prototype|constructor\["prototype"\]|constructor\.constructor)/i,
-  CONTROL_CHARS: /[\x00-\x1F\x7F-\x9F]/,
-  EXCESSIVE_WHITESPACE: /\s{100,}/,
-} as const;
-
-/**
- * PERFORMANCE-OPTIMIZED UTILITY FUNCTIONS
+ * REGEX CACHE (LRU, Pure)
  * ============================================================================
  */
 
-/**
- * Type-safe type guard for string validation
- */
-function isString(value: unknown): value is string {
-  return typeof value === 'string';
+interface CacheEntry {
+  readonly regex: RegExp;
+  readonly createdAt: number;
+  accessCount: number;
 }
 
+const createRegexCache = () => {
+  const cache = new Map<string, CacheEntry>();
+
+  const evictLRU = (): void => {
+    if (cache.size < CONFIG.MAX_CACHE_SIZE) return;
+
+    let lruKey: string | null = null;
+    let minAccess = Infinity;
+
+    for (const [key, entry] of cache) {
+      if (entry.accessCount < minAccess) {
+        minAccess = entry.accessCount;
+        lruKey = key;
+      }
+    }
+
+    if (lruKey !== null) {
+      cache.delete(lruKey);
+    }
+  };
+
+  const validateFlags = (flags: string): string => {
+    const valid = new Set<string>();
+    for (const char of flags) {
+      if ('gimsuy'.includes(char)) {
+        valid.add(char);
+      }
+    }
+    return [...valid].sort().join('');
+  };
+
+  const get = (pattern: string, flags: string = ''): RegExp => {
+    if (pattern.length > CONFIG.MAX_PATTERN_LENGTH) {
+      throw new ResourceError('regexPattern', CONFIG.MAX_PATTERN_LENGTH, pattern.length);
+    }
+
+    const validatedFlags = validateFlags(flags);
+    const key = `${pattern}\x00${validatedFlags}`;
+
+    const existing = cache.get(key);
+    if (existing !== undefined) {
+      existing.accessCount += 1;
+      const cloned = new RegExp(existing.regex.source, existing.regex.flags);
+      return cloned;
+    }
+
+    evictLRU();
+
+    let regex: RegExp;
+    try {
+      regex = new RegExp(pattern, validatedFlags);
+    } catch {
+      throw new ValidationError('regexPattern', `Invalid regular expression: ${pattern}`, []);
+    }
+
+    cache.set(key, {
+      regex,
+      createdAt: Date.now(),
+      accessCount: 1,
+    });
+
+    return new RegExp(regex.source, regex.flags);
+  };
+
+  const clear = (): void => {
+    cache.clear();
+  };
+
+  const size = (): number => cache.size;
+
+  return freeze({ get, clear, size });
+};
+
+const RegexCache = createRegexCache();
+
 /**
- * Validates string inputs with comprehensive security checks
- * @param value - The value to validate
- * @param paramName - Parameter name for error messages
- * @param options - Validation options
- * @returns Validated string
- * @throws {ValidationError} If type validation fails
- * @throws {SecurityError} If security violations detected
- * @throws {ResourceError} If size limits exceeded
+ * YIELD UTILITIES (Non-blocking)
+ * ============================================================================
  */
-function validateAndSanitizeString(
+
+const yieldToMain = (): Promise<void> => {
+  if (typeof globalThis !== 'undefined' && 'scheduler' in globalThis) {
+    const scheduler = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler;
+    if (typeof scheduler?.yield === 'function') {
+      return scheduler.yield();
+    }
+  }
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+};
+
+const shouldYield = (() => {
+  let lastYield = 0;
+  return (): boolean => {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (now - lastYield >= CONFIG.YIELD_INTERVAL) {
+      lastYield = now;
+      return true;
+    }
+    return false;
+  };
+})();
+
+/**
+ * VALIDATION UTILITIES
+ * ============================================================================
+ */
+
+const validateTextInput = (
   value: unknown,
   paramName: string,
-  options: {
-    allowEmpty?: boolean;
-    maxLength?: number;
-    sanitizeControlChars?: boolean;
-  } = {}
-): string {
-  const {
-    allowEmpty = true,
-    maxLength = SECURITY_CONFIG.MAX_INPUT_LENGTH,
-    sanitizeControlChars = true,
-  } = options;
+  options: TextInputOptions = {}
+): string => {
+  const opts = v.parse(TextInputOptionsSchema, options) as Required<TextInputOptions>;
 
-  // NULL/UNDEFINED CHECK
-  if (value === null || value === undefined) {
-    throw new ValidationError(paramName, 'non-null string', value);
+  if (isNil(value)) {
+    throw new ValidationError(paramName, `Parameter "${paramName}" is required`, []);
   }
 
-  // TYPE SAFETY CHECK
-  if (!isString(value)) {
-    throw new ValidationError(paramName, 'string', typeof value);
-  }
+  const parseResult = v.safeParse(TextInputSchema, value);
 
-  const str = value;
-
-  // RESOURCE LIMIT CHECK - BYTE SIZE
-  const byteSize = new Blob([str]).size;
-  if (byteSize > SECURITY_CONFIG.MAX_INPUT_SIZE) {
-    throw new ResourceError(paramName, SECURITY_CONFIG.MAX_INPUT_SIZE, byteSize);
-  }
-
-  // RESOURCE LIMIT CHECK - CHARACTER LENGTH
-  if (str.length > maxLength) {
-    throw new ResourceError(paramName, maxLength, str.length);
-  }
-
-  // SECURITY: Prototype pollution detection
-  if (SECURITY_PATTERNS.PROTO_POLLUTION.test(str)) {
-    throw new SecurityError(
-      `Prototype pollution attempt detected in parameter: "${paramName}"`
+  if (!parseResult.success) {
+    throw new ValidationError(
+      paramName,
+      `Invalid parameter "${paramName}": ${parseResult.issues.map((i) => i.message).join(', ')}`,
+      parseResult.issues
     );
   }
 
-  // SECURITY: Control character sanitization
-  let sanitized = str;
-  if (sanitizeControlChars && SECURITY_PATTERNS.CONTROL_CHARS.test(str)) {
-    sanitized = str.replace(SECURITY_PATTERNS.CONTROL_CHARS, ' ');
+  let text = parseResult.output;
+
+  if (typeof Blob !== 'undefined') {
+    const byteSize = new Blob([text]).size;
+    if (byteSize > CONFIG.MAX_INPUT_BYTES) {
+      throw new ResourceError(paramName, CONFIG.MAX_INPUT_BYTES, byteSize);
+    }
   }
 
-  // SECURITY: Excessive whitespace reduction
-  if (SECURITY_PATTERNS.EXCESSIVE_WHITESPACE.test(sanitized)) {
-    sanitized = sanitized.replace(SECURITY_PATTERNS.EXCESSIVE_WHITESPACE, ' ');
+  if (text.length > opts.maxLength) {
+    throw new ResourceError(paramName, opts.maxLength, text.length);
   }
 
-  // EMPTY STRING VALIDATION
-  if (!allowEmpty && sanitized.trim().length === 0) {
-    throw new ValidationError(paramName, 'non-empty string', 'empty or whitespace-only');
+  if (opts.sanitizeControlChars) {
+    text = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
   }
 
-  return sanitized;
-}
+  if (!opts.allowEmpty && text.trim().length === 0) {
+    throw new ValidationError(paramName, `Parameter "${paramName}" must not be empty`, []);
+  }
+
+  return text;
+};
 
 /**
- * HIGH-PERFORMANCE REGEX CACHE WITH MEMORY MANAGEMENT
+ * MARKDOWN PATTERNS
  * ============================================================================
  */
 
-/**
- * Thread-safe regex cache with LRU eviction and memory limits
- */
-class OptimizedRegexCache {
-  private static readonly instance = new OptimizedRegexCache();
-  private readonly cache = new Map<string, RegExp>();
-  private readonly accessTimes = new Map<string, number>();
-  private readonly maxSize = 100; // Maximum cached patterns
-  private readonly maxAge = 5 * 60 * 1000; // 5 minutes maximum age
-
-  private constructor() {
-    // Start cleanup interval
-    this.scheduleCleanup();
-  }
-
-  /**
-   * Singleton instance accessor
-   */
-  static getInstance(): OptimizedRegexCache {
-    return this.instance;
-  }
-
-  /**
-   * Retrieves or creates and caches a RegExp instance with validation
-   */
-  get(pattern: string, flags: string = ''): RegExp {
-    // VALIDATE pattern length
-    if (pattern.length > SECURITY_CONFIG.MAX_PATTERN_LENGTH) {
-      throw new ResourceError(
-        'regexPattern',
-        SECURITY_CONFIG.MAX_PATTERN_LENGTH,
-        pattern.length
-      );
-    }
-
-    // VALIDATE flags for security
-    const validFlags = this.validateFlags(flags);
-    const key = `${pattern}:${validFlags}`;
-
-    // Check cache with access time update
-    if (this.cache.has(key)) {
-      const regex = this.cache.get(key)!;
-      this.accessTimes.set(key, Date.now());
-      return regex;
-    }
-
-    // Create and cache new regex with security validation
-    const regex = this.createSafeRegex(pattern, validFlags);
-    
-    // Apply LRU eviction if needed
-    if (this.cache.size >= this.maxSize) {
-      this.evictLeastRecentlyUsed();
-    }
-
-    // Store in cache
-    this.cache.set(key, regex);
-    this.accessTimes.set(key, Date.now());
-
-    return regex;
-  }
-
-  /**
-   * Creates a safe RegExp with timeout protection
-   */
-  private createSafeRegex(pattern: string, flags: string): RegExp {
-    try {
-      // SECURITY: Prevent catastrophic backtracking with size limits
-      if (pattern.includes('(') && pattern.includes('*')) {
-        const complexity = pattern.split('*').length + pattern.split('+').length;
-        if (complexity > 100) {
-          throw new SecurityError('Potential regex DoS pattern detected');
-        }
-      }
-
-      return new RegExp(pattern, flags);
-    } catch (error) {
-      if (error instanceof SyntaxError) {
-        throw new ValidationError(
-          'regexPattern',
-          'valid regular expression pattern',
-          pattern
-        );
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * Validates and sanitizes regex flags
-   */
-  private validateFlags(flags: string): string {
-    const validFlags = flags.split('').filter(flag => 'gimsuy'.includes(flag));
-    return Array.from(new Set(validFlags)).join(''); // Remove duplicates
-  }
-
-  /**
-   * Implements LRU eviction policy
-   */
-  private evictLeastRecentlyUsed(): void {
-    let oldestKey: string | null = null;
-    let oldestTime = Infinity;
-
-    for (const [key, time] of this.accessTimes.entries()) {
-      if (time < oldestTime) {
-        oldestTime = time;
-        oldestKey = key;
-      }
-    }
-
-    if (oldestKey) {
-      this.cache.delete(oldestKey);
-      this.accessTimes.delete(oldestKey);
-    }
-  }
-
-  /**
-   * Schedules periodic cache cleanup
-   */
-  private scheduleCleanup(): void {
-    setInterval(() => {
-      const now = Date.now();
-      for (const [key, time] of this.accessTimes.entries()) {
-        if (now - time > this.maxAge) {
-          this.cache.delete(key);
-          this.accessTimes.delete(key);
-        }
-      }
-    }, 60 * 1000); // Clean every minute
-  }
-
-  /**
-   * Clears cache (for testing)
-   */
-  clear(): void {
-    this.cache.clear();
-    this.accessTimes.clear();
-  }
-
-  /**
-   * Gets cache statistics
-   */
-  getStats(): { size: number; maxSize: number } {
-    return {
-      size: this.cache.size,
-      maxSize: this.maxSize,
-    };
-  }
+interface MarkdownPattern {
+  readonly pattern: string;
+  readonly flags: string;
+  readonly replacement: string | ((match: string, ...groups: string[]) => string);
+  readonly priority: number;
 }
 
-/**
- * Singleton regex cache instance
- */
-const RegexCache = OptimizedRegexCache.getInstance();
+const MARKDOWN_PATTERNS: readonly MarkdownPattern[] = freeze([
+  { pattern: '```[\\s\\S]*?```', flags: 'g', replacement: '', priority: 1 },
+  { pattern: '`[^`]+`', flags: 'g', replacement: (_m, ...args) => {
+    const content = args[0];
+    return typeof content === 'string' ? content : '';
+  }, priority: 2 },
+  { pattern: '<[^>]*>', flags: 'g', replacement: '', priority: 3 },
+  { pattern: '!\\[([^\\]]*)\\]\\([^)]*\\)', flags: 'g', replacement: '$1', priority: 4 },
+  { pattern: '\\[([^\\]]*)\\]\\([^)]*\\)', flags: 'g', replacement: '$1', priority: 5 },
+  { pattern: '\\*\\*\\*([^*]+)\\*\\*\\*', flags: 'g', replacement: '$1', priority: 6 },
+  { pattern: '___([^_]+)___', flags: 'g', replacement: '$1', priority: 7 },
+  { pattern: '\\*\\*([^*]+)\\*\\*', flags: 'g', replacement: '$1', priority: 8 },
+  { pattern: '__([^_]+)__', flags: 'g', replacement: '$1', priority: 9 },
+  { pattern: '\\*([^*]+)\\*', flags: 'g', replacement: '$1', priority: 10 },
+  { pattern: '_([^_]+)_', flags: 'g', replacement: '$1', priority: 11 },
+  { pattern: '~~([^~]+)~~', flags: 'g', replacement: '$1', priority: 12 },
+  { pattern: '==([^=]+)==', flags: 'g', replacement: '$1', priority: 13 },
+  { pattern: '^#{1,6}\\s+', flags: 'gm', replacement: '', priority: 14 },
+  { pattern: '^>\\s*', flags: 'gm', replacement: '', priority: 15 },
+  { pattern: '^\\s*[-*+]\\s+', flags: 'gm', replacement: '', priority: 16 },
+  { pattern: '^\\s*\\d+\\.\\s+', flags: 'gm', replacement: '', priority: 17 },
+  { pattern: '^\\s*[-*_]{3,}\\s*$', flags: 'gm', replacement: '', priority: 18 },
+  { pattern: '\\[\\^[^\\]]+\\]', flags: 'g', replacement: '', priority: 19 },
+]);
 
 /**
- * PERFORMANCE-OPTIMIZED TEXT PROCESSING FUNCTIONS
+ * CORE TEXT PROCESSING FUNCTIONS
  * ============================================================================
  */
 
-/**
- * Interface for regex replacement configuration
- */
-interface RegexReplacement {
-  pattern: string;
-  flags?: string;
-  replacement: string | ((substring: string, ...args: any[]) => string);
-  priority: number; // Lower number = higher priority
-}
+const applyPatterns = (
+  text: string,
+  patterns: readonly MarkdownPattern[]
+): string => {
+  let result = text;
 
-/**
- * Pre-configured markdown stripping patterns with proper priority ordering
- */
-const MARKDOWN_PATTERNS: readonly RegexReplacement[] = [
-  // Highest priority: Code blocks (must be removed first to protect content)
-  {
-    pattern: '```[\\s\\S]*?```',
-    flags: 'g',
-    replacement: '',
-    priority: 1,
-  },
-  
-  // High priority: HTML tags
-  {
-    pattern: '<[^>]*>',
-    flags: 'g',
-    replacement: '',
-    priority: 2,
-  },
-  
-  // Medium priority: Links and images (preserve alt text)
-  {
-    pattern: '!?\\[(.*?)\\]\\([^)]*\\)',
-    flags: 'g',
-    replacement: (_, altText: string) => altText || '',
-    priority: 3,
-  },
-  
-  // Medium priority: Emphasis markers
-  {
-    pattern: '(\\*\\*|__|\\*|_|~~|==)(.*?)\\1',
-    flags: 'g',
-    replacement: (_, __, content: string) => content || '',
-    priority: 4,
-  },
-  
-  // Medium priority: Inline code
-  {
-    pattern: '`([^`]+)`',
-    flags: 'g',
-    replacement: (_, content: string) => content || '',
-    priority: 5,
-  },
-  
-  // Lower priority: Headers
-  {
-    pattern: '^#{1,6}\\s+',
-    flags: 'gm',
-    replacement: '',
-    priority: 6,
-  },
-  
-  // Lower priority: Blockquotes
-  {
-    pattern: '^>\\s*',
-    flags: 'gm',
-    replacement: '',
-    priority: 7,
-  },
-  
-  // Lower priority: Lists
-  {
-    pattern: '^(\\s*[-*+]\\s+|\\s*\\d+\\.\\s+)',
-    flags: 'gm',
-    replacement: '',
-    priority: 8,
-  },
-  
-  // Lower priority: Horizontal rules
-  {
-    pattern: '^\\s*([-*_]\\s*){3,}\\s*$',
-    flags: 'gm',
-    replacement: '',
-    priority: 9,
-  },
-  
-  // Lowest priority: Whitespace normalization
-  {
-    pattern: '(\\r\\n|\\n|\\r){3,}',
-    flags: 'g',
-    replacement: '\n\n',
-    priority: 10,
-  },
-] as const;
+  const sorted = [...patterns].sort((a, b) => a.priority - b.priority);
 
-/**
- * Strips Markdown syntax from text with optimized single-pass processing
- * @param text - Source text containing Markdown syntax
- * @returns Plain text with all Markdown syntax removed
- * @throws {ValidationError} If input validation fails
- * @throws {SecurityError} If security checks detect violations
- * @throws {ResourceError} If size limits exceeded
- */
-export function stripMarkdown(text: string): string {
-  // COMPREHENSIVE VALIDATION AND SANITIZATION
-  const validatedText = validateAndSanitizeString(text, 'text', {
-    allowEmpty: true,
-  });
+  for (const { pattern, flags, replacement } of sorted) {
+    const regex = RegexCache.get(pattern, flags);
 
-  // FAST-PATH: Return immediately for empty strings
-  if (validatedText.length === 0) {
-    return '';
+    if (typeof replacement === 'string') {
+      result = result.replace(regex, replacement);
+    } else {
+      result = result.replace(regex, replacement);
+    }
+
+    if (result.length > CONFIG.MAX_OUTPUT_SIZE) {
+      throw new ResourceError('outputText', CONFIG.MAX_OUTPUT_SIZE, result.length);
+    }
   }
 
-  let processedText = validatedText;
-  let iterationCount = 0;
-  const maxIterations = Math.min(
-    SECURITY_CONFIG.MAX_ITERATIONS,
-    processedText.length * 2
-  );
+  return result;
+};
 
-  // PROCESS patterns in priority order
-  const sortedPatterns = [...MARKDOWN_PATTERNS].sort((a, b) => a.priority - b.priority);
+const applyPatternsAsync = async (
+  text: string,
+  patterns: readonly MarkdownPattern[]
+): Promise<string> => {
+  let result = text;
+  const sorted = [...patterns].sort((a, b) => a.priority - b.priority);
 
-  for (const { pattern, flags = '', replacement } of sortedPatterns) {
-    // SAFETY: Prevent infinite loops and DoS
-    if (iterationCount++ > maxIterations) {
-      throw new ResourceError(
-        'processingIterations',
-        maxIterations,
-        iterationCount
-      );
+  for (const { pattern, flags, replacement } of sorted) {
+    if (shouldYield()) {
+      await yieldToMain();
     }
 
     const regex = RegexCache.get(pattern, flags);
-    
-    // OPTIMIZATION: Only apply if pattern exists
-    if (regex.test(processedText)) {
-      regex.lastIndex = 0; // Reset regex state
-      
-      if (typeof replacement === 'function') {
-        processedText = processedText.replace(regex, replacement);
-      } else {
-        processedText = processedText.replace(regex, replacement);
-      }
 
-      // POST-PROCESSING VALIDATION: Ensure output size limit
-      if (processedText.length > SECURITY_CONFIG.MAX_OUTPUT_SIZE) {
-        throw new ResourceError(
-          'outputText',
-          SECURITY_CONFIG.MAX_OUTPUT_SIZE,
-          processedText.length
-        );
-      }
-    }
-  }
-
-  // FINAL SANITIZATION: Trim and collapse multiple spaces
-  const finalText = processedText
-    .replace(/\s+/g, ' ')
-    .replace(/^\s+|\s+$/g, '');
-
-  return finalText;
-}
-
-/**
- * Unicode-aware word boundary detection
- */
-const WORD_BOUNDARY_REGEX = RegexCache.get(
-  '\\p{L}\\p{M}*\\p{N}*(?:[\\p{P}\\p{S}]\\p{L}\\p{M}*\\p{N}*)*',
-  'gu'
-);
-
-/**
- * Counts words using Unicode-aware boundary detection
- * @param text - The text to analyze
- * @returns The number of words
- * @throws {ValidationError} If input validation fails
- */
-export function countWords(text: string): number {
-  const validatedText = validateAndSanitizeString(text, 'text', {
-    allowEmpty: true,
-  });
-
-  // FAST-PATH: Empty string has zero words
-  if (validatedText.length === 0) {
-    return 0;
-  }
-
-  // PERFORMANCE: Use native match for Unicode word boundaries
-  const matches = validatedText.match(WORD_BOUNDARY_REGEX);
-  
-  // RESET regex state for future use
-  WORD_BOUNDARY_REGEX.lastIndex = 0;
-  
-  return matches ? matches.length : 0;
-}
-
-/**
- * Performance-optimized character counting
- * @param text - The text to analyze
- * @returns The exact character count
- * @throws {ValidationError} If input validation fails
- */
-export function countChars(text: string): number {
-  const validatedText = validateAndSanitizeString(text, 'text', {
-    allowEmpty: true,
-  });
-  
-  // DETERMINISTIC: String.length is O(1) and reliable
-  return validatedText.length;
-}
-
-/**
- * Counts lines with optimized single-pass algorithm
- * @param text - The text to analyze
- * @returns The number of lines
- * @throws {ValidationError} If input validation fails
- */
-export function countLines(text: string): number {
-  const validatedText = validateAndSanitizeString(text, 'text', {
-    allowEmpty: true,
-  });
-
-  // FAST-PATH: Empty string has zero lines
-  if (validatedText.length === 0) {
-    return 0;
-  }
-
-  // PERFORMANCE: Single-pass without split()
-  let lineCount = 1; // Non-empty strings start with 1 line
-  const length = validatedText.length;
-  let i = 0;
-
-  while (i < length) {
-    const char = validatedText[i];
-    
-    if (char === '\n') {
-      lineCount++;
-      i++;
-    } else if (char === '\r') {
-      // Handle \r\n sequences as single newline
-      if (i + 1 < length && validatedText[i + 1] === '\n') {
-        i += 2; // Skip both \r and \n
-      } else {
-        i++; // Skip only \r
-      }
-      lineCount++;
+    if (typeof replacement === 'string') {
+      result = result.replace(regex, replacement);
     } else {
-      i++;
+      result = result.replace(regex, replacement);
+    }
+
+    if (result.length > CONFIG.MAX_OUTPUT_SIZE) {
+      throw new ResourceError('outputText', CONFIG.MAX_OUTPUT_SIZE, result.length);
     }
   }
 
-  return lineCount;
-}
+  return result;
+};
+
+const normalizeWhitespace = (text: string): string => {
+  return text
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[\t ]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/^ +| +$/gm, '')
+    .trim();
+};
 
 /**
- * MAIN API INTERFACE
+ * WORD COUNTING (Unicode-aware)
  * ============================================================================
  */
 
-/**
- * Comprehensive text statistics data structure
- * All properties are readonly for immutability
- */
-export interface TextStats {
-  readonly wordCount: number;
-  readonly wordCountWithMd: number;
-  readonly charCount: number;
-  readonly charCountWithMd: number;
-  readonly lineCount: number;
-  readonly lineCountWithoutMd: number;
-  readonly processingTimeMs?: number;
-}
+const createWordCounter = (): ((text: string) => number) => {
+  if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: 'word' });
+
+    return (text: string): number => {
+      if (text.length === 0) return 0;
+
+      let count = 0;
+      for (const segment of segmenter.segment(text)) {
+        if (segment.isWordLike) {
+          count += 1;
+        }
+      }
+      return count;
+    };
+  }
+
+  const wordPattern = /[\p{L}\p{N}]+(?:['\u2019][\p{L}]+)?/gu;
+
+  return (text: string): number => {
+    if (text.length === 0) return 0;
+
+    const matches = text.match(wordPattern);
+    return matches !== null ? matches.length : 0;
+  };
+};
+
+const countWordsImpl = createWordCounter();
 
 /**
- * Calculates comprehensive, deterministic text statistics with performance metrics
- * @param content - The source content to analyze
- * @returns Immutable object containing all text statistics
- * @throws {ValidationError} If content validation fails
- * @throws {SecurityError} If security checks detect violations
- * @throws {ResourceError} If resource limits exceeded
+ * CHARACTER COUNTING
+ * ============================================================================
  */
-export function calculateTextStats(content: string): TextStats {
-  const startTime = performance.now?.() || Date.now();
-  
-  // COMPREHENSIVE VALIDATION
-  const validatedContent = validateAndSanitizeString(content, 'content');
-  
-  // ATOMIC PROCESSING: Compute all metrics
-  const strippedContent = stripMarkdown(validatedContent);
-  
-  const stats: TextStats = {
-    wordCount: countWords(strippedContent),
-    wordCountWithMd: countWords(validatedContent),
-    charCount: countChars(strippedContent),
-    charCountWithMd: countChars(validatedContent),
-    lineCount: countLines(validatedContent),
-    lineCountWithoutMd: countLines(strippedContent),
+
+const createCharCounter = (): ((text: string) => number) => {
+  if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+    return (text: string): number => {
+      if (text.length === 0) return 0;
+
+      let count = 0;
+      for (const _ of segmenter.segment(text)) {
+        count += 1;
+      }
+      return count;
+    };
+  }
+
+  return (text: string): number => {
+    if (text.length === 0) return 0;
+    return [...text].length;
   };
-  
-  // Add processing time if performance API is available
-  const endTime = performance.now?.() || Date.now();
-  const processingTimeMs = Math.round(endTime - startTime);
-  
-  // ENHANCED: Include processing time for monitoring
-  const enhancedStats: TextStats = {
+};
+
+const countGraphemesImpl = createCharCounter();
+
+const countCodePoints = (text: string): number => {
+  if (text.length === 0) return 0;
+  return [...text].length;
+};
+
+/**
+ * LINE COUNTING
+ * ============================================================================
+ */
+
+const countLinesImpl = (text: string): number => {
+  if (text.length === 0) return 0;
+
+  let count = 1;
+  const length = text.length;
+
+  for (let i = 0; i < length; i += 1) {
+    const char = text.charCodeAt(i);
+
+    if (char === 0x0A) {
+      count += 1;
+    } else if (char === 0x0D) {
+      if (i + 1 < length && text.charCodeAt(i + 1) === 0x0A) {
+        i += 1;
+      }
+      count += 1;
+    }
+  }
+
+  return count;
+};
+
+/**
+ * MEMOIZED HELPERS
+ * ============================================================================
+ */
+
+const memoizedNormalize = memoize(normalizeWhitespace);
+
+/**
+ * PUBLIC API
+ * ============================================================================
+ */
+
+const stripMarkdown = (text: string): string => {
+  const validated = validateTextInput(text, 'text', { allowEmpty: true });
+
+  if (validated.length === 0) {
+    return '';
+  }
+
+  const stripped = applyPatterns(validated, MARKDOWN_PATTERNS);
+  const normalized = memoizedNormalize(stripped);
+
+  return normalized;
+};
+
+const stripMarkdownAsync = async (text: string): Promise<string> => {
+  const validated = validateTextInput(text, 'text', { allowEmpty: true });
+
+  if (validated.length === 0) {
+    return '';
+  }
+
+  const stripped = await applyPatternsAsync(validated, MARKDOWN_PATTERNS);
+  await yieldToMain();
+  const normalized = normalizeWhitespace(stripped);
+
+  return normalized;
+};
+
+const countWords = (text: string): number => {
+  const validated = validateTextInput(text, 'text', { allowEmpty: true });
+
+  if (validated.length === 0) {
+    return 0;
+  }
+
+  return countWordsImpl(validated);
+};
+
+const countChars = (text: string): number => {
+  const validated = validateTextInput(text, 'text', { allowEmpty: true });
+
+  if (validated.length === 0) {
+    return 0;
+  }
+
+  return countGraphemesImpl(validated);
+};
+
+const countCharsCodePoints = (text: string): number => {
+  const validated = validateTextInput(text, 'text', { allowEmpty: true });
+
+  if (validated.length === 0) {
+    return 0;
+  }
+
+  return countCodePoints(validated);
+};
+
+const countLines = (text: string): number => {
+  const validated = validateTextInput(text, 'text', { allowEmpty: true });
+
+  if (validated.length === 0) {
+    return 0;
+  }
+
+  return countLinesImpl(validated);
+};
+
+/**
+ * TEXT STATISTICS INTERFACE
+ * ============================================================================
+ */
+
+interface TextStats {
+  readonly wordCount: number;
+  readonly wordCountWithMarkdown: number;
+  readonly charCount: number;
+  readonly charCountWithMarkdown: number;
+  readonly codePointCount: number;
+  readonly codePointCountWithMarkdown: number;
+  readonly lineCount: number;
+  readonly lineCountWithoutMarkdown: number;
+  readonly processingTimeMs: number;
+  // Aliases for backward compatibility
+  readonly wordCountWithMd: number;
+  readonly charCountWithMd: number;
+  readonly lineCountWithoutMd: number;
+}
+
+const calculateTextStats = (content: string): TextStats => {
+  const startTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+
+  const validated = validateTextInput(content, 'content', { allowEmpty: true });
+  const stripped = stripMarkdown(validated);
+
+  const wordCountVal = countWordsImpl(stripped);
+  const wordCountWithMarkdownVal = countWordsImpl(validated);
+  const charCountVal = countGraphemesImpl(stripped);
+  const charCountWithMarkdownVal = countGraphemesImpl(validated);
+  const lineCountWithoutMarkdownVal = countLinesImpl(stripped);
+
+  const stats: TextStats = freeze({
+    wordCount: wordCountVal,
+    wordCountWithMarkdown: wordCountWithMarkdownVal,
+    charCount: charCountVal,
+    charCountWithMarkdown: charCountWithMarkdownVal,
+    codePointCount: countCodePoints(stripped),
+    codePointCountWithMarkdown: countCodePoints(validated),
+    lineCount: countLinesImpl(validated),
+    lineCountWithoutMarkdown: lineCountWithoutMarkdownVal,
+    processingTimeMs: 0,
+    // Aliases for backward compatibility
+    wordCountWithMd: wordCountWithMarkdownVal,
+    charCountWithMd: charCountWithMarkdownVal,
+    lineCountWithoutMd: lineCountWithoutMarkdownVal,
+  });
+
+  const endTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const processingTimeMs = Math.round((endTime - startTime) * 1000) / 1000;
+
+  return freeze({
     ...stats,
     processingTimeMs,
-  };
-  
-  // IMMUTABILITY: Return frozen object
-  return Object.freeze(enhancedStats);
-}
+  });
+};
+
+const calculateTextStatsAsync = async (content: string): Promise<TextStats> => {
+  const startTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+
+  const validated = validateTextInput(content, 'content', { allowEmpty: true });
+
+  await yieldToMain();
+
+  const stripped = await stripMarkdownAsync(validated);
+
+  await yieldToMain();
+
+  const wordCount = countWordsImpl(stripped);
+  const wordCountWithMarkdown = countWordsImpl(validated);
+
+  await yieldToMain();
+
+  const charCount = countGraphemesImpl(stripped);
+  const charCountWithMarkdown = countGraphemesImpl(validated);
+  const codePointCount = countCodePoints(stripped);
+  const codePointCountWithMarkdown = countCodePoints(validated);
+
+  await yieldToMain();
+
+  const lineCount = countLinesImpl(validated);
+  const lineCountWithoutMarkdown = countLinesImpl(stripped);
+
+  const endTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const processingTimeMs = Math.round((endTime - startTime) * 1000) / 1000;
+
+  return freeze({
+    wordCount,
+    wordCountWithMarkdown,
+    charCount,
+    charCountWithMarkdown,
+    codePointCount,
+    codePointCountWithMarkdown,
+    lineCount,
+    lineCountWithoutMarkdown,
+    processingTimeMs,
+    // Aliases for backward compatibility
+    wordCountWithMd: wordCountWithMarkdown,
+    charCountWithMd: charCountWithMarkdown,
+    lineCountWithoutMd: lineCountWithoutMarkdown,
+  });
+};
+
+const processText = (content: string): TextStats => {
+  if (content.length > CONFIG.ASYNC_THRESHOLD) {
+    throw new Error(
+      `Input exceeds sync threshold (${CONFIG.ASYNC_THRESHOLD}). Use processTextAsync() instead.`
+    );
+  }
+  return calculateTextStats(content);
+};
+
+const processTextAsync = async (content: string): Promise<TextStats> => {
+  return calculateTextStatsAsync(content);
+};
 
 /**
- * MODULE INITIALIZATION AND EXPORTS
+ * UTILITY FUNCTIONS
  * ============================================================================
  */
 
-/**
- * Pre-populates regex cache and validates module state
- */
-function initializeModule(): void {
-  try {
-    // Pre-warm regex cache with all patterns
-    MARKDOWN_PATTERNS.forEach(({ pattern, flags }) => {
-      RegexCache.get(pattern, flags);
-    });
-    
-    // Validate module constants
-    if (SECURITY_CONFIG.MAX_INPUT_SIZE <= 0) {
-      throw new Error('Invalid security configuration: MAX_INPUT_SIZE must be positive');
-    }
-    
-    console.debug('Text processing module initialized successfully');
-  } catch (error) {
-    console.error('Failed to initialize text processing module:', error);
-    throw error;
-  }
-}
+const isString = (value: unknown): value is string => {
+  return typeof value === 'string';
+};
 
-// Auto-initialize module on load
-if (typeof window !== 'undefined' || typeof global !== 'undefined') {
-  // Use requestIdleCallback or setTimeout for non-blocking initialization
-  const init = () => {
-    try {
-      initializeModule();
-    } catch (error) {
-      // Log but don't crash - module will initialize on first use
-      console.warn('Module initialization deferred:', error);
-    }
-  };
-  
-  if (typeof requestIdleCallback !== 'undefined') {
-    requestIdleCallback(init);
-  } else {
-    setTimeout(init, 0);
-  }
-}
+const validateAndSanitizeString = (
+  value: unknown,
+  paramName: string,
+  options: TextInputOptions = {}
+): string => {
+  return validateTextInput(value, paramName, options);
+};
+
+const clearCache = (): void => {
+  RegexCache.clear();
+};
+
+const getCacheStats = (): { size: number; maxSize: number } => {
+  return freeze({
+    size: RegexCache.size(),
+    maxSize: CONFIG.MAX_CACHE_SIZE,
+  });
+};
 
 /**
- * Export error classes for external handling
+ * EXPORTS
+ * ============================================================================
  */
+
 export {
   SecurityError,
   ValidationError,
   ResourceError,
 };
 
-/**
- * Export validation utilities for external use
- */
+export {
+  stripMarkdown,
+  stripMarkdownAsync,
+  countWords,
+  countChars,
+  countCharsCodePoints,
+  countLines,
+  calculateTextStats,
+  calculateTextStatsAsync,
+  processText,
+  processTextAsync,
+};
+
 export {
   validateAndSanitizeString,
   isString,
+  clearCache,
+  getCacheStats,
 };
 
-/**
- * Export regex cache for advanced usage (with caution)
- */
-export { RegexCache };
+export type {
+  TextStats,
+  TextInputOptions,
+};
+
+export { CONFIG, MARKDOWN_PATTERNS };
