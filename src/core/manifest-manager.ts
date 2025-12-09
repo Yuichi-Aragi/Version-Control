@@ -187,10 +187,9 @@ export class ManifestManager {
 
     public updateNoteManifest(
         noteId: string, 
-        updateFn: (draft: Draft<NoteManifest>) => void,
-        options: { bypassQueue?: boolean } = {}
+        updateFn: (draft: Draft<NoteManifest>) => void
     ) {
-        return this.noteManifestRepo.update(noteId, updateFn, options);
+        return this.noteManifestRepo.update(noteId, updateFn);
     }
 
     public invalidateNoteManifestCache(noteId: string) {

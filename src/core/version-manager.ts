@@ -74,11 +74,13 @@ export class VersionManager {
     if (!(await this.app.vault.adapter.exists(file.path))) {
         throw new Error(`File to be saved does not exist at path: ${file.path}`);
     }
+    
+    // Use adapter read to support both .md and .base files uniformly as text
     const contentToSave = await this.app.vault.adapter.read(file.path);
 
     const latestContent = await this.versionContentRepo.getLatestVersionContent(noteId, noteManifest);
 
-    if (isAuto && settings.enableMinLinesChangedCheck && latestContent !== null) {
+    if (isAuto && (settings as any).enableMinLinesChangedCheck && latestContent !== null) {
         const changes = diffLines(latestContent, contentToSave);
         let changedLines = 0;
         for (const part of changes) {
@@ -87,7 +89,7 @@ export class VersionManager {
             }
         }
 
-        if (changedLines < settings.minLinesChanged) {
+        if (changedLines < (settings as any).minLinesChanged) {
             return { status: 'skipped_min_lines', newVersionEntry: null, displayName: '', newNoteId: noteId };
         }
     }
@@ -98,8 +100,11 @@ export class VersionManager {
       }
     }
 
-    // Determine version number for ID generation
-    const nextVersionNumber = (currentBranch.totalVersions || 0) + 1;
+    // Determine version number for ID generation using strict incremental logic
+    const existingVersionNumbers = Object.values(currentBranch.versions).map(v => v.versionNumber);
+    const maxVersion = existingVersionNumbers.length > 0 ? Math.max(...existingVersionNumbers) : 0;
+    const nextVersionNumber = maxVersion + 1;
+
     const version_name = (name || '').trim();
     
     // Generate version ID using the configured format
@@ -113,17 +118,13 @@ export class VersionManager {
       const updatedManifest = await this.manifestManager.updateNoteManifest(noteId, (manifest) => {
         const branch = manifest.branches[branchName];
         if (branch) {
-            // Recalculate version number inside update to ensure consistency if concurrent saves happened
-            const versionNumber = (branch.totalVersions || 0) + 1;
-            
-            // Note: If versionId was generated based on versionNumber, and versionNumber changed due to concurrency,
-            // there is a theoretical mismatch. However, manifest updates are queued, so this block runs sequentially.
-            // The file write happened before this. If we strictly want ID to match number, we might need to lock earlier.
-            // For now, we assume sequential access via queue in manifest manager protects the integrity of the manifest,
-            // but the file name might reflect the 'attempted' version number.
+            // Re-calculate version number inside update to ensure consistency if concurrent saves happened
+            const currentVersions = Object.values(branch.versions);
+            const currentMax = currentVersions.length > 0 ? Math.max(...currentVersions.map(v => v.versionNumber)) : 0;
+            const finalVersionNumber = currentMax + 1;
             
             branch.versions[versionId] = {
-              versionNumber,
+              versionNumber: finalVersionNumber,
               timestamp,
               size,
               ...(version_name && { name: version_name }),
@@ -134,7 +135,7 @@ export class VersionManager {
               lineCount: textStats.lineCount,
               lineCountWithoutMd: textStats.lineCountWithoutMd,
             };
-            branch.totalVersions = versionNumber;
+            branch.totalVersions = finalVersionNumber;
             manifest.lastModified = timestamp;
         }
       });
@@ -273,12 +274,10 @@ export class VersionManager {
           return this.plugin.settings;
       } else {
           // Merge global settings with local overrides
-          // We filter out undefined values from branchSettings to allow defaults to shine through if needed,
-          // though typically local settings are fully populated when set.
           const definedBranchSettings = Object.fromEntries(
               Object.entries(branchSettings ?? {}).filter(([, v]) => v !== undefined)
           );
-          return { ...this.plugin.settings, ...definedBranchSettings, isGlobal: false };
+          return { ...this.plugin.settings, ...definedBranchSettings };
       }
   }
 
@@ -355,50 +354,57 @@ export class VersionManager {
     if (versionContent === null) {
         throw new Error('Could not load version content for deviation.');
     }
+    
+    const suffix = `(from V${versionId.substring(0, 6)}...)`;
+    return this.createDeviationFromContent(noteId, versionContent, targetFolder, suffix);
+  }
 
-    const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
-    const originalFile = noteManifest ? this.app.vault.getAbstractFileByPath(noteManifest.notePath) : null;
-    const originalTFile = originalFile instanceof TFile ? originalFile : null;
-    const baseName = originalTFile?.basename || 'Untitled Version';
-    const extension = originalTFile?.extension || 'md';
+  public async createDeviationFromContent(noteId: string, content: string, targetFolder: TFolder | null, suffix: string): Promise<TFile | null> {
+      if (!noteId) throw new Error('Invalid parameters for creating deviation.');
 
-    let parentPath = targetFolder?.isRoot() ? '' : targetFolder?.path ?? originalTFile?.parent?.path ?? '';
-    if (parentPath === '/') {
-        parentPath = '';
-    }
+      const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
+      const originalFile = noteManifest ? this.app.vault.getAbstractFileByPath(noteManifest.notePath) : null;
+      const originalTFile = originalFile instanceof TFile ? originalFile : null;
+      const baseName = originalTFile?.basename || 'Untitled Version';
+      const extension = originalTFile?.extension || 'md';
 
-    const newFileNameBase = `${baseName} (from V${versionId.substring(0, 6)}...)`;
-    const newFilePath = await generateUniqueFilePath(this.app, newFileNameBase, parentPath, extension);
+      let parentPath = targetFolder?.isRoot() ? '' : targetFolder?.path ?? originalTFile?.parent?.path ?? '';
+      if (parentPath === '/') {
+          parentPath = '';
+      }
 
-    this.noteManager.addPendingDeviation(newFilePath);
+      const newFileNameBase = `${baseName} ${suffix}`;
+      const newFilePath = await generateUniqueFilePath(this.app, newFileNameBase, parentPath, extension);
 
-    try {
-        const newFile = await this.app.vault.create(newFilePath, versionContent);
-        if (!newFile) {
-            throw new Error('Failed to create the new note file for deviation.');
-        }
+      this.noteManager.addPendingDeviation(newFilePath);
 
-        if (extension === 'md') {
-            try {
-                await this.app.fileManager.processFrontMatter(newFile, (fm: FrontMatterCache) => {
-                    delete fm[this.noteIdKey];
-                });
-            } catch (fmError) {
-                console.error(`VC: Failed to remove vc-id from new deviation note "${newFilePath}". Trashing the file to prevent issues.`, fmError);
-                await this.app.vault.trash(newFile, true).catch((delErr) => {
-                    console.error(`VC: CRITICAL: Failed to trash corrupted deviation file "${newFilePath}". Please delete it manually.`, delErr);
-                });
-                throw new Error(`Failed to create a clean deviation. The file could not be processed after creation.`);
-            }
-        }
+      try {
+          const newFile = await this.app.vault.create(newFilePath, content);
+          if (!newFile) {
+              throw new Error('Failed to create the new note file for deviation.');
+          }
 
-        return newFile;
-    } catch (error) {
-        console.error(`VC: Failed to create deviation for note ${noteId}, version ${versionId}.`, error);
-        throw error;
-    } finally {
-        this.noteManager.removePendingDeviation(newFilePath);
-    }
+          if (extension === 'md') {
+              try {
+                  await this.app.fileManager.processFrontMatter(newFile, (fm: FrontMatterCache) => {
+                      delete fm[this.noteIdKey];
+                  });
+              } catch (fmError) {
+                  console.error(`VC: Failed to remove vc-id from new deviation note "${newFilePath}". Trashing the file to prevent issues.`, fmError);
+                  await this.app.vault.trash(newFile, true).catch((delErr) => {
+                      console.error(`VC: CRITICAL: Failed to trash corrupted deviation file "${newFilePath}". Please delete it manually.`, delErr);
+                  });
+                  throw new Error(`Failed to create a clean deviation. The file could not be processed after creation.`);
+              }
+          }
+
+          return newFile;
+      } catch (error) {
+          console.error(`VC: Failed to create deviation for note ${noteId}.`, error);
+          throw error;
+      } finally {
+          this.noteManager.removePendingDeviation(newFilePath);
+      }
   }
 
   public async deleteVersion(noteId: string, versionId: string): Promise<boolean> {
@@ -462,14 +468,7 @@ export class VersionManager {
 
   // Branching logic
   public async createBranch(noteId: string, newBranchName: string): Promise<void> {
-    const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
-    if (noteManifest) {
-        const file = this.app.vault.getAbstractFileByPath(noteManifest.notePath);
-        if (file instanceof TFile && file.extension === 'base') {
-            new Notice('Branching is not supported for .base files.');
-            return;
-        }
-    }
+    // Branching is fully supported for .base files as well
     await this.manifestManager.updateNoteManifest(noteId, manifest => {
         if (manifest.branches[newBranchName]) {
             throw new Error(`Branch "${newBranchName}" already exists.`);
@@ -489,11 +488,6 @@ export class VersionManager {
   public async switchBranch(noteId: string, newBranchName: string): Promise<void> {
     const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
     if (!noteManifest) throw new Error('Manifest not found');
-    const file = this.app.vault.getAbstractFileByPath(noteManifest.notePath);
-    if (file instanceof TFile && file.extension === 'base') {
-        new Notice('Branching is not supported for .base files.');
-        return;
-    }
 
     const currentBranchName = noteManifest.currentBranch;
     if (currentBranchName === newBranchName) return;
@@ -536,6 +530,25 @@ export class VersionManager {
                 }
             });
         }
+    } else {
+        // Fallback for .base files or files not open in MarkdownView
+        // We read from disk to save state.
+        try {
+            const content = await this.app.vault.adapter.read(noteManifest.notePath);
+            const state: BranchState = {
+                content,
+                cursor: { line: 0, ch: 0 },
+                scroll: { left: 0, top: 0 }
+            };
+            await this.manifestManager.updateNoteManifest(noteId, manifest => {
+                const branch = manifest.branches[currentBranchName];
+                if (branch) {
+                    branch.state = state;
+                }
+            });
+        } catch (e) {
+            console.warn(`VC: Could not save state for ${noteManifest.notePath}`, e);
+        }
     }
 
     // 2. Switch branch pointer in manifest
@@ -546,22 +559,22 @@ export class VersionManager {
         manifest.currentBranch = newBranchName;
     });
 
-    // 3. Load new state into the editor
+    // 3. Load new state into the editor or file
     const newManifest = await this.manifestManager.loadNoteManifest(noteId);
     if (!newManifest) throw new Error("Failed to reload manifest after switching branch.");
 
     const newBranch = newManifest.branches[newBranchName];
     const newBranchState = newBranch?.state;
 
-    if (targetView) {
-        let contentToRestore: string | null = null;
-        
-        if (newBranchState) {
-            contentToRestore = newBranchState.content;
-        } else {
-            contentToRestore = await this.versionContentRepo.getLatestVersionContent(noteId, newManifest);
-        }
+    let contentToRestore: string | null = null;
+    
+    if (newBranchState) {
+        contentToRestore = newBranchState.content;
+    } else {
+        contentToRestore = await this.versionContentRepo.getLatestVersionContent(noteId, newManifest);
+    }
 
+    if (targetView) {
         if (contentToRestore !== null) {
             if (targetView.getMode() === 'source') {
                 targetView.editor.setValue(contentToRestore);
@@ -572,6 +585,14 @@ export class VersionManager {
             } else if (targetView.file) {
                 // In preview mode, write to file to update view
                 await this.app.vault.modify(targetView.file, contentToRestore);
+            }
+        }
+    } else {
+        // If no view, write to disk directly (e.g. .base files)
+        if (contentToRestore !== null) {
+            const file = this.app.vault.getAbstractFileByPath(noteManifest.notePath);
+            if (file instanceof TFile) {
+                await this.app.vault.modify(file, contentToRestore);
             }
         }
     }

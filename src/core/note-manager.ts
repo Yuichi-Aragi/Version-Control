@@ -5,6 +5,7 @@ import type { ActiveNoteInfo } from "../types";
 import { generateNoteId, extractUuidFromId, extractTimestampFromId } from "../utils/id";
 import { TYPES } from "../types/inversify.types";
 import type VersionControlPlugin from "../main";
+import { EditHistoryManager } from "./edit-history-manager";
 
 @injectable()
 export class NoteManager {
@@ -15,11 +16,16 @@ export class NoteManager {
     constructor(
         @inject(TYPES.Plugin) private plugin: VersionControlPlugin,
         @inject(TYPES.App) private app: App, 
-        @inject(TYPES.ManifestManager) private manifestManager: ManifestManager
+        @inject(TYPES.ManifestManager) private manifestManager: ManifestManager,
+        @inject(TYPES.EditHistoryManager) private editHistoryManager: EditHistoryManager
     ) {}
 
     private get noteIdKey(): string {
         return this.plugin.settings.noteIdFrontmatterKey;
+    }
+
+    private get legacyNoteIdKeys(): string[] {
+        return this.plugin.settings.legacyNoteIdFrontmatterKeys || [];
     }
 
     async getActiveNoteState(leaf?: WorkspaceLeaf | null): Promise<ActiveNoteInfo> {
@@ -35,6 +41,13 @@ export class NoteManager {
         }
 
         if (file.extension === 'base') {
+            // For .base files, we must retrieve the ID consistently using getNoteId logic
+            // which handles manifest lookups and sanitization.
+            const noteId = await this.getNoteId(file);
+            if (noteId) {
+                return { file, noteId, source: 'filepath' };
+            }
+            // If getNoteId returns null (unlikely for .base unless error), fallback to path but it might mismatch
             return { file, noteId: file.path, source: 'filepath' };
         }
 
@@ -43,17 +56,11 @@ export class NoteManager {
                 return { file: null, noteId: null, source: 'none' };
             }
 
-            const fileCache = this.app.metadataCache.getFileCache(file);
-            let noteIdFromFrontmatter = fileCache?.frontmatter?.[this.noteIdKey] ?? null;
+            // Use getNoteId to handle both primary and legacy keys
+            const noteId = await this.getNoteId(file);
 
-            // Treat empty string vc-id as null
-            if (typeof noteIdFromFrontmatter === 'string' && noteIdFromFrontmatter.trim() === '') {
-                noteIdFromFrontmatter = null;
-            }
-
-
-            if (typeof noteIdFromFrontmatter === 'string') {
-                return { file, noteId: noteIdFromFrontmatter, source: 'frontmatter' };
+            if (noteId) {
+                return { file, noteId, source: 'frontmatter' };
             }
 
             try {
@@ -74,23 +81,86 @@ export class NoteManager {
         if (!file) return null;
 
         if (file.extension === 'base') {
-            return file.path;
+            // Priority 1: Check Central Manifest for existing ID associated with this path
+            // This ensures stability if the file was renamed/moved but manifest updated
+            const existingId = await this.manifestManager.getNoteIdByPath(file.path);
+            if (existingId) {
+                return existingId;
+            }
+            
+            // Priority 2: Generate ID based on path (fallback/new file)
+            // Use generateNoteId to ensure consistent ID generation (path-based, sanitized)
+            return generateNoteId(this.plugin.settings, file);
         }
+
+        let noteId: string | null = null;
 
         if (file.extension === 'md') {
             const fileCache = this.app.metadataCache.getFileCache(file);
-            let idFromCache = fileCache?.frontmatter?.[this.noteIdKey];
+            const frontmatter = fileCache?.frontmatter;
 
-            if (typeof idFromCache === 'string' && idFromCache.trim() !== '') {
-                return idFromCache;
-            }
-            if (typeof idFromCache === 'string' && idFromCache.trim() === '') {
-                // If vc-id is present but empty, treat as if it's not there for getNoteId purposes
-                // The auto-reconciliation might pick this up if manifest has an ID.
-                return null;
+            // 1. Check Primary Key
+            let id = frontmatter?.[this.noteIdKey];
+            if (this.isValidId(id)) {
+                noteId = id;
+            } else {
+                // 2. Check Legacy Keys
+                for (const legacyKey of this.legacyNoteIdKeys) {
+                    id = frontmatter?.[legacyKey];
+                    if (this.isValidId(id)) {
+                        // Found valid ID in legacy key. Migrate it silently.
+                        // We await this to ensure consistency, though it might add a slight delay on first access.
+                        await this.migrateLegacyKey(file, legacyKey, this.noteIdKey, id).catch(e => 
+                            console.error(`VC: Failed to migrate legacy key '${legacyKey}' to '${this.noteIdKey}' for file '${file.path}'`, e)
+                        );
+                        noteId = id;
+                        break;
+                    }
+                }
             }
         }
-        return null;
+
+        if (noteId) {
+            await this.ensurePathConsistency(noteId, file.path);
+        }
+
+        return noteId;
+    }
+
+    private async ensurePathConsistency(noteId: string, currentPath: string): Promise<void> {
+        try {
+            const centralManifest = await this.manifestManager.loadCentralManifest();
+            const noteEntry = centralManifest.notes[noteId];
+
+            if (noteEntry && noteEntry.notePath !== currentPath) {
+                console.log(`VC: External move detected for note "${noteId}". Updating path from "${noteEntry.notePath}" to "${currentPath}".`);
+                
+                // 1. Update Version History (Central + Note Manifests)
+                await this.manifestManager.updateNotePath(noteId, currentPath);
+                
+                // 2. Update Edit History (IndexedDB + Edit Manifest)
+                await this.editHistoryManager.updateNotePath(noteId, currentPath);
+            }
+        } catch (error) {
+            console.error(`VC: Failed to ensure path consistency for note ${noteId}`, error);
+        }
+    }
+
+    private isValidId(id: any): id is string {
+        return typeof id === 'string' && id.trim() !== '';
+    }
+
+    private async migrateLegacyKey(file: TFile, oldKey: string, newKey: string, value: string): Promise<void> {
+        try {
+            await this.app.fileManager.processFrontMatter(file, (fm) => {
+                if (fm[oldKey] === value) {
+                    delete fm[oldKey];
+                    fm[newKey] = value;
+                }
+            });
+        } catch (error) {
+            console.error(`VC: Error migrating legacy key for ${file.path}`, error);
+        }
     }
 
     /**
@@ -103,7 +173,8 @@ export class NoteManager {
      */
     async getOrCreateNoteId(file: TFile): Promise<string | null> {
         if (file.extension === 'base') {
-            return file.path;
+            // Use getNoteId to leverage manifest lookup + generation logic
+            return this.getNoteId(file);
         }
 
         if (file.extension === 'md') {
@@ -137,6 +208,13 @@ export class NoteManager {
         try {
             await this.app.fileManager.processFrontMatter(file, (frontmatter: FrontMatterCache) => {
                 frontmatter[this.noteIdKey] = noteId;
+                
+                // Also clean up any legacy keys if they exist, just in case
+                for (const legacyKey of this.legacyNoteIdKeys) {
+                    if (frontmatter[legacyKey]) {
+                        delete frontmatter[legacyKey];
+                    }
+                }
             });
             return true;
         } catch (error) {
@@ -175,17 +253,25 @@ export class NoteManager {
                     // Perform the rename operation (Folder rename + Manifest updates)
                     await this.manifestManager.renameNoteEntry(noteIdToUpdate, uniqueNewId);
                     
-                    // Update the frontmatter in the file
-                    await this.writeNoteIdToFrontmatter(file, uniqueNewId);
+                    if (file.extension === 'md') {
+                        // Update the frontmatter in the file for .md files
+                        await this.writeNoteIdToFrontmatter(file, uniqueNewId);
+                    }
                     
                     // We also need to update the path in the manifest (which is now under new ID)
                     await this.manifestManager.updateNotePath(uniqueNewId, file.path);
+
+                    // CRITICAL: Update Edit History to match new ID and Path
+                    await this.editHistoryManager.renameNote(noteIdToUpdate, uniqueNewId, file.path);
                     
                     return; // Done
                 }
 
                 // If ID didn't change, just update the path mapping
                 await this.manifestManager.updateNotePath(noteIdToUpdate, file.path);
+
+                // CRITICAL: Update Edit History path
+                await this.editHistoryManager.updateNotePath(noteIdToUpdate, file.path);
             } else {
                 // If no ID was found for the old path, there's nothing to update in our DB,
                 // but we should still invalidate the central manifest cache in case it was stale.
@@ -222,6 +308,7 @@ export class NoteManager {
             // Extract UUID
             const currentUuid = extractUuidFromId(currentId);
 
+            // Generate expected ID based on current file path and preserved components
             const expectedId = generateNoteId(settings, file, timestamp, currentUuid);
 
             // If the ID is different, we should update it to match the current path
@@ -230,8 +317,15 @@ export class NoteManager {
                 const uniqueNewId = await this.manifestManager.ensureUniqueNoteId(expectedId);
                 
                 await this.manifestManager.renameNoteEntry(currentId, uniqueNewId);
-                await this.writeNoteIdToFrontmatter(file, uniqueNewId);
+                
+                if (file.extension === 'md') {
+                    await this.writeNoteIdToFrontmatter(file, uniqueNewId);
+                }
+                
                 await this.manifestManager.updateNotePath(uniqueNewId, file.path);
+
+                // CRITICAL: Update Edit History to match new ID and Path
+                await this.editHistoryManager.renameNote(currentId, uniqueNewId, file.path);
             }
         } catch (error) {
             console.error(`VC: Error verifying note ID match for "${file.path}".`, error);
