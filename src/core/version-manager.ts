@@ -1,4 +1,4 @@
-import { App, TFile, MarkdownView, TFolder, type FrontMatterCache, Notice } from 'obsidian';
+import { App, TFile, MarkdownView, TFolder, type FrontMatterCache } from 'obsidian';
 import { map, orderBy } from 'lodash-es';
 import { injectable, inject } from 'inversify';
 import { diffLines } from 'diff';
