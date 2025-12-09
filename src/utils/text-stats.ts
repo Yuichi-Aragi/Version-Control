@@ -118,7 +118,7 @@ function validateAndSanitizeString(
   } = {}
 ): string {
   const {
-    allowEmpty = false,
+    allowEmpty = true,
     maxLength = SECURITY_CONFIG.MAX_INPUT_LENGTH,
     sanitizeControlChars = true,
   } = options;

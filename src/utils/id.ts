@@ -187,7 +187,7 @@ function validateAndSanitizeString(input: unknown, _paramName: string): string {
  * transformFilePathExtensions('folder/.md/file.txt') // Returns 'folder/.md/file.txt' (not at end)
  * ```
  */
-function transformFilePathExtensions(path: string): string {
+export function transformFilePathExtensions(path: string): string {
     if (typeof path !== 'string' || path.length === 0) {
         return path;
     }
@@ -297,7 +297,7 @@ export function extractTimestampFromId(id: string): string | null {
 
     const match = id.match(VALIDATION.REGEX.TIMESTAMP);
     // match[1] contains the captured digits
-    return match ? match[1] : null;
+    return match ? (match[1] || null) : null;
 }
 
 /**
@@ -320,6 +320,10 @@ export function extractTimestampFromId(id: string): string | null {
  * Note: File path extensions (.md/.base) are transformed to _md/_base at the end of the path
  * only when used for the {path} variable.
  * 
+ * Special handling for .base files:
+ * If the file extension is 'base', the format is forced to '{path}' regardless of settings.
+ * This ensures .base files always use a path-based ID structure (transformed to _base).
+ * 
  * @example
  * ```typescript
  * generateNoteId(settings, file) // Returns 'folder_note_md_1640995200000'
@@ -336,9 +340,15 @@ export function generateNoteId(settings: VersionControlSettings, file: TFile, cu
     }
     
     // Safe access with defaults
-    const format = typeof settings.noteIdFormat === 'string' && settings.noteIdFormat.trim().length > 0
+    let format = typeof settings.noteIdFormat === 'string' && settings.noteIdFormat.trim().length > 0
         ? settings.noteIdFormat
         : '{uuid}';
+
+    // Override format for .base files to ensure path-based ID
+    // This ignores the user's configured format for these specific files
+    if (file.extension === 'base') {
+        format = '{path}';
+    }
     
     // Validate file properties
     const filePath = validateAndSanitizeString(file.path, 'file.path');
