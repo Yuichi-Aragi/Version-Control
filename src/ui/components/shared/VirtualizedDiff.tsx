@@ -292,11 +292,11 @@ export const StaticDiff: FC<{
                     key={data.key}
                     data={data}
                     isHighlighted={activeMatchInfo?.lineIndex === index}
-                    searchQuery={searchQuery}
-                    isCaseSensitive={isCaseSensitive}
+                    {...(searchQuery && { searchQuery })}
+                    {...(isCaseSensitive && { isCaseSensitive })}
                     isTargetLine={activeMatchInfo?.lineIndex === index}
                     targetMatchIndexInLine={activeMatchInfo?.lineIndex === index ? activeMatchInfo.matchIndexInLine : -1}
-                    onClick={onLineClick}
+                    {...(onLineClick && { onClick: onLineClick })}
                 />
             ))}
         </div>
