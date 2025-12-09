@@ -244,7 +244,12 @@ export class DiffManager extends Component {
             if (activeMarkdownView?.file?.path === file.path && activeMarkdownView.getMode() === 'source') {
                 return activeMarkdownView.editor.getValue();
             } else {
-                // Optimize reading file on disk as binary for transfer
+                // Optimize reading file on disk. 
+                // For .base files, use adapter.read() to get string content.
+                if (file.extension === 'base') {
+                    return await this.app.vault.adapter.read(file.path);
+                }
+                // For other files (presumably binary or large), use readBinary
                 return await this.app.vault.adapter.readBinary(file.path);
             }
         } else {
