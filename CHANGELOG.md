@@ -1,5 +1,14 @@
 ***
 
+**Version: 1.9.33**
+
+#### ✨ New Features
+
+* **Compression Feature:** Added an optional compression feature. When enabled, it ensures all version history files are compressed before being written to disk, which helps limit file size.
+* **Manual Decompression Note:** If you want to use the version file without the plugin, you can change the version file's `.md` extension to `.gz`, extract the file, rename the extracted file by adding the `.md` extension, and then open it.
+
+***
+
 **Version: 1.9.32**
 
 #### ✨ New Features
