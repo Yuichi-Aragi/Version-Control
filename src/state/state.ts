@@ -1,5 +1,5 @@
 import { TFile } from 'obsidian';
-import type { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, DiffRequest, DiffType, Change, TimelineEvent, TimelineSettings } from '../types';
+import type { VersionControlSettings, HistorySettings, VersionHistoryEntry, AppError, DiffTarget, DiffRequest, DiffType, Change, TimelineEvent, TimelineSettings, ViewMode } from '../types';
 export type { TimelineEvent } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
 import type { AppThunk } from './store';
@@ -107,22 +107,29 @@ export interface SortOrder {
     direction: SortDirection;
 }
 
-export interface KeyUpdateProgress {
-    active: boolean;
-    progress: number;
-    total: number;
-    message: string;
-}
-
 export interface AppState {
     status: AppStatus;
-    settings: VersionControlSettings;
+    settings: VersionControlSettings & {
+        enableMinLinesChangedCheck?: boolean;
+        minLinesChanged?: number;
+        renderMarkdownInPreview?: boolean;
+        isGlobal?: boolean;
+    };
+    
+    // Effective settings for the current context (Note + Branch + ViewMode)
+    effectiveSettings: HistorySettings;
+
     error: AppError | null;
     
     // Properties for LOADING and READY states
     file: TFile | null; 
     noteId: string | null;
-    history: VersionHistoryEntry[];
+    
+    // History Data
+    viewMode: ViewMode;
+    history: VersionHistoryEntry[]; // Used for Versions
+    editHistory: VersionHistoryEntry[]; // Used for Edits
+
     currentBranch: string | null;
     availableBranches: string[];
     
@@ -145,9 +152,6 @@ export interface AppState {
 
     // Watch Mode properties
     watchModeCountdown: number | null;
-
-    // Key update progress
-    keyUpdateProgress: KeyUpdateProgress | null;
 }
 
 export const getInitialState = (loadedSettings: VersionControlSettings): AppState => {
@@ -155,10 +159,13 @@ export const getInitialState = (loadedSettings: VersionControlSettings): AppStat
     return {
         status: AppStatus.INITIALIZING,
         settings: { ...DEFAULT_SETTINGS, ...loadedSettings },
+        effectiveSettings: DEFAULT_SETTINGS.versionHistorySettings, // Default start
         error: null,
         file: null,
         noteId: null,
+        viewMode: 'versions',
         history: [],
+        editHistory: [],
         currentBranch: null,
         availableBranches: [],
         isProcessing: false,
@@ -173,6 +180,5 @@ export const getInitialState = (loadedSettings: VersionControlSettings): AppStat
         sortOrder: defaultSortOrder,
         diffRequest: null,
         watchModeCountdown: null,
-        keyUpdateProgress: null,
     };
 };

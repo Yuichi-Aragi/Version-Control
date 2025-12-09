@@ -3,7 +3,7 @@ import type { PayloadAction } from '@reduxjs/toolkit';
 import { TFile } from 'obsidian';
 import { AppStatus, getInitialState } from './state';
 import type { AppState, PanelState, SortOrder } from './state';
-import type { VersionControlSettings, VersionHistoryEntry, AppError, DiffTarget, ActiveNoteInfo, DiffType, Change, TimelineEvent, TimelineSettings } from '../types';
+import type { VersionControlSettings, HistorySettings, VersionHistoryEntry, AppError, DiffTarget, ActiveNoteInfo, DiffType, Change, TimelineEvent, TimelineSettings, ViewMode } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
 
 const initialState: AppState = getInitialState(DEFAULT_SETTINGS);
@@ -16,19 +16,48 @@ export const appSlice = createSlice({
         updateSettings(state, action: PayloadAction<Partial<VersionControlSettings>>) {
             state.settings = { ...state.settings, ...action.payload };
         },
+        updateEffectiveSettings(state, action: PayloadAction<HistorySettings>) {
+            state.effectiveSettings = action.payload;
+        },
         reportError(state, action: PayloadAction<AppError>) {
             state.status = AppStatus.ERROR;
             state.error = action.payload;
         },
 
         // --- State Machine Transition Actions ---
+        resetToInitializing(state) {
+            state.status = AppStatus.INITIALIZING;
+            // We preserve file, noteId, and viewMode to allow initializeView to correctly
+            // determine if it should maintain the current view mode or reset it.
+            // However, we clear all data to ensure a clean slate UI (Placeholder).
+            state.history = [];
+            state.editHistory = [];
+            state.currentBranch = null;
+            state.availableBranches = [];
+            state.panel = null;
+            state.diffRequest = null;
+            state.error = null;
+            state.isProcessing = false;
+            state.isRenaming = false;
+            state.namingVersionId = null;
+            state.isManualVersionEdit = false;
+            state.highlightedVersionId = null;
+            state.watchModeCountdown = null;
+        },
         initializeView(state, action: PayloadAction<ActiveNoteInfo>) {
             const { file } = action.payload;
+            
+            // Only reset viewMode if we are switching to a completely different file context
+            if (state.file?.path !== file?.path) {
+                 state.viewMode = 'versions';
+            }
+            
             if (!file) {
                 state.status = AppStatus.PLACEHOLDER;
                 state.file = null;
                 state.noteId = null;
                 state.history = [];
+                state.editHistory = [];
                 state.currentBranch = null;
                 state.availableBranches = [];
                 if (state.panel?.type !== 'changelog') {
@@ -50,6 +79,7 @@ export const appSlice = createSlice({
                 // Reset other fields
                 state.noteId = null;
                 state.history = [];
+                state.editHistory = [];
                 state.currentBranch = null;
                 state.availableBranches = [];
                 state.isManualVersionEdit = false;
@@ -81,11 +111,56 @@ export const appSlice = createSlice({
                 state.diffRequest = null;
             }
         },
+        editHistoryLoadedSuccess(state, action: PayloadAction<{ editHistory: VersionHistoryEntry[], currentBranch?: string | null, availableBranches?: string[] }>) {
+             // If we are loading or ready, we update. This allows transition from LOADING -> READY.
+             if (state.status === AppStatus.LOADING || state.status === AppStatus.READY) {
+                 state.editHistory = action.payload.editHistory;
+                 
+                 // Update branch info if provided (crucial for initialization in Edit mode)
+                 if (action.payload.currentBranch !== undefined) {
+                     state.currentBranch = action.payload.currentBranch;
+                 }
+                 if (action.payload.availableBranches !== undefined) {
+                     state.availableBranches = action.payload.availableBranches;
+                 }
+                 
+                 state.status = AppStatus.READY;
+                 state.isProcessing = false;
+             }
+        },
+        // NEW: Specific action for clearing history during branch switch.
+        // We set status to LOADING to force UI components to reset/show skeletons.
+        // This prevents "stale state" rendering and ensures a clean transition.
+        clearHistoryForBranchSwitch(state, action: PayloadAction<{ currentBranch: string, availableBranches: string[] }>) {
+            state.status = AppStatus.LOADING;
+            state.history = [];
+            state.editHistory = [];
+            state.currentBranch = action.payload.currentBranch;
+            state.availableBranches = action.payload.availableBranches;
+            state.isProcessing = false; // We rely on LOADING status for "busy" UI
+        },
+        setViewMode(state, action: PayloadAction<ViewMode>) {
+            state.viewMode = action.payload;
+            
+            // STRICT CLEANUP: Prevent bleed over of state from previous mode
+            state.panel = null; // Close any open panel (settings, diff, etc.)
+            state.namingVersionId = null;
+            state.isManualVersionEdit = false;
+            state.highlightedVersionId = null;
+            state.diffRequest = null;
+            state.isSearchActive = false;
+            state.searchQuery = '';
+            
+            // Note: We do NOT clear history/editHistory here to allow potential caching/fast switching,
+            // but the UI should strictly render based on viewMode.
+            // The thunk handling this action should dispatch a reload of the relevant history.
+        },
         clearActiveNote(state) {
             state.status = AppStatus.PLACEHOLDER;
             state.file = null;
             state.noteId = null;
             state.history = [];
+            state.editHistory = [];
             state.currentBranch = null;
             state.availableBranches = [];
             if (state.panel?.type !== 'changelog') {
@@ -93,6 +168,7 @@ export const appSlice = createSlice({
             }
             state.error = null;
             state.isManualVersionEdit = false;
+            state.viewMode = 'versions'; // Reset to default
         },
 
         // --- Actions specific to ReadyState ---
@@ -161,8 +237,18 @@ export const appSlice = createSlice({
             if (state.status === AppStatus.READY) {
                 state.history.unshift(action.payload.newVersion);
                 state.isProcessing = false;
-                const shouldPromptEdit = state.settings.enableVersionNaming || state.settings.enableVersionDescription;
+                const shouldPromptEdit = state.effectiveSettings.enableVersionNaming || state.effectiveSettings.enableVersionDescription;
                 state.namingVersionId = shouldPromptEdit ? action.payload.newVersion.id : null;
+                state.isManualVersionEdit = false;
+            }
+        },
+        addEditSuccess(state, action: PayloadAction<{ newEdit: VersionHistoryEntry }>) {
+            if (state.status === AppStatus.READY) {
+                state.editHistory.unshift(action.payload.newEdit);
+                state.isProcessing = false;
+                // Prompt edit for edits too? Yes, if settings enabled
+                const shouldPromptEdit = state.effectiveSettings.enableVersionNaming || state.effectiveSettings.enableVersionDescription;
+                state.namingVersionId = shouldPromptEdit ? action.payload.newEdit.id : null;
                 state.isManualVersionEdit = false;
             }
         },
@@ -180,34 +266,30 @@ export const appSlice = createSlice({
         },
         updateVersionDetailsInState(state, action: PayloadAction<{ versionId: string; name?: string; description?: string }>) {
             if (state.status === AppStatus.READY) {
-                const versionIndex = state.history.findIndex(v => v.id === action.payload.versionId);
-                if (versionIndex > -1) {
-                    const originalVersion = state.history[versionIndex];
-                    if (!originalVersion) return;
+                // Update in both lists to be safe, though usually only one is active
+                const updateList = (list: VersionHistoryEntry[]) => {
+                    const versionIndex = list.findIndex(v => v.id === action.payload.versionId);
+                    if (versionIndex > -1) {
+                        const originalVersion = list[versionIndex];
+                        if (!originalVersion) return;
 
-                    // Create a new object to ensure React's memoization detects the prop change.
-                    const updatedVersion = { ...originalVersion };
+                        const updatedVersion = { ...originalVersion };
+                        if (action.payload.name !== undefined) {
+                            const newName = action.payload.name;
+                            if (newName) updatedVersion.name = newName;
+                            else delete updatedVersion.name;
+                        }
+                        if (action.payload.description !== undefined) {
+                            const newDescription = action.payload.description;
+                            if (newDescription) updatedVersion.description = newDescription;
+                            else delete updatedVersion.description;
+                        }
+                        list[versionIndex] = updatedVersion;
+                    }
+                };
 
-                    if (action.payload.name !== undefined) {
-                        const newName = action.payload.name;
-                        if (newName) {
-                            updatedVersion.name = newName;
-                        } else {
-                            delete updatedVersion.name;
-                        }
-                    }
-                    if (action.payload.description !== undefined) {
-                        const newDescription = action.payload.description;
-                        if (newDescription) {
-                            updatedVersion.description = newDescription;
-                        } else {
-                            delete updatedVersion.description;
-                        }
-                    }
-                    // Replace the old version object with the new one.
-                    // Immer will handle creating a new history array.
-                    state.history[versionIndex] = updatedVersion;
-                }
+                updateList(state.history);
+                updateList(state.editHistory);
             }
         },
 
@@ -321,25 +403,6 @@ export const appSlice = createSlice({
             if (state.status === AppStatus.READY) {
                 state.watchModeCountdown = action.payload;
             }
-        },
-
-        // --- Key Update Progress Actions ---
-        startKeyUpdate(state, action: PayloadAction<{ total: number }>) {
-            state.keyUpdateProgress = {
-                active: true,
-                progress: 0,
-                total: action.payload.total,
-                message: 'Starting frontmatter key update...',
-            };
-        },
-        updateKeyUpdateProgress(state, action: PayloadAction<{ processed: number; message: string }>) {
-            if (state.keyUpdateProgress) {
-                state.keyUpdateProgress.progress = action.payload.processed;
-                state.keyUpdateProgress.message = action.payload.message;
-            }
-        },
-        endKeyUpdate(state) {
-            state.keyUpdateProgress = null;
         },
     },
 });
