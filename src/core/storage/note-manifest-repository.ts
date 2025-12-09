@@ -8,15 +8,35 @@ import { TYPES } from '../../types/inversify.types';
 import { QueueService } from '../../services/queue-service';
 import { DEFAULT_BRANCH_NAME } from '../../constants';
 
-type V1NoteManifest = Omit<NoteManifest, 'branches' | 'currentBranch'> & {
+type V1NoteManifest = Omit<NoteManifest, 'branches' | 'currentBranch' | 'viewMode'> & {
     versions: { [versionId: string]: any };
     totalVersions: number;
     settings?: any;
 };
 
+interface CachedManifest {
+    data: NoteManifest;
+    mtime: number;
+}
+
+/**
+ * Repository for managing Note Manifests.
+ * 
+ * ARCHITECTURE NOTE:
+ * Uses the Public (Queued) / Internal (Unqueued) pattern to prevent deadlocks.
+ * Implements "Check-Then-Act" caching strategy using file mtime.
+ * Utilises Immer for all state modifications.
+ * 
+ * DEADLOCK PROTECTION:
+ * Uses a 'manifest:' prefix for all queue keys to ensure isolation from 
+ * other services (like VersionContentRepository) operating on the same noteId.
+ */
 @injectable()
 export class NoteManifestRepository {
-    private readonly cache = new Map<string, NoteManifest>();
+    private readonly cache = new Map<string, CachedManifest>();
+    private readonly MAX_RETRIES = 3;
+    private readonly RETRY_DELAY_MS = 100;
+    private readonly QUEUE_PREFIX = 'manifest:';
 
     constructor(
         @inject(TYPES.App) private readonly app: App,
@@ -24,45 +44,21 @@ export class NoteManifestRepository {
         @inject(TYPES.QueueService) private readonly queueService: QueueService
     ) {}
 
+    private getQueueKey(noteId: string): string {
+        return `${this.QUEUE_PREFIX}${noteId}`;
+    }
+
+    // ==================================================================================
+    // PUBLIC API (Queued)
+    // ==================================================================================
+
     public async load(noteId: string, forceReload = false): Promise<NoteManifest | null> {
-        if (typeof noteId !== 'string' || noteId.trim() === '') {
-            throw new Error('Invalid noteId: must be a non-empty string');
-        }
-
-        if (!forceReload && this.cache.has(noteId)) {
-            return this.cache.get(noteId) ?? null;
-        }
-
-        try {
-            let manifestToParse = await this.readAndParseManifest(noteId);
-            if (!manifestToParse) return null;
-
-            if (this.isV1Manifest(manifestToParse)) {
-                const migratedManifest = this.migrateV1Manifest(manifestToParse);
-                await this.writeManifest(noteId, migratedManifest);
-                manifestToParse = migratedManifest;
-            }
-
-            const parseResult = NoteManifestSchema.safeParse(manifestToParse);
-            if (!parseResult.success) {
-                console.error(`VC: Manifest for note ${noteId} is invalid.`, parseResult.error);
-                await this.tryBackupCorruptFile(this.pathService.getNoteManifestPath(noteId));
-                return null;
-            }
-            
-            const validatedManifest = parseResult.data;
-            this.cache.set(noteId, validatedManifest);
-            return validatedManifest;
-
-        } catch (error) {
-            console.error(`VC: Failed to load manifest for noteId: ${noteId}`, error);
-            throw error;
-        }
+        return this.queueService.enqueue(this.getQueueKey(noteId), () => this._loadInternal(noteId, forceReload));
     }
 
     public async create(noteId: string, notePath: string): Promise<NoteManifest> {
-        return this.queueService.enqueue(noteId, async () => {
-            const existing = await this.readAndParseManifest(noteId);
+        return this.queueService.enqueue(this.getQueueKey(noteId), async () => {
+            const existing = await this._loadInternal(noteId, true);
             if (existing) {
                 throw new Error(`Manifest already exists for noteId: ${noteId}`);
             }
@@ -83,72 +79,165 @@ export class NoteManifestRepository {
             };
 
             const newManifest = NoteManifestSchema.parse(newManifestData);
-            await this.writeManifest(noteId, newManifest);
-            this.cache.set(noteId, newManifest);
+            await this._writeManifest(noteId, newManifest);
             return newManifest;
         });
     }
 
     public async update(
         noteId: string,
-        updateFn: (draft: Draft<NoteManifest>) => void,
-        options: { bypassQueue?: boolean } = {}
+        updateFn: (draft: Draft<NoteManifest>) => void
     ): Promise<NoteManifest> {
-        const task = async (): Promise<NoteManifest> => {
-            const currentManifest = await this.load(noteId, true);
+        return this.queueService.enqueue(this.getQueueKey(noteId), async () => {
+            const currentManifest = await this._loadInternal(noteId, true);
             if (!currentManifest) {
                 throw new Error(`Cannot update manifest for non-existent note ID: ${noteId}`);
             }
 
-            const updatedDraft = produce(currentManifest, (draft) => {
+            // Use Immer to produce the new state
+            const updatedManifest = produce(currentManifest, (draft) => {
                 updateFn(draft);
-                // Enforce integrity after the update
+                // Enforce integrity
                 const branch = draft.branches[draft.currentBranch];
                 if (branch) {
                     branch.totalVersions = Object.keys(branch.versions || {}).length;
                 }
             });
 
-            const updatedManifest = NoteManifestSchema.parse(updatedDraft);
-            await this.writeManifest(noteId, updatedManifest);
-            this.cache.set(noteId, updatedManifest);
-            return updatedManifest;
-        };
-
-        if (options.bypassQueue) {
-            return task();
-        }
-        return this.queueService.enqueue(noteId, task);
+            const validatedManifest = NoteManifestSchema.parse(updatedManifest);
+            await this._writeManifest(noteId, validatedManifest);
+            return validatedManifest;
+        });
     }
 
     public invalidateCache(noteId: string): void {
         this.cache.delete(noteId);
-        this.queueService.clear(noteId);
     }
 
     public clearCache(): void {
         this.cache.clear();
     }
 
-    private async readAndParseManifest(noteId: string): Promise<unknown | null> {
+    // ==================================================================================
+    // INTERNAL IMPLEMENTATION (Unqueued)
+    // ==================================================================================
+
+    private async _loadInternal(noteId: string, forceReload: boolean): Promise<NoteManifest | null> {
         const manifestPath = this.pathService.getNoteManifestPath(noteId);
+
+        let stat;
         try {
+            stat = await this.app.vault.adapter.stat(manifestPath);
+        } catch (e) {
+            stat = null;
+        }
+
+        if (!stat) {
+            this.cache.delete(noteId);
+            return null;
+        }
+
+        if (!forceReload && this.cache.has(noteId)) {
+            const cached = this.cache.get(noteId)!;
+            if (cached.mtime >= stat.mtime) {
+                return cached.data;
+            }
+        }
+
+        try {
+            let manifestToParse = await this._readAndParseManifest(noteId);
+            if (!manifestToParse) {
+                this.cache.delete(noteId);
+                return null;
+            }
+
+            // --- Migration Logic ---
+            try {
+                if (this.isV1Manifest(manifestToParse)) {
+                    const migratedManifest = this.migrateV1Manifest(manifestToParse);
+                    await this._writeManifest(noteId, migratedManifest);
+                    manifestToParse = migratedManifest;
+                    return migratedManifest;
+                }
+
+                if (this.isLegacyBranchSettings(manifestToParse)) {
+                    const migratedManifest = this.migrateLegacyBranchSettings(manifestToParse);
+                    await this._writeManifest(noteId, migratedManifest);
+                    manifestToParse = migratedManifest;
+                }
+            } catch (migrationError) {
+                console.error(`VC: Migration failed for note ${noteId}. Preserving original structure.`, migrationError);
+                // Continue with original manifestToParse if migration fails, 
+                // allowing partial functionality or later recovery.
+            }
+            // -----------------------
+
+            const parseResult = NoteManifestSchema.safeParse(manifestToParse);
+            if (!parseResult.success) {
+                console.error(`VC: Manifest for note ${noteId} is invalid.`, parseResult.error);
+                await this.tryBackupCorruptFile(manifestPath);
+                this.cache.delete(noteId);
+                return null;
+            }
+            
+            const validatedManifest = parseResult.data;
+            this.cache.set(noteId, { data: validatedManifest, mtime: stat.mtime });
+            return validatedManifest;
+
+        } catch (error) {
+            console.error(`VC: Failed to load manifest for noteId: ${noteId}`, error);
+            this.cache.delete(noteId);
+            throw error;
+        }
+    }
+
+    private async _readAndParseManifest(noteId: string): Promise<unknown | null> {
+        const manifestPath = this.pathService.getNoteManifestPath(noteId);
+        
+        return this.executeWithRetry(async () => {
             if (!(await this.app.vault.adapter.exists(manifestPath))) {
                 return null;
             }
             const content = await this.app.vault.adapter.read(manifestPath);
             if (!content || content.trim() === '') return null;
             return JSON.parse(content);
+        });
+    }
+
+    private async _writeManifest(noteId: string, data: NoteManifest): Promise<void> {
+        const manifestPath = this.pathService.getNoteManifestPath(noteId);
+        const content = JSON.stringify(data, null, 2);
+        
+        try {
+            await this.executeWithRetry(async () => {
+                await this.app.vault.adapter.write(manifestPath, content);
+            });
+
+            const stat = await this.app.vault.adapter.stat(manifestPath);
+            if (stat) {
+                this.cache.set(noteId, { data, mtime: stat.mtime });
+            } else {
+                this.cache.set(noteId, { data, mtime: Date.now() });
+            }
         } catch (error) {
-            console.error(`VC: Failed to read or parse manifest ${manifestPath}.`, error);
-            return null;
+            this.cache.delete(noteId);
+            throw error;
         }
     }
 
-    private async writeManifest(noteId: string, data: NoteManifest): Promise<void> {
-        const manifestPath = this.pathService.getNoteManifestPath(noteId);
-        const content = JSON.stringify(data, null, 2);
-        await this.app.vault.adapter.write(manifestPath, content);
+    private async executeWithRetry<T>(operation: () => Promise<T>): Promise<T> {
+        let lastError: unknown;
+        for (let attempt = 0; attempt <= this.MAX_RETRIES; attempt++) {
+            try {
+                return await operation();
+            } catch (error) {
+                lastError = error;
+                if (attempt < this.MAX_RETRIES) {
+                    await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY_MS * Math.pow(2, attempt)));
+                }
+            }
+        }
+        throw lastError;
     }
 
     private async tryBackupCorruptFile(path: string): Promise<void> {
@@ -156,11 +245,8 @@ export class NoteManifestRepository {
         try {
             if (await this.app.vault.adapter.exists(path)) {
                 await this.app.vault.adapter.copy(path, backupPath);
-                console.log(`VC: Successfully backed up corrupt manifest to ${backupPath}`);
             }
-        } catch (backupError) {
-            console.error(`VC: Failed to backup corrupt manifest ${path}`, backupError);
-        }
+        } catch (e) { /* ignore */ }
     }
 
     private isV1Manifest(obj: any): obj is V1NoteManifest {
@@ -184,5 +270,36 @@ export class NoteManifestRepository {
                 [DEFAULT_BRANCH_NAME]: mainBranch,
             },
         };
+    }
+
+    private isLegacyBranchSettings(manifest: any): boolean {
+        if (!manifest || !manifest.branches) return false;
+        // Check if any branch has settings with deprecated keys
+        for (const branch of Object.values(manifest.branches) as any[]) {
+            if (branch.settings) {
+                if ('noteIdFormat' in branch.settings || 'versionIdFormat' in branch.settings || 'defaultExportFormat' in branch.settings) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private migrateLegacyBranchSettings(manifest: any): NoteManifest {
+        // Deep clone to ensure we don't mutate the input in place before we are ready
+        const newManifest = JSON.parse(JSON.stringify(manifest));
+        
+        if (newManifest.branches) {
+            for (const branchName in newManifest.branches) {
+                const branch = newManifest.branches[branchName];
+                if (branch.settings) {
+                    // Remove keys that are no longer supported in per-branch settings
+                    delete branch.settings.noteIdFormat;
+                    delete branch.settings.versionIdFormat;
+                    delete branch.settings.defaultExportFormat;
+                }
+            }
+        }
+        return newManifest;
     }
 }

@@ -49,13 +49,13 @@ export class TimelineDatabase extends Component {
         return JSON.parse(json);
     }
 
-    public async getTimeline(noteId: string, branchName: string): Promise<TimelineEvent[]> {
+    public async getTimeline(noteId: string, branchName: string, source: 'version' | 'edit'): Promise<TimelineEvent[]> {
         if (!this.workerProxy) await this.initializeWorker();
         if (!this.workerProxy) return [];
         
         try {
             // Worker returns an ArrayBuffer (transferred ownership)
-            const buffer = await this.workerProxy.getTimeline(noteId, branchName);
+            const buffer = await this.workerProxy.getTimeline(noteId, branchName, source);
             return this.deserialize<TimelineEvent[]>(buffer);
         } catch (error) {
             console.error("VC: Failed to get timeline from worker", error);
@@ -70,6 +70,7 @@ export class TimelineDatabase extends Component {
     public async generateAndStoreEvent(
         noteId: string,
         branchName: string,
+        source: 'version' | 'edit',
         fromVersionId: string | null,
         toVersionId: string,
         toVersionTimestamp: string,
@@ -91,6 +92,7 @@ export class TimelineDatabase extends Component {
             const resultBuffer = await this.workerProxy.generateAndStoreEvent(
                 noteId,
                 branchName,
+                source,
                 fromVersionId,
                 toVersionId,
                 toVersionTimestamp,
@@ -112,14 +114,14 @@ export class TimelineDatabase extends Component {
         await this.workerProxy.updateEventMetadata(noteId, versionId, data);
     }
 
-    public async removeEventByVersion(noteId: string, branchName: string, versionId: string): Promise<void> {
+    public async removeEventByVersion(noteId: string, branchName: string, source: 'version' | 'edit', versionId: string): Promise<void> {
         if (!this.workerProxy) return;
-        await this.workerProxy.removeEventByVersion(noteId, branchName, versionId);
+        await this.workerProxy.removeEventByVersion(noteId, branchName, source, versionId);
     }
 
-    public async clearTimelineForNote(noteId: string): Promise<void> {
+    public async clearTimelineForNote(noteId: string, source?: 'version' | 'edit'): Promise<void> {
         if (!this.workerProxy) return;
-        await this.workerProxy.clearTimelineForNote(noteId);
+        await this.workerProxy.clearTimelineForNote(noteId, source);
     }
 
     public async clearAll(): Promise<void> {

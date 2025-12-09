@@ -61,10 +61,12 @@ export class PathService {
 
         try {
             const dbRoot = this.getDbRoot();
-            let sanitizedNoteId = this.sanitizePathComponent(noteId);
-            if (sanitizedNoteId.endsWith('.base')) {
-                sanitizedNoteId = sanitizedNoteId.slice(0, -5);
-            }
+            const sanitizedNoteId = this.sanitizePathComponent(noteId);
+            
+            // Previously, we stripped .base extension here to match legacy behavior.
+            // This is now removed to ensure that if a note ID is generated as '..._base',
+            // the folder reflects that exactly.
+            
             const rawPath = `${dbRoot}/${sanitizedNoteId}`;
             const normalized = normalizePath(rawPath);
 

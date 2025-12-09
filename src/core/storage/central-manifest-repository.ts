@@ -8,6 +8,14 @@ import type VersionControlPlugin from '../../main';
 
 const CENTRAL_MANIFEST_QUEUE_KEY = 'system:central-manifest';
 
+/**
+ * Repository for managing the Central Manifest.
+ * 
+ * ARCHITECTURE NOTE:
+ * Uses the Public (Queued) / Internal (Unqueued) pattern to prevent deadlocks.
+ * Implements aggressive cache invalidation on write failures.
+ * Utilises Immer for all state modifications to ensure immutability.
+ */
 @injectable()
 export class CentralManifestRepository {
     private cache: CentralManifest | null = null;
@@ -17,96 +25,27 @@ export class CentralManifestRepository {
     constructor(
         @inject(TYPES.Plugin) private readonly plugin: VersionControlPlugin,
         @inject(TYPES.QueueService) private readonly queueService: QueueService
-    ) {
-        if (!plugin) throw new Error('CentralManifestRepository: Plugin dependency is required');
-        if (!queueService) throw new Error('CentralManifestRepository: QueueService dependency is required');
-    }
+    ) {}
+
+    // ==================================================================================
+    // PUBLIC API (Queued)
+    // ==================================================================================
 
     public async load(forceReload: boolean = false): Promise<CentralManifest> {
-        if (this.cache && !forceReload) {
-            return { ...this.cache };
-        }
-
-        if (this.initializationPromise) {
-            await this.initializationPromise;
-            if (this.cache && !forceReload) {
-                return { ...this.cache };
-            }
-        }
-
-        this.initializationPromise = this.initializeManifest();
-        await this.initializationPromise;
-        this.initializationPromise = null;
-
-        if (!this.cache) {
-            throw new Error('Failed to initialize central manifest');
-        }
-
-        return { ...this.cache };
-    }
-
-    private async initializeManifest(): Promise<void> {
-        try {
-            const originalManifest = this.plugin.settings.centralManifest;
-            const parseResult = CentralManifestSchema.safeParse(originalManifest);
-
-            if (parseResult.success) {
-                this.cache = parseResult.data;
-                // If Zod applied defaults, the data might have changed.
-                if (JSON.stringify(originalManifest) !== JSON.stringify(parseResult.data)) {
-                    this.plugin.settings.centralManifest = parseResult.data;
-                    await this.plugin.saveSettings();
-                }
-            } else {
-                console.warn("Version Control: Central manifest validation failed. Resetting to default.", parseResult.error);
-                this.cache = CentralManifestSchema.parse({}); // Get default value
-                this.plugin.settings.centralManifest = this.cache;
-                await this.plugin.saveSettings();
-            }
-            
-            this.rebuildPathToIdMap();
-        } catch (error) {
-            console.error('CentralManifestRepository.initializeManifest failed:', error);
-            this.cache = CentralManifestSchema.parse({});
-            this.rebuildPathToIdMap();
-        }
-    }
-
-    public invalidateCache(): void {
-        this.cache = null;
-        this.pathToIdMap = null;
+        return this.queueService.enqueue(CENTRAL_MANIFEST_QUEUE_KEY, () => this._loadInternal(forceReload));
     }
 
     public async getNoteIdByPath(path: string): Promise<string | null> {
         if (!path || typeof path !== 'string') return null;
-        if (!this.pathToIdMap) await this.load(true);
-        return this.pathToIdMap?.get(path) ?? null;
-    }
-
-    private async updateAndSaveManifest(updateFn: (draft: CentralManifest) => void): Promise<void> {
         return this.queueService.enqueue(CENTRAL_MANIFEST_QUEUE_KEY, async () => {
-            try {
-                const currentManifest = await this.load();
-                const updatedDraft = produce(currentManifest, updateFn);
-                
-                const newManifest = CentralManifestSchema.parse(updatedDraft);
-
-                this.plugin.settings.centralManifest = newManifest;
-                await this.plugin.saveSettings();
-
-                this.cache = newManifest;
-                this.rebuildPathToIdMap();
-            } catch (error) {
-                console.error('updateAndSaveManifest failed:', error);
-                this.invalidateCache();
-                throw error;
-            }
+             if (!this.pathToIdMap) await this._loadInternal(true);
+             return this.pathToIdMap?.get(path) ?? null;
         });
     }
 
     public async addNoteEntry(noteId: string, notePath: string, noteManifestPath: string): Promise<void> {
         const now = new Date().toISOString();
-        await this.updateAndSaveManifest(draft => {
+        await this._updateAndSaveManifest(draft => {
             if (draft.notes[noteId]) {
                 console.warn(`VC: Note ID ${noteId} already exists. Overwriting entry.`);
             }
@@ -120,9 +59,8 @@ export class CentralManifestRepository {
     }
 
     public async removeNoteEntry(noteId: string): Promise<void> {
-        await this.updateAndSaveManifest(draft => {
+        await this._updateAndSaveManifest(draft => {
             if (!draft.notes[noteId]) {
-                console.warn(`VC: removeNoteEntry: Note ID ${noteId} not found.`);
                 return;
             }
             delete draft.notes[noteId];
@@ -131,13 +69,112 @@ export class CentralManifestRepository {
 
     public async updateNotePath(noteId: string, newPath: string): Promise<void> {
         const now = new Date().toISOString();
-        await this.updateAndSaveManifest(draft => {
+        await this._updateAndSaveManifest(draft => {
             const noteEntry = draft.notes[noteId];
             if (noteEntry) {
                 noteEntry.notePath = newPath;
                 noteEntry.lastModified = now;
+            }
+        });
+    }
+
+    public invalidateCache(): void {
+        this.cache = null;
+        this.pathToIdMap = null;
+    }
+
+    public async getAllNotes(): Promise<Record<string, NoteEntry>> {
+        const manifest = await this.load();
+        return { ...manifest.notes };
+    }
+
+    // ==================================================================================
+    // INTERNAL IMPLEMENTATION (Unqueued / Helper)
+    // ==================================================================================
+
+    private async _loadInternal(forceReload: boolean): Promise<CentralManifest> {
+        if (this.cache && !forceReload) {
+            return { ...this.cache };
+        }
+
+        if (this.initializationPromise) {
+            await this.initializationPromise;
+            if (this.cache && !forceReload) {
+                return { ...this.cache };
+            }
+        }
+
+        await this._initializeManifestInternal();
+
+        if (!this.cache) {
+            throw new Error('Failed to initialize central manifest');
+        }
+
+        return { ...this.cache };
+    }
+
+    private async _initializeManifestInternal(): Promise<void> {
+        try {
+            const originalManifest = this.plugin.settings.centralManifest;
+            const parseResult = CentralManifestSchema.safeParse(originalManifest);
+
+            if (parseResult.success) {
+                this.cache = parseResult.data;
+                if (JSON.stringify(originalManifest) !== JSON.stringify(parseResult.data)) {
+                    // Update settings using produce
+                    this.plugin.settings = produce(this.plugin.settings, draft => {
+                        draft.centralManifest = parseResult.data;
+                    });
+                    await this.plugin.saveSettings();
+                }
             } else {
-                console.warn(`VC: updateNotePath: Note ID ${noteId} not found.`);
+                console.warn("Version Control: Central manifest validation failed. Resetting.", parseResult.error);
+                this.cache = CentralManifestSchema.parse({});
+                // Update settings using produce
+                this.plugin.settings = produce(this.plugin.settings, draft => {
+                    draft.centralManifest = this.cache!;
+                });
+                await this.plugin.saveSettings();
+            }
+            
+            this.rebuildPathToIdMap();
+        } catch (error) {
+            console.error('CentralManifestRepository.initializeManifest failed:', error);
+            this.cache = CentralManifestSchema.parse({});
+            this.rebuildPathToIdMap();
+        }
+    }
+
+    /**
+     * Helper to update manifest. 
+     * Uses Immer's produce to ensure immutable state updates.
+     */
+    private async _updateAndSaveManifest(updateFn: (draft: CentralManifest) => void): Promise<void> {
+        return this.queueService.enqueue(CENTRAL_MANIFEST_QUEUE_KEY, async () => {
+            try {
+                const currentManifest = await this._loadInternal(false);
+                
+                // 1. Create new manifest state using Immer
+                const newManifest = produce(currentManifest, (draft) => {
+                    updateFn(draft);
+                });
+                
+                // 2. Validate
+                const validatedManifest = CentralManifestSchema.parse(newManifest);
+
+                // 3. Update plugin settings using Immer
+                this.plugin.settings = produce(this.plugin.settings, draft => {
+                    draft.centralManifest = validatedManifest;
+                });
+                await this.plugin.saveSettings();
+
+                // 4. Update cache
+                this.cache = validatedManifest;
+                this.rebuildPathToIdMap();
+            } catch (error) {
+                console.error('updateAndSaveManifest failed:', error);
+                this.invalidateCache();
+                throw error;
             }
         });
     }
@@ -147,15 +184,7 @@ export class CentralManifestRepository {
         if (!this.cache?.notes) return;
         
         for (const [noteId, noteData] of Object.entries(this.cache.notes)) {
-            if (this.pathToIdMap.has(noteData.notePath)) {
-                console.warn(`Duplicate path detected in central manifest: ${noteData.notePath}`);
-            }
             this.pathToIdMap.set(noteData.notePath, noteId);
         }
-    }
-
-    public async getAllNotes(): Promise<Record<string, NoteEntry>> {
-        const manifest = await this.load();
-        return { ...manifest.notes };
     }
 }
