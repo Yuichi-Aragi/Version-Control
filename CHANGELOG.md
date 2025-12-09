@@ -1,5 +1,17 @@
 ***
 
+**Version: 1.9.32**
+
+#### ✨ New Features
+
+* **Edit History (Per-Branch Automatic Snapshots):** Introduced "Edit history" to provide passive, automatic, granular snapshots of all changes you make.
+    * There are now two history types (on a per-branch basis): **Version history** for saving intentional milestones, and **Edit history** for capturing granular changes.
+    * Edit history conserves resources by saving only highly compressed diffs (similar to Git) between changes, while Version history continues to save the full content.
+    * Initially, Edit history data is stored solely in IndexedDB.
+    * *Note:* This is an early stable version. While major problems are unlikely, minor inconsistencies may occur (Version history operates as before). Please report any issues found!
+
+***
+
 **Version: 1.9.31**
 
 #### 🐞 Bug Fixes
