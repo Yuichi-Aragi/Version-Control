@@ -4,20 +4,18 @@ import { PathService } from "./path-service";
 import type { NoteManifest } from "../../types";
 import { TYPES } from "../../types/inversify.types";
 import { QueueService } from "../../services/queue-service";
+import { CompressionManager } from "../compression-manager";
+import type VersionControlPlugin from "../../main";
 
 /**
  * Repository for managing the content of individual versions.
- * Handles reading, writing, and deleting the actual version files,
- * and encapsulates concurrency control for write/delete operations.
+ * Handles reading, writing, and deleting the actual version files.
  * 
- * ARCHITECTURE NOTE:
- * All public methods are queued using QueueService to prevent race conditions.
- * Internal methods (_methodName) contain the actual logic and retry mechanisms
- * but DO NOT interact with the queue to prevent deadlocks.
- * 
- * DEADLOCK PROTECTION:
- * Uses a 'content:' prefix for all queue keys to ensure isolation from 
- * other services (like NoteManifestRepository) operating on the same noteId.
+ * FEATURES:
+ * - Transparent GZIP compression/decompression via CompressionManager.
+ * - Lazy migration: Automatically compresses uncompressed files on read if enabled.
+ * - Backward compatibility: Handles both compressed and uncompressed files.
+ * - Concurrency control via QueueService.
  */
 @injectable()
 export class VersionContentRepository {
@@ -26,10 +24,16 @@ export class VersionContentRepository {
   private readonly FILE_OPERATION_TIMEOUT_MS = 5000;
   private readonly QUEUE_PREFIX = 'content:';
 
+  // GZIP Magic Numbers
+  private readonly GZIP_MAGIC_0 = 0x1f;
+  private readonly GZIP_MAGIC_1 = 0x8b;
+
   constructor(
     @inject(TYPES.App) private readonly app: App,
+    @inject(TYPES.Plugin) private readonly plugin: VersionControlPlugin,
     @inject(TYPES.PathService) private readonly pathService: PathService,
-    @inject(TYPES.QueueService) private readonly queueService: QueueService
+    @inject(TYPES.QueueService) private readonly queueService: QueueService,
+    @inject(TYPES.CompressionManager) private readonly compressionManager: CompressionManager
   ) {
     if (!this.app?.vault?.adapter) throw new Error('VersionContentRepository: Invalid dependencies');
   }
@@ -63,10 +67,6 @@ export class VersionContentRepository {
   }
 
   public async getLatestVersionContent(noteId: string, noteManifest: NoteManifest): Promise<string | null> {
-    // This method is a composition of logic and a read call. 
-    // Since it calls `read` (which queues), we don't queue the wrapper itself 
-    // to avoid holding the lock during the manifest parsing (though that's fast).
-    
     if (!noteManifest || !noteManifest.branches) return null;
     const currentBranch = noteManifest.branches[noteManifest.currentBranch];
     if (!currentBranch || !currentBranch.versions) return null;
@@ -74,7 +74,6 @@ export class VersionContentRepository {
     const versions = Object.entries(currentBranch.versions).sort(([, a], [, b]) => b.versionNumber - a.versionNumber);
     if (versions.length === 0) return null;
 
-    // Fix for TS2488 and noUncheckedIndexedAccess: Explicitly check for undefined before accessing
     const latestEntry = versions[0];
     if (!latestEntry) return null;
 
@@ -88,6 +87,12 @@ export class VersionContentRepository {
   // INTERNAL IMPLEMENTATION (Unqueued, Retry Logic)
   // ==================================================================================
 
+  private isGzip(buffer: ArrayBuffer): boolean {
+    if (buffer.byteLength < 2) return false;
+    const view = new Uint8Array(buffer);
+    return view[0] === this.GZIP_MAGIC_0 && view[1] === this.GZIP_MAGIC_1;
+  }
+
   private async _read(noteId: string, versionId: string): Promise<string | null> {
     const versionFilePath = this.pathService.getNoteVersionPath(noteId, versionId);
     
@@ -95,31 +100,60 @@ export class VersionContentRepository {
       async () => {
         const exists = await this.app.vault.adapter.exists(versionFilePath);
         if (!exists) return null;
-        return await this.app.vault.adapter.read(versionFilePath);
+
+        // Always read as binary first to check for compression
+        const buffer = await this.app.vault.adapter.readBinary(versionFilePath);
+        const isCompressed = this.isGzip(buffer);
+        const enableCompression = this.plugin.settings.enableCompression;
+
+        if (isCompressed) {
+            const decompressed = await this.compressionManager.decompress(buffer);
+            
+            // Migration: If compression is disabled but file is compressed, save decompressed version
+            if (!enableCompression) {
+                await this.app.vault.adapter.write(versionFilePath, decompressed);
+            }
+            return decompressed;
+        } else {
+            // File is uncompressed (legacy or text)
+            const decoder = new TextDecoder('utf-8');
+            const content = decoder.decode(buffer);
+
+            // Migration: If compression is enabled but file is uncompressed, compress and save
+            if (enableCompression) {
+                const compressed = await this.compressionManager.compress(content);
+                await this.app.vault.adapter.writeBinary(versionFilePath, compressed);
+            }
+            return content;
+        }
       },
       `read_${noteId}_${versionId}`
-    ).catch(() => null);
+    ).catch((error) => {
+        console.error(`VC: Failed to read version ${versionId}`, error);
+        return null;
+    });
   }
 
   private async _readBinary(noteId: string, versionId: string): Promise<ArrayBuffer | null> {
-    const versionFilePath = this.pathService.getNoteVersionPath(noteId, versionId);
-
-    return this.executeWithRetryAndTimeout(
-      async () => {
-        const exists = await this.app.vault.adapter.exists(versionFilePath);
-        if (!exists) return null;
-        return await this.app.vault.adapter.readBinary(versionFilePath);
-      },
-      `readBinary_${noteId}_${versionId}`
-    ).catch(() => null);
+    // DiffManager expects the *logical* binary content (utf-8 bytes of the text), 
+    // not the physical compressed bytes.
+    const content = await this._read(noteId, versionId);
+    if (content === null) return null;
+    return new TextEncoder().encode(content).buffer;
   }
 
   private async _write(noteId: string, versionId: string, content: string): Promise<{ size: number }> {
     const versionFilePath = this.pathService.getNoteVersionPath(noteId, versionId);
+    const enableCompression = this.plugin.settings.enableCompression;
 
     await this.executeWithRetryAndTimeout(
       async () => {
-        await this.app.vault.adapter.write(versionFilePath, content);
+        if (enableCompression) {
+            const compressed = await this.compressionManager.compress(content);
+            await this.app.vault.adapter.writeBinary(versionFilePath, compressed);
+        } else {
+            await this.app.vault.adapter.write(versionFilePath, content);
+        }
       },
       `write_${noteId}_${versionId}`
     );
