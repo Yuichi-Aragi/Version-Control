@@ -190,8 +190,60 @@ export default class VersionControlPlugin extends Plugin {
 
     private async loadSettings() {
         try {
-            const loadedData: unknown = await this.loadData() || {};
+            const loadedData: any = await this.loadData() || {};
             let settingsData: Partial<VersionControlSettings>;
+
+            // --- Migration Logic: Flat to Nested Structure ---
+            // Detect legacy flat structure by checking for a known root key that moved (e.g., maxVersionsPerNote)
+            // and the absence of the new container (versionHistorySettings).
+            if ('maxVersionsPerNote' in loadedData && !('versionHistorySettings' in loadedData)) {
+                console.log("Version Control: Migrating settings from legacy flat format.");
+                try {
+                    const historyKeys = [
+                        'maxVersionsPerNote', 'autoCleanupOldVersions', 'autoCleanupDays',
+                        'useRelativeTimestamps', 'enableVersionNaming', 'enableVersionDescription',
+                        'showDescriptionInList', 'isListView', 'renderMarkdownInPreview',
+                        'enableWatchMode', 'watchModeInterval', 'autoSaveOnSave',
+                        'autoSaveOnSaveInterval', 'enableMinLinesChangedCheck', 'minLinesChanged',
+                        'enableWordCount', 'includeMdSyntaxInWordCount', 'enableCharacterCount',
+                        'includeMdSyntaxInCharacterCount', 'enableLineCount', 'includeMdSyntaxInLineCount',
+                        'isGlobal', 'autoRegisterNotes', 'pathFilters'
+                    ];
+
+                    const migratedVersionSettings: any = {};
+                    
+                    // Extract history settings from root
+                    for (const key of historyKeys) {
+                        if (key in loadedData) {
+                            migratedVersionSettings[key] = loadedData[key];
+                        }
+                    }
+
+                    // Construct new settings object structure
+                    // Note: We spread loadedData into root to preserve globals like databasePath,
+                    // but VersionControlSettingsSchema.parse will strip the now-invalid flat keys.
+                    const newSettings = {
+                        ...DEFAULT_SETTINGS,
+                        ...loadedData, 
+                        versionHistorySettings: {
+                            ...DEFAULT_SETTINGS.versionHistorySettings,
+                            ...migratedVersionSettings
+                        },
+                        // editHistorySettings will take defaults as it's a new feature
+                        editHistorySettings: {
+                            ...DEFAULT_SETTINGS.editHistorySettings
+                        }
+                    };
+
+                    // Validate and Save immediately
+                    this.settings = VersionControlSettingsSchema.parse(newSettings);
+                    await this.saveSettings();
+                    return; // Migration successful
+                } catch (migrationError) {
+                    console.error("Version Control: Settings migration failed. Falling back to default loading.", migrationError);
+                    // Fall through to standard loading logic if migration fails
+                }
+            }
     
             // Try parsing as the new full settings format first
             const settingsParseResult = VersionControlSettingsSchema.safeParse(loadedData);
@@ -202,7 +254,7 @@ export default class VersionControlPlugin extends Plugin {
                 const manifestParseResult = CentralManifestSchema.safeParse(loadedData);
                 if (manifestParseResult.success) {
                     // Old format: it's just a CentralManifest.
-                    console.log("Version Control: Migrating settings from old format.");
+                    console.log("Version Control: Migrating settings from old central manifest format.");
                     settingsData = { centralManifest: manifestParseResult.data };
                 } else {
                     // Unknown format, use defaults and log the error
@@ -212,7 +264,6 @@ export default class VersionControlPlugin extends Plugin {
             }
     
             // Merge defaults with loaded data, then parse to ensure the final object is valid.
-            // This handles migrations and adding new settings gracefully.
             const mergedSettings = {
                 ...DEFAULT_SETTINGS,
                 ...settingsData,
@@ -220,6 +271,14 @@ export default class VersionControlPlugin extends Plugin {
                     ...DEFAULT_SETTINGS.centralManifest,
                     ...(settingsData.centralManifest || {}),
                 },
+                versionHistorySettings: {
+                    ...DEFAULT_SETTINGS.versionHistorySettings,
+                    ...(settingsData.versionHistorySettings || {}),
+                },
+                editHistorySettings: {
+                    ...DEFAULT_SETTINGS.editHistorySettings,
+                    ...(settingsData.editHistorySettings || {}),
+                }
             };
     
             this.settings = VersionControlSettingsSchema.parse(mergedSettings);

@@ -37,17 +37,12 @@ export const TimelineSettingsSchema = z.object({
     expandByDefault: z.boolean().optional().default(false),
 });
 
-// --- Settings Schema ---
+// --- History Settings Schema (Replaces flat settings) ---
 
-export const VersionControlSettingsSchema = z.object({
-    version: z.string().optional().default('0.0.0'),
-    databasePath: z.string().min(1),
-    noteIdFrontmatterKey: z.string().min(1).refine(s => !s.includes(':'), { message: "Key cannot contain a colon" }),
-    keyUpdatePathFilters: z.array(z.string()).optional().default([]),
+export const HistorySettingsSchema = z.object({
     maxVersionsPerNote: z.number().int().min(0).optional().default(50),
     autoCleanupOldVersions: z.boolean().optional().default(false),
     autoCleanupDays: z.number().int().min(1).optional().default(60),
-    defaultExportFormat: z.enum(['md', 'json', 'ndjson', 'txt']).optional().default('md'),
     useRelativeTimestamps: z.boolean().optional().default(true),
     enableVersionNaming: z.boolean().optional().default(true),
     enableVersionDescription: z.boolean().optional().default(false),
@@ -60,30 +55,45 @@ export const VersionControlSettingsSchema = z.object({
     autoSaveOnSaveInterval: z.number().int().min(1).optional().default(2),
     enableMinLinesChangedCheck: z.boolean().optional().default(false),
     minLinesChanged: z.number().int().min(1).optional().default(5),
-    autoRegisterNotes: z.boolean().optional().default(false),
-    pathFilters: z.array(z.string()).optional().default([]),
-    centralManifest: CentralManifestSchema.optional().default({ version: "1.0.0", notes: {} }),
-    isGlobal: z.boolean().optional(),
     enableWordCount: z.boolean().optional().default(false),
     includeMdSyntaxInWordCount: z.boolean().optional().default(false),
     enableCharacterCount: z.boolean().optional().default(false),
     includeMdSyntaxInCharacterCount: z.boolean().optional().default(false),
     enableLineCount: z.boolean().optional().default(false),
     includeMdSyntaxInLineCount: z.boolean().optional().default(false),
+    isGlobal: z.boolean().optional().default(true),
+    
+    // Auto-registration settings (moved/duplicated from global)
+    autoRegisterNotes: z.boolean().optional().default(false),
+    pathFilters: z.array(z.string()).optional().default([]),
+});
+
+// --- Global Settings Schema ---
+
+export const VersionControlSettingsSchema = z.object({
+    version: z.string().optional().default('0.0.0'),
+    databasePath: z.string().min(1),
+    noteIdFrontmatterKey: z.string().min(1).refine(s => !s.includes(':'), { message: "Key cannot contain a colon" }),
+    legacyNoteIdFrontmatterKeys: z.array(z.string()).optional().default([]),
+    keyUpdatePathFilters: z.array(z.string()).optional().default([]),
+    defaultExportFormat: z.enum(['md', 'json', 'ndjson', 'txt']).optional().default('md'),
+    
+    // Deprecated at top level, but kept for migration/compatibility if needed
+    autoRegisterNotes: z.boolean().optional().default(false),
+    pathFilters: z.array(z.string()).optional().default([]),
+    
     // ID Format Settings
     noteIdFormat: z.string().min(1).optional().default('{uuid}'),
     versionIdFormat: z.string().min(1).optional().default('{timestamp}_{version}'),
-});
 
-const PartialNoteSettingsSchema = VersionControlSettingsSchema.omit({
-    databasePath: true,
-    centralManifest: true,
-    autoRegisterNotes: true,
-    pathFilters: true,
-    noteIdFrontmatterKey: true,
-    keyUpdatePathFilters: true,
-    version: true,
-}).partial();
+    // Manifests
+    centralManifest: CentralManifestSchema.optional().default({ version: "1.0.0", notes: {} }),
+    editHistoryManifest: CentralManifestSchema.optional().default({ version: "1.0.0", notes: {} }),
+
+    // Split Settings
+    versionHistorySettings: HistorySettingsSchema,
+    editHistorySettings: HistorySettingsSchema,
+});
 
 // --- Manifest Schemas ---
 
@@ -102,7 +112,7 @@ export const BranchSchema = z.object({
         lineCountWithoutMd: z.number().optional(),
     })),
     totalVersions: z.number().int(),
-    settings: PartialNoteSettingsSchema.optional(),
+    settings: HistorySettingsSchema.partial().optional(),
     state: BranchStateSchema.optional(),
     timelineSettings: TimelineSettingsSchema.optional(),
 });
@@ -114,6 +124,7 @@ export const NoteManifestSchema = z.object({
     branches: z.record(z.string(), BranchSchema),
     createdAt: z.string().datetime(),
     lastModified: z.string().datetime(),
+    // viewMode removed to prevent persistence
 });
 
 // --- Data & State Schemas ---
