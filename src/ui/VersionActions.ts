@@ -6,7 +6,7 @@ export interface VersionActionConfig {
     id: string;
     title: string;
     icon: string;
-    tooltip:string;
+    tooltip: string;
     isDanger?: boolean;
     /**
      * The action handler now only needs to know about the version and the store,
