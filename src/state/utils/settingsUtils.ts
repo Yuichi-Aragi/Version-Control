@@ -8,6 +8,11 @@ import type { EditHistoryManager } from '../../core/edit-history-manager';
 /**
  * Resolves the effective settings for a given note and history type (version or edit).
  * Determines whether to use global settings or per-note/per-branch settings.
+ * 
+ * This function ensures consistency by:
+ * 1. Always using the NoteManifest as the source of truth for the current branch.
+ * 2. Correctly merging global defaults with local overrides.
+ * 3. Handling the 'isGlobal' flag logic (defaulting to true if undefined).
  */
 export async function resolveSettings(
     noteId: string, 
@@ -23,35 +28,48 @@ export async function resolveSettings(
         : plugin.settings.editHistorySettings;
         
     try {
+        // 1. Authoritative Branch Determination from NoteManifest
+        // NoteManifest is the source of truth for the "Current Branch" of a note.
+        const noteManifest = await manifestManager.loadNoteManifest(noteId);
+        
+        // If note manifest is missing, we default to global settings
+        if (!noteManifest) {
+            return { ...globalDefaults, isGlobal: true };
+        }
+
+        const currentBranch = noteManifest.currentBranch;
         let perBranchSettings: Partial<HistorySettings> | undefined;
         
         if (type === 'version') {
-            const manifest = await manifestManager.loadNoteManifest(noteId);
-            if (manifest) {
-                perBranchSettings = Object.fromEntries(
-                    Object.entries(manifest.branches[manifest.currentBranch]?.settings || {}).filter(([, v]) => v !== undefined)
-                ) as Partial<HistorySettings>;
-            }
+            const branch = noteManifest.branches[currentBranch];
+            perBranchSettings = branch?.settings;
         } else {
-            const manifest = await editHistoryManager.getEditManifest(noteId);
-            if (manifest) {
-                perBranchSettings = Object.fromEntries(
-                    Object.entries(manifest.branches[manifest.currentBranch]?.settings || {}).filter(([, v]) => v !== undefined)
-                ) as Partial<HistorySettings>;
+            // For edits, we use the branch name from NoteManifest to query EditManifest.
+            // This ensures we are looking at the settings for the active context, even if
+            // the EditManifest hasn't been synced for a new branch yet.
+            const editManifest = await editHistoryManager.getEditManifest(noteId);
+            if (editManifest) {
+                const branch = editManifest.branches[currentBranch];
+                perBranchSettings = branch?.settings;
             }
         }
         
-        const isUnderGlobalInfluence = perBranchSettings?.isGlobal === true || perBranchSettings === undefined;
+        // Default to Global if isGlobal is undefined or true.
+        // Explicit 'false' is required to enable local settings.
+        const isUnderGlobalInfluence = perBranchSettings?.isGlobal !== false;
         
         if (isUnderGlobalInfluence) {
             return { ...globalDefaults, isGlobal: true };
         } else {
+            // Filter undefineds to ensure clean merge (don't overwrite defaults with undefined)
             const definedBranchSettings = Object.fromEntries(
                 Object.entries(perBranchSettings ?? {}).filter(([, v]) => v !== undefined)
             );
+            // Local overrides Global
             return { ...globalDefaults, ...definedBranchSettings, isGlobal: false };
         }
     } catch (e) {
+        console.error("Version Control: Error resolving settings", e);
         return { ...globalDefaults, isGlobal: true };
     }
 }
