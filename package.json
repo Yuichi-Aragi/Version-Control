@@ -41,7 +41,8 @@
     "reflect-metadata": "^0.2.2",
     "semver": "^7.7.2",
     "zod": "^4.1.12",
-    "zustand": "^5.0.8"
+    "es-toolkit": "^1.42.0",
+    "valibot": "^1.2.0"
   },
   "devDependencies": {
     "@types/d3": "^7.4.3",
