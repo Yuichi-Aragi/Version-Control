@@ -125,6 +125,32 @@ const FrontmatterKeySetting: React.FC = memo(() => {
 });
 FrontmatterKeySetting.displayName = 'FrontmatterKeySetting';
 
+// --- Compression Setting ---
+
+const CompressionSetting: React.FC = memo(() => {
+    const dispatch = useAppDispatch();
+    const enableCompression = useAppSelector(state => state.settings.enableCompression ?? true);
+
+    const handleToggle = (checked: boolean) => {
+        dispatch(thunks.updateGlobalSettings({ enableCompression: checked }));
+    };
+
+    return (
+        <SettingComponent
+            name="Enable compression"
+            desc="Compress version files using GZIP to save space. Existing files will be migrated automatically when accessed."
+        >
+            <input
+                type="checkbox"
+                checked={enableCompression}
+                onChange={(e) => handleToggle(e.target.checked)}
+                aria-label="Toggle compression"
+            />
+        </SettingComponent>
+    );
+});
+CompressionSetting.displayName = 'CompressionSetting';
+
 // --- ID Format Settings ---
 
 const IdFormatFormSchema = z.object({
@@ -206,6 +232,7 @@ export const GlobalSettings: React.FC<GlobalSettingsProps> = memo(({ showTitle =
             {showTitle && <h2 id="global-settings-title">Global Plugin Settings</h2>}
             <DatabasePathSetting />
             <FrontmatterKeySetting />
+            <CompressionSetting />
             <IdFormatSettings />
             
             <div style={{marginTop: '20px', borderTop: '1px solid var(--background-modifier-border)', paddingTop: '10px'}}>
