@@ -55,6 +55,21 @@ export function registerCommands(plugin: Plugin, store: AppStore): void {
     });
 
     plugin.addCommand({
+        id: 'save-new-edit',
+        name: 'Save a new edit of the current note',
+        checkCallback: (checking: boolean) => {
+            const activeFile = plugin.app.workspace.getActiveFile();
+            if (activeFile && (activeFile.extension === 'md' || activeFile.extension === 'base')) {
+                if (!checking) {
+                    store.dispatch(thunks.saveNewEdit());
+                }
+                return true;
+            }
+            return false;
+        }
+    });
+
+    plugin.addCommand({
         id: 'cleanup-orphaned-versions',
         name: 'Clean up orphaned version data',
         callback: () => {
