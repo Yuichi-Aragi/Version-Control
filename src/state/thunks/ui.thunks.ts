@@ -5,7 +5,7 @@ import { actions } from '../appSlice';
 import type { VersionHistoryEntry, ViewMode } from '../../types';
 import { AppStatus, type ActionItem, type SortOrder, type SortProperty, type SortDirection } from '../state';
 import { CHANGELOG_URL } from '../../constants';
-import { loadEffectiveSettingsForNote, loadHistoryForNoteId, initializeView } from './core.thunks';
+import { loadEffectiveSettingsForNote, loadHistoryForNoteId } from './core.thunks';
 import { UIService } from '../../services/ui-service';
 import { VersionManager } from '../../core/version-manager';
 import { EditHistoryManager } from '../../core/edit-history-manager';

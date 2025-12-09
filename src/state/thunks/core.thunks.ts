@@ -2,12 +2,10 @@ import { TFile, type WorkspaceLeaf, App, FileView } from 'obsidian';
 import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
 import type { AppError, HistorySettings } from '../../types';
-import { AppStatus } from '../state';
 import { NoteManager } from '../../core/note-manager';
 import { UIService } from '../../services/ui-service';
 import { VersionManager } from '../../core/version-manager';
 import { ManifestManager } from '../../core/manifest-manager';
-import { EditHistoryManager } from '../../core/edit-history-manager';
 import { CleanupManager } from '../../core/tasks/cleanup-manager';
 import { BackgroundTaskManager } from '../../core/tasks/BackgroundTaskManager';
 import { TYPES } from '../../types/inversify.types';
@@ -87,7 +85,7 @@ export const autoRegisterNote = (file: TFile): AppThunk => async (dispatch, getS
     }
 };
 
-export const initializeView = (leaf?: WorkspaceLeaf | null): AppThunk => async (dispatch, getState, container) => {
+export const initializeView = (leaf?: WorkspaceLeaf | null): AppThunk => async (dispatch, _getState, container) => {
     if (isPluginUnloading(container)) return;
     const app = container.get<App>(TYPES.App);
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);

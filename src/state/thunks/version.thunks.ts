@@ -19,9 +19,9 @@ import type VersionControlPlugin from '../../main';
  * Thunks for direct version management (CRUD operations).
  */
 
-export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => async (dispatch, getState, container) => {
+export const saveNewVersion = (options: { isAuto?: boolean; settings?: VersionControlSettings } = {}): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
-    const { isAuto = false } = options;
+    const { isAuto = false, settings } = options;
     const uiService = container.get<UIService>(TYPES.UIService);
     const initialState = getState();
     if (initialState.isRenaming) {
@@ -56,16 +56,22 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => 
             return;
         }
 
-        // Construct a hybrid settings object that satisfies VersionManager's loose typing.
-        // It needs VersionControlSettings properties (for ID generation, from Global) 
-        // AND flattened HistorySettings (for logic like minLinesChanged, from Effective).
-        const effectiveHistorySettings = initialState.effectiveSettings;
-        const hybridSettings = {
-            ...initialState.settings, // Global VersionControlSettings (contains ID formats)
-            ...effectiveHistorySettings // Flattened effective history settings (overrides logic flags)
-        };
+        // Determine settings to use:
+        // 1. Explicit settings passed in options (e.g. from BackgroundTaskManager)
+        // 2. Fallback to effective settings from state (for manual saves)
+        let settingsToUse: VersionControlSettings;
+        
+        if (settings) {
+            settingsToUse = settings;
+        } else {
+            const effectiveHistorySettings = initialState.effectiveSettings;
+            settingsToUse = {
+                ...initialState.settings, // Global VersionControlSettings (contains ID formats)
+                ...effectiveHistorySettings // Flattened effective history settings (overrides logic flags)
+            };
+        }
 
-        const result = await versionManager.saveNewVersionForFile(liveFile, { isAuto, settings: hybridSettings });
+        const result = await versionManager.saveNewVersionForFile(liveFile, { isAuto, settings: settingsToUse });
 
         const stateAfterSave = getState();
         if (isPluginUnloading(container) || stateAfterSave.status !== AppStatus.READY || stateAfterSave.file?.path !== initialFileFromState.path) {
@@ -302,9 +308,8 @@ export const restoreVersion = (versionId: string): AppThunk => async (dispatch, 
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);
     const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
     const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
-    
+
     if (initialState.status !== AppStatus.READY) return;
 
     const initialFileFromState = initialState.file;
