@@ -25,8 +25,9 @@ const MAX_DESC_LENGTH = 2048;
 
 export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery, isSearchCaseSensitive, viewMode = 'versions' }) => {
     const dispatch = useAppDispatch();
-    const { settings, namingVersionId, highlightedVersionId, isManualVersionEdit, isSearchActive } = useAppSelector(state => ({
+    const { settings, enableCompression, namingVersionId, highlightedVersionId, isManualVersionEdit, isSearchActive } = useAppSelector(state => ({
         settings: state.effectiveSettings,
+        enableCompression: state.settings.enableCompression,
         namingVersionId: state.namingVersionId,
         highlightedVersionId: state.highlightedVersionId,
         isManualVersionEdit: state.isManualVersionEdit,
@@ -232,6 +233,13 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
     const placeholderName = viewMode === 'edits' ? 'Edit name...' : 'Version name...';
     const placeholderDesc = viewMode === 'edits' ? 'Edit description...' : 'Version description...';
 
+    const displaySize = useMemo(() => {
+        if (enableCompression) {
+            return version.compressedSize ?? version.uncompressedSize ?? version.size;
+        }
+        return version.uncompressedSize ?? version.size;
+    }, [enableCompression, version.compressedSize, version.uncompressedSize, version.size]);
+
     return (
         <div
             ref={entryRef}
@@ -300,7 +308,7 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
             <div className="v-version-content" aria-hidden>
                 <span>
                     Size: <HighlightedText 
-                        text={formatFileSize(typeof version.size === 'number' ? version.size : 0)} 
+                        text={formatFileSize(typeof displaySize === 'number' ? displaySize : 0)} 
                         {...(searchQuery && { query: searchQuery })}
                         {...(isSearchCaseSensitive !== undefined && { caseSensitive: isSearchCaseSensitive })}
                     />
