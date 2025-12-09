@@ -10,7 +10,7 @@ import type { NoteManifest } from '../types';
 const MAX_CHAIN_LENGTH = 50;
 const DIFF_SIZE_THRESHOLD = 0.8;
 const DB_NAME = 'VersionControlEditHistoryDB';
-const COMPRESSION_LEVEL = 6; // Balanced compression (0-9)
+const COMPRESSION_LEVEL = 9; // Balanced compression (0-9)
 const MAX_CONTENT_SIZE = 50 * 1024 * 1024; // 50MB safety limit
 
 // --- Types & Interfaces ---
@@ -531,6 +531,19 @@ const editHistoryApi = {
 
                 if (baseEditId !== undefined) editRecord.baseEditId = baseEditId;
                 if (previousEditId !== undefined) editRecord.previousEditId = previousEditId;
+
+                // Update manifest with compressed/uncompressed sizes
+                const branch = validatedManifest.branches[validatedBranchName];
+                if (branch && branch.versions[validatedEditId]) {
+                    const versionEntry = branch.versions[validatedEditId];
+                    if (versionEntry) {
+                        versionEntry.compressedSize = compressedContent.byteLength;
+                        // Ensure uncompressedSize is set if not already (it should be set by thunk, but safety check)
+                        if (versionEntry.uncompressedSize === undefined) {
+                            versionEntry.uncompressedSize = strToU8(contentStr).length;
+                        }
+                    }
+                }
 
                 // 2. WRITE PHASE (Inside Transaction)
                 let committed = false;
