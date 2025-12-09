@@ -10,7 +10,7 @@
     * Currently, Edit History data is stored solely in IndexedDB (request a feature for disk storage).
     * **Switching Views:** Simply click on the "Version History" header text (at the top left corner of the version control view in the right sidebar) to toggle between "Version History" and "Edit History."
 
-* **Early Stable Release:** This is an early stable release of the Edit History feature. While major problems are unlikely, please open an issue if you encounter any minor inconsistencies. Your feedback is highly valued!
+* **Early Stable Release:** This is an early stable release of the Edit History feature. While major problems are unlikely (i hope), minor inconsistencies are possible, please open an issue if you encounter any inconsistencies. Your feedback is highly valued!
 
 ***
 
