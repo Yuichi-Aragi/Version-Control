@@ -6,8 +6,7 @@
   "sideEffects": false,
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "dev": "node esbuild.config.mjs --watch",
-    "build": "node esbuild.config.mjs --production"
+    "build": "node esbuild.config.mjs"
   },
   "keywords": [
     "obsidian-md",
@@ -20,37 +19,40 @@
   "author": "Yuichi-Aragi",
   "license": "MIT",
   "dependencies": {
+    "@hookform/resolvers": "^5.2.2",
     "@reduxjs/toolkit": "^2.8.2",
+    "clsx": "^2.1.1",
+    "comlink": "^4.4.2",
+    "d3": "^7.9.0",
+    "d3-jetpack": "^2.2.1",
+    "dexie": "^4.2.1",
     "diff": "^8.0.2",
+    "fflate": "^0.8.2",
+    "immer": "^10.1.1",
     "inversify": "^7.5.4",
     "lodash-es": "^4.17.21",
     "p-queue": "^8.1.0",
-    "immer": "^10.1.1",
-    "reflect-metadata": "^0.2.2",
-    "react-virtuoso": "^4.13.0",
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1",
-    "react-redux": "^9.2.0",
-    "clsx": "^2.1.1",
-    "comlink": "^4.4.2",
     "radix-ui": "^1.4.3",
-    "semver": "^7.7.2",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
     "react-hook-form": "^7.65.0",
-    "@hookform/resolvers": "^5.2.2",
-    "zustand": "^5.0.8",
+    "react-redux": "^9.2.0",
+    "react-virtuoso": "^4.13.0",
+    "reflect-metadata": "^0.2.2",
+    "semver": "^7.7.2",
     "zod": "^4.1.12",
-    "dexie": "^4.2.1",
-    "fflate": "^0.8.2"
+    "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@types/d3": "^7.4.3",
     "@types/lodash-es": "^4.17.12",
     "@types/node": "^24.0.12",
-    "@types/react": "^19.1.10",
-    "@types/react-dom": "^19.1.7",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
     "@types/semver": "^7.7.1",
-    "esbuild": "^0.25.6",
-    "obsidian": "1.10.2-1",
+    "esbuild": "^0.27.1",
+    "obsidian": "1.10.3",
     "tslib": "^2.8.1",
-    "typescript": "^5.8.3"
+    "typescript": "^5.9.3"
   }
 }
