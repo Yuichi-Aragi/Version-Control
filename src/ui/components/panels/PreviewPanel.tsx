@@ -18,7 +18,7 @@ interface PreviewPanelProps {
 export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
     const app = useApp();
     const { settings, notePath } = useAppSelector(state => ({
-        settings: state.settings,
+        settings: state.effectiveSettings,
         notePath: state.file?.path ?? '',
     }));
     const [localRenderMarkdown, setLocalRenderMarkdown] = useState(false);

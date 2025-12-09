@@ -3,7 +3,7 @@ import clsx from 'clsx';
 import { moment } from 'obsidian';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { useAppDispatch } from '../../hooks/useRedux';
+import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
 import { thunks } from '../../../state/thunks';
 import type { TimelinePanel as TimelinePanelState, TimelineEvent } from '../../../state/state';
 import type { TimelineSettings } from '../../../types';
@@ -166,6 +166,7 @@ interface TimelineCardProps {
     isCaseSensitive: boolean;
     activeMatch: TimelineMatch | null;
     isAutoExpanded: boolean;
+    viewMode: 'versions' | 'edits';
 }
 
 const TimelineCard: FC<TimelineCardProps> = memo(({ 
@@ -175,7 +176,8 @@ const TimelineCard: FC<TimelineCardProps> = memo(({
     searchQuery, 
     isCaseSensitive,
     activeMatch,
-    isAutoExpanded
+    isAutoExpanded,
+    viewMode
 }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const [renderMode, setRenderMode] = useState<'virtual' | 'static'>('virtual');
@@ -241,6 +243,8 @@ const TimelineCard: FC<TimelineCardProps> = memo(({
         caseSensitive: isCaseSensitive
     };
 
+    const prefix = viewMode === 'edits' ? 'E' : 'V';
+
     return (
         <div className={clsx("v-timeline-card", { 
             "is-expanded": isExpanded,
@@ -252,7 +256,7 @@ const TimelineCard: FC<TimelineCardProps> = memo(({
                         <div className={clsx("v-timeline-header-left", { "is-collapsed": isTimestampFocused })}>
                             {showVersion && (
                                 <span className="v-timeline-version-badge">
-                                    V{event.toVersionNumber}
+                                    {prefix}{event.toVersionNumber}
                                 </span>
                             )}
                             {showName && (
@@ -341,6 +345,7 @@ TimelineCard.displayName = 'TimelineCard';
 
 export const TimelinePanel: FC<TimelinePanelProps> = ({ panelState }) => {
     const { events, settings } = panelState;
+    const viewMode = useAppSelector(state => state.viewMode);
     const handleClose = usePanelClose();
     const handleBackdropClick = useBackdropClick(handleClose);
     const search = usePanelSearch();
@@ -401,12 +406,14 @@ export const TimelinePanel: FC<TimelinePanelProps> = ({ panelState }) => {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [search.isSearchActive, handleGoToMatch]);
 
+    const timelineTitle = viewMode === 'versions' ? 'Version Timeline' : 'Edit Timeline';
+
     return (
         <div className="v-panel-container is-active is-drawer-like" onClick={handleBackdropClick}>
             <div className="v-inline-panel v-timeline-panel is-drawer">
                 <div className={clsx("v-panel-header", { 'is-searching': search.isSearchActive })}>
                     <div className="v-panel-header-content">
-                        <h3>Timeline</h3>
+                        <h3>{timelineTitle}</h3>
                         <div className="v-panel-header-actions">
                             <button className="clickable-icon" onClick={search.handleToggleSearch}>
                                 <Icon name="search" />
@@ -507,6 +514,7 @@ export const TimelinePanel: FC<TimelinePanelProps> = ({ panelState }) => {
                                                 matchController.activeMatch?.eventIndex === index &&
                                                 matchController.activeMatch?.type === 'diff'
                                             }
+                                            viewMode={viewMode}
                                         />
                                     </div>
                                 )}
