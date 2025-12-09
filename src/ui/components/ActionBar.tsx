@@ -24,7 +24,6 @@ export const ActionBar: FC = () => {
         editHistory,
         viewMode,
         panel,
-        file,
         currentBranch,
         availableBranches,
     } = useAppSelector(state => ({
@@ -41,7 +40,6 @@ export const ActionBar: FC = () => {
         editHistory: state.editHistory,
         viewMode: state.viewMode,
         panel: state.panel,
-        file: state.file,
         currentBranch: state.currentBranch,
         availableBranches: state.availableBranches,
     }));
