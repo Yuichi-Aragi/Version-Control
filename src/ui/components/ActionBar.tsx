@@ -18,9 +18,11 @@ export const ActionBar: FC = () => {
         isProcessing, 
         isRenaming,
         diffRequest, 
-        settings, 
+        settings, // Effective settings
         watchModeCountdown, 
         history, 
+        editHistory,
+        viewMode,
         panel,
         file,
         currentBranch,
@@ -33,9 +35,11 @@ export const ActionBar: FC = () => {
         isProcessing: state.isProcessing,
         isRenaming: state.isRenaming,
         diffRequest: state.diffRequest,
-        settings: state.settings,
+        settings: state.effectiveSettings,
         watchModeCountdown: state.watchModeCountdown,
         history: state.history,
+        editHistory: state.editHistory,
+        viewMode: state.viewMode,
         panel: state.panel,
         file: state.file,
         currentBranch: state.currentBranch,
@@ -115,9 +119,9 @@ export const ActionBar: FC = () => {
     }, [dispatch]);
 
     const handleOpenBranchDrawer = useCallback(() => {
-        if (status !== AppStatus.READY || isBusy || file?.extension === 'base') return;
+        if (status !== AppStatus.READY || isBusy) return;
         dispatch(thunks.showBranchSwitcher());
-    }, [dispatch, status, isBusy, file]);
+    }, [dispatch, status, isBusy]);
 
     const handleOpenTimeline = useCallback(() => {
         if (status !== AppStatus.READY || isBusy) return;
@@ -152,39 +156,39 @@ export const ActionBar: FC = () => {
     const diffIndicatorIcon = isDiffGenerating ? 'loader' : 'diff';
     const diffIndicatorAriaLabel = isDiffGenerating ? 'Diff is being generated...' : 'Diff is ready. Click to view.';
 
+    const hasHistory = viewMode === 'versions' ? history.length > 0 : editHistory.length > 0;
+
     return (
         <div className={clsx('v-actions-container', { 'is-searching': isSearchActive })}>
             <div className="v-top-actions">
                 <div className="v-top-actions-left-group">
-                    {file?.extension !== 'base' && (
-                        <DropdownMenu.Root>
-                            <DropdownMenu.Trigger asChild>
-                                <button
-                                    className="clickable-icon"
-                                    aria-label="More options"
-                                    disabled={isBusy}
-                                >
-                                    <Icon name="menu" />
-                                </button>
-                            </DropdownMenu.Trigger>
-                            <DropdownMenu.Portal>
-                                <DropdownMenu.Content className="v-actionbar-dropdown-content" sideOffset={5} collisionPadding={10}>
-                                    <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenBranchDrawer}>
-                                        <span>Branches</span>
-                                        <Icon name="git-branch" />
-                                    </DropdownMenu.Item>
-                                    <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenTimeline}>
-                                        <span>Timeline</span>
-                                        <Icon name="history" />
-                                    </DropdownMenu.Item>
-                                </DropdownMenu.Content>
-                            </DropdownMenu.Portal>
-                        </DropdownMenu.Root>
-                    )}
+                    <DropdownMenu.Root>
+                        <DropdownMenu.Trigger asChild>
+                            <button
+                                className="clickable-icon"
+                                aria-label="More options"
+                                disabled={isBusy}
+                            >
+                                <Icon name="menu" />
+                            </button>
+                        </DropdownMenu.Trigger>
+                        <DropdownMenu.Portal>
+                            <DropdownMenu.Content className="v-actionbar-dropdown-content" sideOffset={5} collisionPadding={10}>
+                                <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenBranchDrawer}>
+                                    <span>Branches</span>
+                                    <Icon name="git-branch" />
+                                </DropdownMenu.Item>
+                                <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenTimeline}>
+                                    <span>Timeline</span>
+                                    <Icon name="history" />
+                                </DropdownMenu.Item>
+                            </DropdownMenu.Content>
+                        </DropdownMenu.Portal>
+                    </DropdownMenu.Root>
                     
                     <div className="v-branch-switcher-container">
                         {availableBranches.length > 1 && (
-                            <button className="v-branch-switcher-button" onClick={handleOpenBranchDrawer} disabled={isBusy || file?.extension === 'base'}>
+                            <button className="v-branch-switcher-button" onClick={handleOpenBranchDrawer} disabled={isBusy}>
                                 <Icon name="git-branch" />
                                 <span>{currentBranch}</span>
                             </button>
@@ -229,7 +233,7 @@ export const ActionBar: FC = () => {
                         </button>
                     )}
                     
-                    {history.length > 0 && (
+                    {hasHistory && (
                         <>
                             <button 
                                 className={clsx('clickable-icon', { 'is-active': isSearchActive })} 

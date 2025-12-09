@@ -1,4 +1,3 @@
-// src/ui/components/HistoryList.tsx
 import { moment } from 'obsidian';
 import { orderBy } from 'lodash-es';
 import clsx from 'clsx';
@@ -73,25 +72,32 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
     const { 
         status, 
         history, 
+        editHistory,
+        viewMode,
         searchQuery, 
         isSearchCaseSensitive, 
         sortOrder, 
-        isListView, 
         panel, 
-        settings,
+        settings, // Effective settings
     } = useAppSelector(state => ({
         status: state.status,
         history: state.history ?? [],
+        editHistory: state.editHistory ?? [],
+        viewMode: state.viewMode,
         searchQuery: state.searchQuery ?? '',
         isSearchCaseSensitive: state.isSearchCaseSensitive,
         sortOrder: state.sortOrder ?? { property: 'versionNumber', direction: 'desc' },
-        isListView: state.settings?.isListView ?? true,
         panel: state.panel,
-        settings: state.settings ?? { isListView: true, useRelativeTimestamps: true, enableVersionDescription: false },
+        settings: state.effectiveSettings,
     }));
 
     const [processedHistory, setProcessedHistory] = useState<VersionHistoryEntryType[]>([]);
     const [isPending, startTransition] = useTransition();
+
+    // Determine active list based on mode
+    const activeList = viewMode === 'versions' ? history : editHistory;
+    // Use isListView from effective settings
+    const isListView = settings.isListView;
 
     const isMountedRef = useRef<boolean>(false);
     useEffect(() => {
@@ -104,13 +110,13 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
     useEffect(() => {
         if (status !== AppStatus.READY) {
             setProcessedHistory([]);
-            onCountChange(0, history.length);
+            onCountChange(0, activeList.length);
             return;
         }
 
         startTransition(() => {
             try {
-                const src = Array.isArray(history) ? history : [];
+                const src = Array.isArray(activeList) ? activeList : [];
                 const trimmedQuery = String(searchQuery ?? '').trim();
 
                 let result = src;
@@ -211,20 +217,20 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
                 console.error('HistoryList: failed to process history:', err);
                 if (isMountedRef.current) {
                     setProcessedHistory([]);
-                    onCountChange(0, history.length);
+                    onCountChange(0, activeList.length);
                 }
             }
         });
-    }, [status, history, searchQuery, isSearchCaseSensitive, sortOrder, startTransition, onCountChange, settings]);
+    }, [status, activeList, searchQuery, isSearchCaseSensitive, sortOrder, startTransition, onCountChange, settings]);
 
 
     if (status === AppStatus.LOADING) {
         return (
             <div className="v-history-list-container">
-                <div className={clsx('v-history-list', { 'is-list-view': settings.isListView })}>
+                <div className={clsx('v-history-list', { 'is-list-view': isListView })}>
                     {Array.from({ length: 8 }).map((_, i) => (
-                        <div key={i} className={settings.isListView ? 'v-history-item-list-wrapper' : 'v-history-item-card-wrapper'}>
-                            <SkeletonEntry isListView={settings.isListView} />
+                        <div key={i} className={isListView ? 'v-history-item-list-wrapper' : 'v-history-item-card-wrapper'}>
+                            <SkeletonEntry isListView={isListView} />
                         </div>
                     ))}
                 </div>
@@ -235,12 +241,14 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
     if (status !== AppStatus.READY) return null;
 
     const renderContent = () => {
-        const total = Array.isArray(history) ? history.length : 0;
+        const total = Array.isArray(activeList) ? activeList.length : 0;
         if (total === 0) {
-            return <EmptyState icon="inbox" title="No versions saved yet." subtitle="Click the '+' button to start tracking history for this note." />;
+            const noun = viewMode === 'versions' ? 'versions' : 'edits';
+            const action = viewMode === 'versions' ? 'track history' : 'track edits';
+            return <EmptyState icon="inbox" title={`No ${noun} saved yet.`} subtitle={`Click the '+' button to start ${action} for this note.`} />;
         }
         if ((Array.isArray(processedHistory) ? processedHistory.length : 0) === 0 && String(searchQuery ?? '').trim()) {
-            return <EmptyState icon="search-x" title="No matching versions found." subtitle="Try a different search query or change sort options." />;
+            return <EmptyState icon="search-x" title="No matching items found." subtitle="Try a different search query or change sort options." />;
         }
 
         return (
@@ -256,6 +264,7 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
                                 version={version} 
                                 searchQuery={searchQuery}
                                 isSearchCaseSensitive={isSearchCaseSensitive}
+                                viewMode={viewMode}
                             />
                         </div>
                     );

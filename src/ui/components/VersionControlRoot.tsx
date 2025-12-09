@@ -8,7 +8,6 @@ import { ActionBar } from './ActionBar';
 import { HistoryList } from './HistoryList';
 import { PanelContainer } from './panels/PanelContainer';
 import { SettingsPanel } from './SettingsPanel';
-import { KeyUpdateOverlay } from './KeyUpdateOverlay';
 import { DiffWindow } from './panels/DiffWindow';
 import { thunks } from '../../state/thunks';
 import { Icon } from './Icon';
@@ -16,13 +15,13 @@ import { HistoryListHeader } from './HistoryListHeader';
 
 export const VersionControlRoot: FC = () => {
     const dispatch = useAppDispatch();
-    const { status, error, panel, isProcessing, isRenaming, keyUpdateActive } = useAppSelector(state => ({
+    const { status, error, panel, isProcessing, isRenaming, viewMode } = useAppSelector(state => ({
         status: state.status,
         error: state.error,
         panel: state.panel,
         isProcessing: state.isProcessing,
         isRenaming: state.isRenaming,
-        keyUpdateActive: state.keyUpdateProgress?.active ?? false,
+        viewMode: state.viewMode,
     }));
 
     const [historyCounts, setHistoryCounts] = useState({ filtered: 0, total: 0 });
@@ -30,10 +29,14 @@ export const VersionControlRoot: FC = () => {
     const headerRef = useRef<HTMLDivElement>(null);
     const mainRef = useRef<HTMLDivElement>(null);
 
-    const handleSaveVersionClick = useCallback(() => {
+    const handleSaveClick = useCallback(() => {
         if (status !== AppStatus.READY || isProcessing || isRenaming) return;
-        dispatch(thunks.saveNewVersion());
-    }, [dispatch, status, isProcessing, isRenaming]);
+        if (viewMode === 'versions') {
+            dispatch(thunks.saveNewVersion());
+        } else {
+            dispatch(thunks.saveNewEdit());
+        }
+    }, [dispatch, status, isProcessing, isRenaming, viewMode]);
 
     const handleCountChange = useCallback((filteredCount: number, totalCount: number) => {
         setHistoryCounts({ filtered: filteredCount, total: totalCount });
@@ -62,11 +65,9 @@ export const VersionControlRoot: FC = () => {
         { 'is-processing': isProcessing || isRenaming }
     );
 
-    const renderContent = () => {
-        if (keyUpdateActive) {
-            return <KeyUpdateOverlay />;
-        }
+    const saveLabel = viewMode === 'versions' ? "Save a new version" : "Save a new edit";
 
+    const renderContent = () => {
         switch (status) {
             case AppStatus.INITIALIZING:
                 return <Placeholder title="Initializing version control..." iconName="sync" />;
@@ -95,9 +96,10 @@ export const VersionControlRoot: FC = () => {
                             <SettingsPanel />
                             <button
                                 className="v-fab-save-button"
-                                aria-label="Save a new version of the current note"
-                                onClick={handleSaveVersionClick}
+                                aria-label={saveLabel}
+                                onClick={handleSaveClick}
                                 disabled={isProcessing || isRenaming}
+                                title={saveLabel}
                             >
                                 <Icon name="plus" />
                             </button>
@@ -112,7 +114,7 @@ export const VersionControlRoot: FC = () => {
     return (
         <div className={rootClassName}>
             {renderContent()}
-            { !keyUpdateActive && <PanelContainer /> }
+            <PanelContainer />
             { panel?.type === 'diff' && panel.renderMode === 'window' && <DiffWindow panelState={panel} /> }
         </div>
     );
