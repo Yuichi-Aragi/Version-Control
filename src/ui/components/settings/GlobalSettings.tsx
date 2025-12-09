@@ -1,19 +1,18 @@
-import { memo, useCallback, useEffect, useMemo } from 'react';
+import { memo, useEffect } from 'react';
 import { useForm, type SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { debounce } from 'lodash-es';
 import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
 import { thunks } from '../../../state/thunks';
 import { SettingComponent } from '../SettingComponent';
-import { ValidatedInput, ValidatedTextarea } from './controls/ValidatedControls';
+import { ValidatedInput } from './controls/ValidatedControls';
 import { 
     DatabasePathSchema, 
     FrontmatterKeySchema, 
     NoteIdFormatSchema,
-    VersionIdFormatSchema,
-    RegexListSchema 
+    VersionIdFormatSchema 
 } from './settingsUtils';
 import { z } from 'zod';
+import { AutoRegisterSettings } from './setting-controls/AutoRegisterSettings';
 
 // --- Database Path Setting ---
 
@@ -71,63 +70,6 @@ const DatabasePathSetting: React.FC = memo(() => {
 });
 DatabasePathSetting.displayName = 'DatabasePathSetting';
 
-// --- Key Update Filter Setting ---
-
-const KeyUpdateFilterFormSchema = z.object({
-    filters: RegexListSchema
-});
-
-type KeyUpdateFilterFormValues = z.infer<typeof KeyUpdateFilterFormSchema>;
-
-const KeyUpdateFilterSetting: React.FC = memo(() => {
-    const dispatch = useAppDispatch();
-    const keyUpdatePathFilters = useAppSelector(state => state.settings.keyUpdatePathFilters);
-    
-    const { control, watch, reset, formState: { isValid } } = useForm<KeyUpdateFilterFormValues>({
-        mode: 'onChange',
-        resolver: zodResolver(KeyUpdateFilterFormSchema),
-        defaultValues: { filters: keyUpdatePathFilters.join('\n') }
-    });
-
-    const debouncedSave = useMemo(() => debounce((value: string) => {
-        const filterArray = value.split('\n').map(s => s.trim()).filter(Boolean);
-        dispatch(thunks.updateGlobalSettings({ keyUpdatePathFilters: filterArray }));
-    }, 1000), [dispatch]);
-
-    // Sync external state changes
-    useEffect(() => {
-        reset({ filters: keyUpdatePathFilters.join('\n') });
-    }, [keyUpdatePathFilters, reset]);
-
-    useEffect(() => {
-        const subscription = watch((value) => {
-            if (isValid && value.filters !== undefined) {
-                debouncedSave(value.filters);
-            }
-        });
-        return () => {
-            subscription.unsubscribe();
-            debouncedSave.flush(); // Flush pending changes on unmount/cleanup
-        };
-    }, [watch, isValid, debouncedSave]);
-
-    return (
-        <>
-            <p className="v-settings-info v-meta-label">
-                (Optional) Exclude paths from this key update. Enter one case-sensitive regular expression per line.
-            </p>
-            <ValidatedTextarea 
-                name="filters"
-                control={control}
-                rows={3}
-                placeholder={"^DoNotUpdateThisFolder/.*\n/path/to/specific-file.md"}
-                maxLength={1000}
-            />
-        </>
-    );
-});
-KeyUpdateFilterSetting.displayName = 'KeyUpdateFilterSetting';
-
 // --- Frontmatter Key Setting ---
 
 const FrontmatterKeyFormSchema = z.object({
@@ -157,31 +99,28 @@ const FrontmatterKeySetting: React.FC = memo(() => {
     };
 
     return (
-        <>
-            <SettingComponent
-                name="Frontmatter key"
-                desc={`The key used in note frontmatter to store the version control ID. Current: ${frontmatterKey}`}
-            >
-                <form onSubmit={handleSubmit(onSubmit)} className="v-setting-form" style={{ width: '100%' }}>
-                    <ValidatedInput
-                        name="key"
-                        control={control}
-                        placeholder="e.g., vc-id"
-                        maxLength={50}
-                    />
-                    <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'flex-end' }}>
-                        <button
-                            type="submit"
-                            aria-label="Apply frontmatter key change"
-                            disabled={!isValid || !isDirty}
-                        >
-                            Apply
-                        </button>
-                    </div>
-                </form>
-            </SettingComponent>
-            {isDirty && <KeyUpdateFilterSetting />}
-        </>
+        <SettingComponent
+            name="Frontmatter key"
+            desc={`The key used in note frontmatter to store the version control ID. Current: ${frontmatterKey}`}
+        >
+            <form onSubmit={handleSubmit(onSubmit)} className="v-setting-form" style={{ width: '100%' }}>
+                <ValidatedInput
+                    name="key"
+                    control={control}
+                    placeholder="e.g., vc-id"
+                    maxLength={50}
+                />
+                <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                        type="submit"
+                        aria-label="Apply frontmatter key change"
+                        disabled={!isValid || !isDirty}
+                    >
+                        Apply
+                    </button>
+                </div>
+            </form>
+        </SettingComponent>
     );
 });
 FrontmatterKeySetting.displayName = 'FrontmatterKeySetting';
@@ -257,94 +196,38 @@ const IdFormatSettings: React.FC = memo(() => {
 });
 IdFormatSettings.displayName = 'IdFormatSettings';
 
-// --- Auto Register Notes Setting ---
-
-const AutoRegisterFormSchema = z.object({
-    filters: RegexListSchema
-});
-
-type AutoRegisterFormValues = z.infer<typeof AutoRegisterFormSchema>;
-
-const AutoRegisterNotesSetting: React.FC = memo(() => {
-    const dispatch = useAppDispatch();
-    const autoRegisterNotes = useAppSelector(state => state.settings.autoRegisterNotes);
-    const pathFilters = useAppSelector(state => state.settings.pathFilters);
-    
-    const handleAutoRegisterToggle = useCallback((value: boolean) => {
-        dispatch(thunks.updateGlobalSettings({ autoRegisterNotes: value }));
-    }, [dispatch]);
-    
-    const { control, watch, reset, formState: { isValid } } = useForm<AutoRegisterFormValues>({
-        mode: 'onChange',
-        resolver: zodResolver(AutoRegisterFormSchema),
-        defaultValues: { filters: pathFilters.join('\n') }
-    });
-
-    const debouncedSave = useMemo(() => debounce((value: string) => {
-        const filterArray = value.split('\n').map(s => s.trim()).filter(Boolean);
-        dispatch(thunks.updateGlobalSettings({ pathFilters: filterArray }));
-    }, 1000), [dispatch]);
-
-    // Sync external state changes
-    useEffect(() => {
-        reset({ filters: pathFilters.join('\n') });
-    }, [pathFilters, reset]);
-
-    useEffect(() => {
-        const subscription = watch((value) => {
-            if (isValid && value.filters !== undefined) {
-                debouncedSave(value.filters);
-            }
-        });
-        return () => {
-            subscription.unsubscribe();
-            debouncedSave.flush(); // Flush pending changes on unmount/cleanup
-        };
-    }, [watch, isValid, debouncedSave]);
-
-    return (
-        <>
-            <SettingComponent 
-                name="Automatically track new notes" 
-                desc="When enabled, any opened note not currently under version control will be automatically added and an initial version will be saved."
-            >
-                <input 
-                    type="checkbox" 
-                    checked={autoRegisterNotes} 
-                    onChange={e => handleAutoRegisterToggle(e.target.checked)}
-                    aria-label="Toggle automatic note tracking"
-                />
-            </SettingComponent>
-            {autoRegisterNotes && (
-                <>
-                    <p className="v-settings-info v-meta-label">
-                        Enter one case-sensitive regular expression per line. Notes with paths matching any of these patterns will be excluded from auto-tracking.
-                    </p>
-                    <ValidatedTextarea 
-                        name="filters"
-                        control={control}
-                        rows={3}
-                        placeholder={"^Private/.*\n_templates/.*"}
-                        maxLength={1000}
-                    />
-                </>
-            )}
-        </>
-    );
-});
-AutoRegisterNotesSetting.displayName = 'AutoRegisterNotesSetting';
-
 interface GlobalSettingsProps {
     showTitle?: boolean;
 }
 
-export const GlobalSettings: React.FC<GlobalSettingsProps> = memo(({ showTitle = true }) => (
-    <div className="v-settings-section" role="region" aria-labelledby="global-settings-title">
-        {showTitle && <h2 id="global-settings-title">Global Plugin Settings</h2>}
-        <DatabasePathSetting />
-        <FrontmatterKeySetting />
-        <IdFormatSettings />
-        <AutoRegisterNotesSetting />
-    </div>
-));
+export const GlobalSettings: React.FC<GlobalSettingsProps> = memo(({ showTitle = true }) => {
+    return (
+        <div className="v-settings-section" role="region" aria-labelledby="global-settings-title">
+            {showTitle && <h2 id="global-settings-title">Global Plugin Settings</h2>}
+            <DatabasePathSetting />
+            <FrontmatterKeySetting />
+            <IdFormatSettings />
+            
+            <div style={{marginTop: '20px', borderTop: '1px solid var(--background-modifier-border)', paddingTop: '10px'}}>
+                <h3 id="global-version-defaults-title">
+                    Global Version History Defaults
+                </h3>
+                <p className="setting-item-description">
+                    These settings apply to all notes using Version History unless overridden.
+                </p>
+                <AutoRegisterSettings settingKey="versionHistorySettings" />
+            </div>
+
+            <div style={{marginTop: '20px', borderTop: '1px solid var(--background-modifier-border)', paddingTop: '10px'}}>
+                <h3 id="global-edit-defaults-title">
+                    Global Edit History Defaults
+                </h3>
+                <p className="setting-item-description">
+                    These settings apply to all notes using Edit History unless overridden.
+                </p>
+                <AutoRegisterSettings settingKey="editHistorySettings" />
+            </div>
+        </div>
+    );
+});
 GlobalSettings.displayName = 'GlobalSettings';

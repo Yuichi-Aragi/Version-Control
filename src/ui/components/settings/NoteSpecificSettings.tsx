@@ -9,12 +9,13 @@ import { NoteSettingsControls } from './setting-controls/NoteSettingsControls';
 
 export const NoteSpecificSettings: React.FC = memo(() => {
     const dispatch = useAppDispatch();
-    const { status, file, noteId, history, isGlobal } = useAppSelector(state => ({
+    const { status, file, noteId, history, isGlobal, viewMode } = useAppSelector(state => ({
         status: state.status,
         file: state.file,
         noteId: state.noteId,
         history: state.history,
-        isGlobal: state.settings.isGlobal,
+        isGlobal: state.effectiveSettings.isGlobal,
+        viewMode: state.viewMode,
     }), isEqual);
 
     const handleRefresh = useCallback(() => {
@@ -51,6 +52,7 @@ export const NoteSpecificSettings: React.FC = memo(() => {
 
     if (status !== AppStatus.READY || !file) return null;
     const areControlsDisabled = !noteId;
+    const modeLabel = viewMode === 'versions' ? 'Version History' : 'Edit History';
 
     return (
         <>
@@ -79,14 +81,14 @@ export const NoteSpecificSettings: React.FC = memo(() => {
             </div>
             <div className="v-settings-section" role="region" aria-labelledby="note-settings-title">
                 <h4 id="note-settings-title">
-                    {noteId ? 'Note-specific settings' : 'Default settings'}
+                    {noteId ? `${modeLabel} Settings (Current Branch)` : 'Default settings'}
                 </h4>
                 {noteId && <IsGlobalSetting disabled={areControlsDisabled} />}
                 <p className="v-settings-info">
                     {noteId ? (
                         isGlobal ? 
-                            'This note follows the global settings. Changes made here will affect all other notes that follow global settings.' : 
-                            'This note has its own settings that override the global defaults. Changes made here only affect this note.'
+                            `This note follows the global ${modeLabel.toLowerCase()} settings. Changes made here will affect all other notes that follow global settings.` : 
+                            `This note has its own ${modeLabel.toLowerCase()} settings for the current branch. Changes made here only affect this note.`
                     ) : 
                         'This note is not under version control. These are the default settings that will be applied.'
                     }
