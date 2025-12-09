@@ -1,18 +1,21 @@
-import { App, TFolder } from 'obsidian';
+import { App, TFolder, TFile } from 'obsidian';
 import type { Container } from 'inversify';
 import type { AppThunk, AppStore } from '../store';
 import { actions } from '../appSlice';
-import type { VersionHistoryEntry } from '../../types';
+import type { VersionHistoryEntry, ViewMode } from '../../types';
 import { AppStatus, type ActionItem, type SortOrder, type SortProperty, type SortDirection } from '../state';
 import { CHANGELOG_URL } from '../../constants';
-import { initializeView } from './core.thunks';
+import { loadEffectiveSettingsForNote, loadHistoryForNoteId, initializeView } from './core.thunks';
 import { UIService } from '../../services/ui-service';
 import { VersionManager } from '../../core/version-manager';
+import { EditHistoryManager } from '../../core/edit-history-manager';
 import { TYPES } from '../../types/inversify.types';
-import { isPluginUnloading } from './ThunkUtils';
+import { isPluginUnloading } from '../utils/settingsUtils';
 import { versionActions } from '../../ui/VersionActions';
+import { editActions } from '../../ui/EditActions';
 import type VersionControlPlugin from '../../main';
 import { requestWithRetry } from '../../utils/network';
+import { loadEditHistory } from './edit-history.thunks';
 import { createBranch, switchBranch } from './version.thunks';
 
 /**
@@ -39,6 +42,38 @@ const updateVersionInSettings = async (container: Container): Promise<void> => {
     } catch (error) {
         console.error("Version Control: Failed to save updated version to settings.", error);
         // This is a non-critical error, so we don't bother the user with a notice.
+    }
+};
+
+export const toggleViewMode = (): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
+    const state = getState();
+
+    const currentMode = state.viewMode;
+    const newMode: ViewMode = currentMode === 'versions' ? 'edits' : 'versions';
+    
+    // 1. Pre-emptively reset effective settings to global defaults for the new mode
+    // This minimizes "bleed over" of specific settings from the previous mode during the async load
+    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
+    const globalDefaults = newMode === 'versions' 
+        ? plugin.settings.versionHistorySettings 
+        : plugin.settings.editHistorySettings;
+    
+    dispatch(actions.updateEffectiveSettings({ ...globalDefaults, isGlobal: true }));
+
+    // 2. Update State (This clears panel, diffRequest, etc.)
+    dispatch(actions.setViewMode(newMode));
+
+    // 3. Load Data for New Mode
+    const { noteId, file } = state;
+    if (noteId && file) {
+        dispatch(loadEffectiveSettingsForNote(noteId));
+        
+        if (newMode === 'edits') {
+            dispatch(loadEditHistory(noteId));
+        } else {
+            dispatch(loadHistoryForNoteId(file, noteId));
+        }
     }
 };
 
@@ -108,7 +143,7 @@ export const showChangelogPanel = (options: { forceRefresh?: boolean; isManualRe
         const stateAfterFetch = getState();
         // This is the final check before displaying the content and updating the version.
         // For a manual request, we always show it.
-        // For an automatic request, we only show it if our loading panel is still the active one.
+        // For a automatic request, we only show it if our loading panel is still the active one.
         // This prevents showing the changelog if the user has navigated away or opened another panel
         // during the fetch, which would be intrusive.
         const canShowPanelNow = isManualRequest || stateAfterFetch.panel?.type === 'changelog';
@@ -163,44 +198,6 @@ export const processQueuedChangelogRequest = (): AppThunk => (dispatch, _getStat
     }
 };
 
-export const viewVersionInPanel = (version: VersionHistoryEntry): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
-    const uiService = container.get<UIService>(TYPES.UIService);
-    const state = getState();
-
-    if (state.status !== AppStatus.READY || !state.noteId) return;
-    
-    dispatch(actions.setProcessing(true));
-    try {
-        if (state.noteId !== version.noteId) {
-            uiService.showNotice("VC: Cannot preview this version now because the note context changed.");
-            dispatch(initializeView());
-            return;
-        }
-        const content = await versionManager.getVersionContent(state.noteId, version.id);
-
-        const stateAfterFetch = getState();
-        if (isPluginUnloading(container) || stateAfterFetch.status !== AppStatus.READY || stateAfterFetch.noteId !== state.noteId) {
-            return;
-        }
-
-        if (content !== null) {
-            dispatch(actions.openPanel({ type: 'preview', version, content }));
-        } else {
-            uiService.showNotice("VC: Error: Could not load version content for preview.");
-        }
-    } catch (error) {
-        console.error("Version Control: Error fetching content for preview panel.", error);
-        uiService.showNotice("VC: Failed to load content for preview. Check the console for details.");
-    } finally {
-        const finalState = getState();
-        if (finalState.status === AppStatus.READY) {
-             dispatch(actions.setProcessing(false));
-        }
-    }
-};
-
 export const createDeviation = (version: VersionHistoryEntry): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     const uiService = container.get<UIService>(TYPES.UIService);
@@ -225,6 +222,7 @@ export const createDeviation = (version: VersionHistoryEntry): AppThunk => async
     const onChooseAction = (selectedFolder: TFolder): AppThunk => async (dispatch, getState, container) => {
         if (isPluginUnloading(container)) return;
         const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+        const editHistoryManager = container.get<EditHistoryManager>(TYPES.EditHistoryManager);
         
         dispatch(actions.closePanel()); // Close the folder selection panel immediately.
 
@@ -235,14 +233,25 @@ export const createDeviation = (version: VersionHistoryEntry): AppThunk => async
         }
         
         try {
-            const newFile = await versionManager.createDeviation(version.noteId, version.id, selectedFolder);
+            let newFile: TFile | null = null;
+            const viewMode = latestState.viewMode;
+
+            if (viewMode === 'versions') {
+                newFile = await versionManager.createDeviation(version.noteId, version.id, selectedFolder);
+            } else {
+                const content = await editHistoryManager.getEditContent(version.noteId, version.id);
+                if (!content) throw new Error("Could not load edit content.");
+                const suffix = `(from Edit #${version.versionNumber})`;
+                newFile = await versionManager.createDeviationFromContent(version.noteId, content, selectedFolder, suffix);
+            }
+
             if (newFile) {
-                uiService.showNotice(`Created new note "${newFile.basename}" from version ${version.id.substring(0,6)}...`, 5000);
+                uiService.showNotice(`Created new note "${newFile.basename}"...`, 5000);
                 await app.workspace.getLeaf(true).openFile(newFile);
             }
         } catch (error) {
             console.error("Version Control: Error creating deviation.", error);
-            uiService.showNotice("VC: Failed to create a new note from this version. Check the console for details.");
+            uiService.showNotice("VC: Failed to create a new note from this version/edit. Check the console for details.");
         }
     };
 
@@ -263,7 +272,11 @@ export const showVersionContextMenu = (version: VersionHistoryEntry): AppThunk =
         return;
     }
 
-    const items: ActionItem<string>[] = versionActions.map(action => ({
+    const isEdits = state.viewMode === 'edits';
+    const actionsList = isEdits ? editActions : versionActions;
+    const titlePrefix = isEdits ? 'Edit #' : 'V';
+
+    const items: ActionItem<string>[] = actionsList.map(action => ({
         id: action.id,
         data: action.id,
         text: action.title,
@@ -272,7 +285,7 @@ export const showVersionContextMenu = (version: VersionHistoryEntry): AppThunk =
     }));
 
     const onChooseAction = (actionId: string): AppThunk => (_dispatch, _getState, _container) => {
-        const action = versionActions.find(a => a.id === actionId);
+        const action = actionsList.find(a => a.id === actionId);
         if (action) {
             // We need to get the store from the container again inside this new thunk's scope
             const store = container.get<AppStore>(TYPES.Store);
@@ -282,7 +295,7 @@ export const showVersionContextMenu = (version: VersionHistoryEntry): AppThunk =
 
     dispatch(actions.openPanel({
         type: 'action',
-        title: `Actions for V${version.versionNumber}`,
+        title: `Actions for ${titlePrefix}${version.versionNumber}`,
         items,
         onChooseAction,
         showFilter: false,

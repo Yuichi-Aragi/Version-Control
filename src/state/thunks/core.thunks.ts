@@ -1,18 +1,19 @@
-import { TFile, type WorkspaceLeaf, type CachedMetadata, App, MarkdownView } from 'obsidian';
+import { TFile, type WorkspaceLeaf, App, FileView } from 'obsidian';
 import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
-import type { AppError, VersionControlSettings } from '../../types';
+import type { AppError, HistorySettings } from '../../types';
 import { AppStatus } from '../state';
 import { NoteManager } from '../../core/note-manager';
 import { UIService } from '../../services/ui-service';
 import { VersionManager } from '../../core/version-manager';
 import { ManifestManager } from '../../core/manifest-manager';
+import { EditHistoryManager } from '../../core/edit-history-manager';
 import { CleanupManager } from '../../core/tasks/cleanup-manager';
 import { BackgroundTaskManager } from '../../core/tasks/BackgroundTaskManager';
 import { TYPES } from '../../types/inversify.types';
-import { isPluginUnloading } from './ThunkUtils';
+import { isPluginUnloading } from '../utils/settingsUtils';
 import type VersionControlPlugin from '../../main';
-import { autoRegisterNote } from './version.thunks';
+import { saveNewEdit } from './edit-history.thunks';
 import { isPathAllowed } from '../../utils/path-filter';
 
 /**
@@ -22,59 +23,126 @@ import { isPathAllowed } from '../../utils/path-filter';
 export const loadEffectiveSettingsForNote = (noteId: string | null): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const editHistoryManager = container.get<EditHistoryManager>(TYPES.EditHistoryManager);
     const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
+    const state = getState();
+    const viewMode = state.viewMode;
 
     const globalSettings = plugin.settings;
-    let effectiveSettings: VersionControlSettings = { ...globalSettings };
+    let effectiveSettings: HistorySettings;
+    
+    // Determine which global defaults to use based on view mode
+    const globalDefaults = viewMode === 'versions' 
+        ? globalSettings.versionHistorySettings 
+        : globalSettings.editHistorySettings;
 
     if (noteId) {
         try {
+            let perBranchSettings: Partial<HistorySettings> | undefined;
+            
+            // Always load NoteManifest first to get the authoritative current branch.
+            // This is critical because during branch switching, the NoteManifest is updated first,
+            // while the EditManifest might still point to the old branch until loadEditHistory runs.
             const noteManifest = await manifestManager.loadNoteManifest(noteId);
             const currentBranchName = noteManifest?.currentBranch;
-            const perBranchSettings = currentBranchName ? noteManifest?.branches[currentBranchName]?.settings : undefined;
+
+            if (viewMode === 'versions') {
+                perBranchSettings = currentBranchName ? Object.fromEntries(
+                    Object.entries(noteManifest?.branches[currentBranchName]?.settings || {}).filter(([, v]) => v !== undefined)
+                ) : undefined;
+            } else {
+                // For edits, we use the branch name from NoteManifest to look up settings in EditManifest.
+                // This ensures we load settings for the *target* branch, not the stale one.
+                const editManifest = await editHistoryManager.getEditManifest(noteId);
+                
+                // If the branch exists in EditManifest, use its settings.
+                // If it's a new branch (not in EditManifest yet), perBranchSettings will be undefined,
+                // causing fallback to global settings (which is correct for a new branch).
+                if (currentBranchName && editManifest?.branches[currentBranchName]) {
+                    perBranchSettings = Object.fromEntries(
+                        Object.entries(editManifest.branches[currentBranchName]?.settings || {}).filter(([, v]) => v !== undefined)
+                    );
+                }
+            }
 
             const isUnderGlobalInfluence = perBranchSettings?.isGlobal === true || perBranchSettings === undefined;
 
             if (isUnderGlobalInfluence) {
-                effectiveSettings = { ...globalSettings, isGlobal: true };
+                effectiveSettings = { ...globalDefaults, isGlobal: true };
             } else {
                 const definedBranchSettings = Object.fromEntries(
                     Object.entries(perBranchSettings ?? {}).filter(([, v]) => v !== undefined)
                 );
-                effectiveSettings = { ...globalSettings, ...definedBranchSettings, isGlobal: false };
+                effectiveSettings = { ...globalDefaults, ...definedBranchSettings, isGlobal: false };
             }
         } catch (error) {
             console.error(`VC: Could not load per-note settings for note ${noteId}. Using global settings.`, error);
-            effectiveSettings = { ...globalSettings, isGlobal: true };
+            effectiveSettings = { ...globalDefaults, isGlobal: true };
         }
     } else {
-        effectiveSettings = { ...globalSettings, isGlobal: true };
+        effectiveSettings = { ...globalDefaults, isGlobal: true };
     }
 
-    effectiveSettings.autoRegisterNotes = globalSettings.autoRegisterNotes;
-    effectiveSettings.databasePath = globalSettings.databasePath;
-    effectiveSettings.pathFilters = globalSettings.pathFilters;
-    effectiveSettings.noteIdFrontmatterKey = globalSettings.noteIdFrontmatterKey;
-
-    if (JSON.stringify(getState().settings) !== JSON.stringify(effectiveSettings)) {
-        dispatch(actions.updateSettings(effectiveSettings));
+    if (JSON.stringify(getState().effectiveSettings) !== JSON.stringify(effectiveSettings)) {
+        dispatch(actions.updateEffectiveSettings(effectiveSettings));
     }
 };
 
+export const autoRegisterNote = (file: TFile): AppThunk => async (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
+    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const uiService = container.get<UIService>(TYPES.UIService);
+    const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
 
-export const initializeView = (leaf?: WorkspaceLeaf | null): AppThunk => async (dispatch, _getState, container) => {
+    // Set a loading state for the file
+    dispatch(actions.initializeView({ file, noteId: null, source: 'none' }));
+    
+    try {
+        const result = await versionManager.saveNewVersionForFile(file, {
+            name: 'Initial Version',
+            isAuto: true,
+            force: true, // Save even if empty
+            settings: getState().settings,
+        });
+
+        if (result.status === 'saved') {
+            uiService.showNotice(`"${file.basename}" is now under version control.`);
+            // After saving, we have a noteId and history, so we can load it directly.
+            dispatch(loadHistoryForNoteId(file, result.newNoteId));
+        } else {
+            // This could happen if another process registered it, or if content is identical to a deleted note's last version.
+            // In this case, just proceed with a normal history load.
+            dispatch(loadHistory(file));
+        }
+    } catch (error) {
+        console.error(`Version Control: Failed to auto-register note "${file.path}".`, error);
+        const appError: AppError = {
+            title: "Auto-registration failed",
+            message: `Could not automatically start version control for "${file.basename}".`,
+            details: error instanceof Error ? error.message : String(error),
+        };
+        dispatch(actions.reportError(appError));
+    } finally {
+        if (!isPluginUnloading(container)) {
+            backgroundTaskManager.syncWatchMode();
+        }
+    }
+};
+
+export const initializeView = (leaf?: WorkspaceLeaf | null): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     const app = container.get<App>(TYPES.App);
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);
     const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
-
+    
     try {
         let targetLeaf: WorkspaceLeaf | null;
         if (leaf !== undefined) {
             targetLeaf = leaf;
         } else {
-            const activeMarkdownView = app.workspace.getActiveViewOfType(MarkdownView);
-            targetLeaf = activeMarkdownView ? activeMarkdownView.leaf : null;
+            // Use FileView to support .base files and other non-markdown files that implement FileView
+            const activeView = app.workspace.getActiveViewOfType(FileView);
+            targetLeaf = activeView ? activeView.leaf : null;
         }
 
         const activeNoteInfo = await noteManager.getActiveNoteState(targetLeaf);
@@ -88,9 +156,22 @@ export const initializeView = (leaf?: WorkspaceLeaf | null): AppThunk => async (
         }
         // ----------------------------------------------------------------
 
-        if (activeNoteInfo.file && !activeNoteInfo.noteId && plugin.settings.autoRegisterNotes) {
-            if (isPathAllowed(activeNoteInfo.file.path, plugin.settings)) {
+        // --- Auto Registration Logic ---
+        if (activeNoteInfo.file && !activeNoteInfo.noteId) {
+            const versionSettings = plugin.settings.versionHistorySettings;
+            const editSettings = plugin.settings.editHistorySettings;
+
+            // Check Version History Auto-Reg
+            if (versionSettings.autoRegisterNotes && isPathAllowed(activeNoteInfo.file.path, { pathFilters: versionSettings.pathFilters })) {
+                dispatch(actions.setViewMode('versions'));
                 dispatch(autoRegisterNote(activeNoteInfo.file));
+                return;
+            }
+
+            // Check Edit History Auto-Reg
+            if (editSettings.autoRegisterNotes && isPathAllowed(activeNoteInfo.file.path, { pathFilters: editSettings.pathFilters })) {
+                dispatch(actions.setViewMode('edits'));
+                dispatch(saveNewEdit(true)); // Auto-save first edit
                 return;
             }
         }
@@ -104,6 +185,7 @@ export const initializeView = (leaf?: WorkspaceLeaf | null): AppThunk => async (
         dispatch(loadEffectiveSettingsForNote(activeNoteInfo.noteId));
 
         if (activeNoteInfo.file) {
+            // Default to loading versions history since viewMode is reset to 'versions' in initializeView reducer
             dispatch(loadHistory(activeNoteInfo.file));
         } else {
             const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
@@ -122,6 +204,10 @@ export const initializeView = (leaf?: WorkspaceLeaf | null): AppThunk => async (
 
 export const reconcileNoteId = (file: TFile, noteId: string): AppThunk => async (_dispatch, _getState, container) => {
     if (isPluginUnloading(container)) return;
+    
+    // Skip for .base files as they don't support frontmatter
+    if (file.extension === 'base') return;
+
     const noteManager = container.get<NoteManager>(TYPES.NoteManager);
     const uiService = container.get<UIService>(TYPES.UIService);
 
@@ -175,7 +261,9 @@ export const loadHistoryForNoteId = (file: TFile, noteId: string): AppThunk => a
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
     const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
     try {
-        dispatch(loadEffectiveSettingsForNote(noteId));
+        // Ensure settings are loaded before history to prevent race conditions or UI glitches
+        await dispatch(loadEffectiveSettingsForNote(noteId));
+        
         const history = await versionManager.getVersionHistory(noteId);
         const noteManifest = await manifestManager.loadNoteManifest(noteId);
         const currentBranch = noteManifest?.currentBranch ?? '';
@@ -192,101 +280,6 @@ export const loadHistoryForNoteId = (file: TFile, noteId: string): AppThunk => a
             details: error instanceof Error ? error.message : String(error),
         };
         dispatch(actions.reportError(appError));
-    }
-};
-
-export const handleMetadataChange = (file: TFile, cache: CachedMetadata): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    
-    // Guard against processing files that are part of an in-progress deviation creation.
-    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
-    if (noteManager.isPendingDeviation(file.path)) {
-        return;
-    }
-
-    if (file.extension !== 'md') return;
-
-    const state = getState();
-    if (state.status === AppStatus.READY && state.isProcessing && state.file?.path === file.path) {
-        return;
-    }
-    if (state.status === AppStatus.LOADING && state.file?.path === file.path) {
-        return;
-    }
-
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
-    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
-    const noteIdKey = plugin.settings.noteIdFrontmatterKey;
-
-    const fileCache = cache;
-    const newNoteIdFromFrontmatter = fileCache?.frontmatter?.[noteIdKey] ?? null;
-    const oldNoteIdInManifest = await manifestManager.getNoteIdByPath(file.path);
-
-    let idChanged = false;
-    if (typeof newNoteIdFromFrontmatter === 'string' && newNoteIdFromFrontmatter.trim() === '') {
-        idChanged = null !== oldNoteIdInManifest;
-    } else {
-        idChanged = newNoteIdFromFrontmatter !== oldNoteIdInManifest;
-    }
-
-    if (idChanged) {
-        manifestManager.invalidateCentralManifestCache();
-
-        const currentState = getState();
-        if ((currentState.status === AppStatus.READY || currentState.status === AppStatus.LOADING) && currentState.file?.path === file.path) {
-            dispatch(initializeView());
-        }
-    }
-};
-
-export const handleFileRename = (file: TFile, oldPath: string): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    if (file.extension !== 'md' && file.extension !== 'base') return;
-
-    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
-    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
-    
-    const debouncerInfo = plugin.autoSaveDebouncers.get(oldPath);
-    if (debouncerInfo) {
-        debouncerInfo.debouncer.cancel();
-        plugin.autoSaveDebouncers.delete(oldPath);
-    }
-
-    const oldNoteId = await manifestManager.getNoteIdByPath(oldPath);
-    
-    // Handle the rename, which may involve updating the ID if it depends on the path
-    await noteManager.handleNoteRename(file, oldPath);
-    
-    const state = getState();
-    // Re-initialize view if the active file was the one renamed
-    if (state.file?.path === oldPath || (oldNoteId && state.noteId === oldNoteId)) {
-        dispatch(initializeView());
-    }
-};
-
-export const handleFileDelete = (file: TFile): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    if (file.extension !== 'md' && file.extension !== 'base') return;
-    
-    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
-    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
-
-    const debouncerInfo = plugin.autoSaveDebouncers.get(file.path);
-    if (debouncerInfo) {
-        debouncerInfo.debouncer.cancel();
-        plugin.autoSaveDebouncers.delete(file.path);
-    }
-
-    const deletedNoteId = await manifestManager.getNoteIdByPath(file.path); 
-    
-    noteManager.invalidateCentralManifestCache();
-    manifestManager.invalidateCentralManifestCache();
-
-    const state = getState();
-    if (state.file?.path === file.path || (deletedNoteId && state.noteId === deletedNoteId)) {
-        dispatch(actions.clearActiveNote()); 
     }
 };
 

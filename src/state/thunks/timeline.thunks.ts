@@ -3,9 +3,10 @@ import { actions } from '../appSlice';
 import { AppStatus } from '../state';
 import { TimelineManager } from '../../core/timeline-manager';
 import { ManifestManager } from '../../core/manifest-manager';
+import { EditHistoryManager } from '../../core/edit-history-manager';
 import { UIService } from '../../services/ui-service';
 import { TYPES } from '../../types/inversify.types';
-import { isPluginUnloading } from './ThunkUtils';
+import { isPluginUnloading } from '../utils/settingsUtils';
 import type { TimelineSettings } from '../../types';
 import { TimelineSettingsSchema } from '../../schemas';
 
@@ -18,20 +19,34 @@ export const openTimeline = (): AppThunk => async (dispatch, getState, container
     const state = getState();
     const uiService = container.get<UIService>(TYPES.UIService);
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const editHistoryManager = container.get<EditHistoryManager>(TYPES.EditHistoryManager);
 
     if (state.status !== AppStatus.READY || !state.noteId || !state.currentBranch) {
         uiService.showNotice("Cannot open timeline: view context is not ready.");
         return;
     }
 
-    // Load settings from manifest
+    const { noteId, currentBranch, viewMode } = state;
+    const source = viewMode === 'versions' ? 'version' : 'edit';
+
+    // Load settings from correct manifest based on view mode
     let settings: TimelineSettings = TimelineSettingsSchema.parse({});
     try {
-        const manifest = await manifestManager.loadNoteManifest(state.noteId);
-        if (manifest) {
-            const branch = manifest.branches[state.currentBranch];
-            if (branch && branch.timelineSettings) {
-                settings = branch.timelineSettings;
+        if (source === 'version') {
+            const manifest = await manifestManager.loadNoteManifest(noteId);
+            if (manifest) {
+                const branch = manifest.branches[currentBranch];
+                if (branch && branch.timelineSettings) {
+                    settings = branch.timelineSettings;
+                }
+            }
+        } else {
+            const manifest = await editHistoryManager.getEditManifest(noteId);
+            if (manifest) {
+                const branch = manifest.branches[currentBranch];
+                if (branch && branch.timelineSettings) {
+                    settings = branch.timelineSettings;
+                }
             }
         }
     } catch (error) {
@@ -42,10 +57,9 @@ export const openTimeline = (): AppThunk => async (dispatch, getState, container
     dispatch(actions.openPanel({ type: 'timeline', events: null, settings }));
 
     const timelineManager = container.get<TimelineManager>(TYPES.TimelineManager);
-    const { noteId, currentBranch } = state;
 
     try {
-        const events = await timelineManager.getOrGenerateTimeline(noteId, currentBranch);
+        const events = await timelineManager.getOrGenerateTimeline(noteId, currentBranch, source);
         
         // Verify state hasn't changed while we were awaiting
         const currentState = getState();
@@ -65,25 +79,39 @@ export const updateTimelineSettings = (newSettings: Partial<TimelineSettings>): 
     if (isPluginUnloading(container)) return;
     const state = getState();
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const editHistoryManager = container.get<EditHistoryManager>(TYPES.EditHistoryManager);
 
     if (state.status !== AppStatus.READY || !state.noteId || !state.currentBranch || state.panel?.type !== 'timeline') {
         return;
     }
 
+    const { noteId, currentBranch, viewMode } = state;
+    const source = viewMode === 'versions' ? 'version' : 'edit';
     const currentSettings = state.panel.settings;
     const updatedSettings = { ...currentSettings, ...newSettings };
 
     // Update UI immediately
     dispatch(actions.setTimelineSettings(updatedSettings));
 
-    // Persist to manifest
+    // Persist to manifest based on source
     try {
-        await manifestManager.updateNoteManifest(state.noteId, (manifest) => {
-            const branch = manifest.branches[state.currentBranch!];
-            if (branch) {
-                branch.timelineSettings = updatedSettings;
+        if (source === 'version') {
+            await manifestManager.updateNoteManifest(noteId, (manifest) => {
+                const branch = manifest.branches[currentBranch];
+                if (branch) {
+                    branch.timelineSettings = updatedSettings;
+                }
+            });
+        } else {
+            const manifest = await editHistoryManager.getEditManifest(noteId);
+            if (manifest) {
+                const branch = manifest.branches[currentBranch];
+                if (branch) {
+                    branch.timelineSettings = updatedSettings;
+                    await editHistoryManager.saveEditManifest(noteId, manifest);
+                }
             }
-        });
+        }
     } catch (error) {
         console.error("VC: Failed to save timeline settings", error);
         // Revert UI if failed? Or just log.

@@ -2,20 +2,21 @@ import { App, normalizePath, TFolder } from 'obsidian';
 import { produce } from 'immer';
 import type { AppThunk } from '../store';
 import { actions } from '../appSlice';
-import type { VersionControlSettings, VersionHistoryEntry, VersionData } from '../../types';
+import type { VersionControlSettings, VersionHistoryEntry, VersionData, HistorySettings } from '../../types';
 import { AppStatus, type ActionItem } from '../state';
 import { customSanitizeFileName } from '../../utils/file';
 import { UIService } from '../../services/ui-service';
 import { ManifestManager } from '../../core/manifest-manager';
+import { EditHistoryManager } from '../../core/edit-history-manager';
 import { ExportManager } from '../../services/export-manager';
 import { VersionManager } from '../../core/version-manager';
 import { BackgroundTaskManager } from '../../core/tasks/BackgroundTaskManager';
-import { KeyUpdateManager } from '../../core/tasks/KeyUpdateManager';
 import { TYPES } from '../../types/inversify.types';
-import { isPluginUnloading } from './ThunkUtils';
+import { isPluginUnloading } from '../utils/settingsUtils';
 import type VersionControlPlugin from '../../main';
 import { initializeView, loadEffectiveSettingsForNote } from './core.thunks';
-import { VersionControlSettingsSchema } from '../../schemas';
+import { VersionControlSettingsSchema, HistorySettingsSchema } from '../../schemas';
+import { StorageService } from '../../core/storage/storage-service';
 
 /**
  * Thunks for updating settings and handling export functionality.
@@ -45,7 +46,7 @@ export const updateGlobalSettings = (settingsUpdate: Partial<VersionControlSetti
     }
 };
 
-export const requestKeyUpdate = (newKeyRaw: string): AppThunk => (dispatch, _getState, container) => {
+export const requestKeyUpdate = (newKeyRaw: string): AppThunk => async (dispatch, _getState, container) => {
     if (isPluginUnloading(container)) return;
     const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
     const uiService = container.get<UIService>(TYPES.UIService);
@@ -62,25 +63,18 @@ export const requestKeyUpdate = (newKeyRaw: string): AppThunk => (dispatch, _get
         return;
     }
 
-    dispatch(actions.openPanel({
-        type: 'confirmation',
-        title: 'Update Frontmatter Key?',
-        message: `This will update the frontmatter key from "${oldKey}" to "${newKey}" in all tracked notes and their version histories. This operation can take some time and is irreversible. Are you sure?`,
-        onConfirmAction: confirmKeyUpdate(oldKey, newKey),
+    // Update settings:
+    // 1. Add old key to legacy keys (if not already there)
+    // 2. Set new key as primary
+    const currentLegacyKeys = plugin.settings.legacyNoteIdFrontmatterKeys || [];
+    const updatedLegacyKeys = Array.from(new Set([...currentLegacyKeys, oldKey]));
+
+    dispatch(updateGlobalSettings({
+        noteIdFrontmatterKey: newKey,
+        legacyNoteIdFrontmatterKeys: updatedLegacyKeys
     }));
-};
 
-const confirmKeyUpdate = (oldKey: string, newKey: string): AppThunk => async (dispatch, _getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const keyUpdateManager = container.get<KeyUpdateManager>(TYPES.KeyUpdateManager);
-    
-    dispatch(actions.closePanel());
-    
-    // This is a fire-and-forget call. The manager will dispatch progress updates.
-    keyUpdateManager.updateAllKeys(oldKey, newKey);
-
-    // Immediately update the setting so new operations use the new key.
-    dispatch(updateGlobalSettings({ noteIdFrontmatterKey: newKey }));
+    uiService.showNotice(`Frontmatter key updated to "${newKey}". Legacy keys will be migrated lazily.`, 4000);
 };
 
 export const requestUpdateIdFormats = (newNoteIdFormat: string, newVersionIdFormat: string): AppThunk => (dispatch, _getState, container) => {
@@ -126,36 +120,56 @@ export const toggleGlobalSettings = (applyGlobally: boolean): AppThunk => async 
     const state = getState();
     const uiService = container.get<UIService>(TYPES.UIService);
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const editHistoryManager = container.get<EditHistoryManager>(TYPES.EditHistoryManager);
     const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
 
     if (state.status !== AppStatus.READY || !state.noteId) {
         uiService.showNotice("A versioned note must be active to change this setting.", 4000);
         return;
     }
-    const { noteId } = state;
+    const { noteId, viewMode } = state;
 
     try {
-        if (applyGlobally) {
-            await manifestManager.updateNoteManifest(noteId, (manifest) => {
-                const branch = manifest.branches[manifest.currentBranch];
-                if (branch) {
-                    branch.settings = { isGlobal: true };
-                }
-            });
-            dispatch(loadEffectiveSettingsForNote(noteId));
-            uiService.showNotice("Note now follows global settings.", 3000);
+        if (viewMode === 'versions') {
+            if (applyGlobally) {
+                await manifestManager.updateNoteManifest(noteId, (manifest) => {
+                    const branch = manifest.branches[manifest.currentBranch];
+                    if (branch) {
+                        branch.settings = { isGlobal: true };
+                    }
+                });
+                uiService.showNotice("Note versions now follow global settings.", 3000);
+            } else {
+                const globalVersionDefaults = plugin.settings.versionHistorySettings;
+                await manifestManager.updateNoteManifest(noteId, (manifest) => {
+                    const branch = manifest.branches[manifest.currentBranch];
+                    if (branch) {
+                        branch.settings = { ...globalVersionDefaults, isGlobal: false };
+                    }
+                });
+                uiService.showNotice("Note versions now have independent settings.", 3000);
+            }
         } else {
-            const currentGlobalSettings = plugin.settings;
-            await manifestManager.updateNoteManifest(noteId, (manifest) => {
-                const branch = manifest.branches[manifest.currentBranch];
-                if (branch) {
-                    const { databasePath, centralManifest, autoRegisterNotes, pathFilters, noteIdFrontmatterKey, keyUpdatePathFilters, noteIdFormat, versionIdFormat, ...localSettings } = currentGlobalSettings;
-                    branch.settings = { ...localSettings, isGlobal: false };
-                }
-            });
-            dispatch(loadEffectiveSettingsForNote(noteId));
-            uiService.showNotice("Note now has its own independent settings.", 3000);
+            // Edit Mode
+            let editManifest = await editHistoryManager.getEditManifest(noteId);
+            if (!editManifest) {
+                // Should exist if we are viewing edits, but just in case
+                uiService.showNotice("Edit history not initialized.", 3000);
+                return;
+            }
+            
+            if (applyGlobally) {
+                editManifest.branches[editManifest.currentBranch]!.settings = { isGlobal: true };
+            } else {
+                const globalEditDefaults = plugin.settings.editHistorySettings;
+                editManifest.branches[editManifest.currentBranch]!.settings = { ...globalEditDefaults, isGlobal: false };
+            }
+            await editHistoryManager.saveEditManifest(noteId, editManifest);
+            uiService.showNotice(`Note edits now ${applyGlobally ? 'follow global' : 'have independent'} settings.`, 3000);
         }
+        
+        dispatch(loadEffectiveSettingsForNote(noteId));
+        
     } catch (error) {
         console.error(`VC: Failed to toggle global settings for note ${noteId}.`, error);
         uiService.showNotice("Failed to update settings. Please try again.", 5000);
@@ -163,7 +177,7 @@ export const toggleGlobalSettings = (applyGlobally: boolean): AppThunk => async 
     }
 };
 
-export const updateSettings = (settingsUpdate: Partial<VersionControlSettings>): AppThunk => async (dispatch, getState, container) => {
+export const updateSettings = (settingsUpdate: Partial<HistorySettings>): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
     const stateBeforeUpdate = getState();
     const uiService = container.get<UIService>(TYPES.UIService);
@@ -173,14 +187,15 @@ export const updateSettings = (settingsUpdate: Partial<VersionControlSettings>):
     }
 
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const editHistoryManager = container.get<EditHistoryManager>(TYPES.EditHistoryManager);
     const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
     const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
 
-    const { noteId, file } = stateBeforeUpdate;
-    const isUnderGlobalInfluence = stateBeforeUpdate.settings.isGlobal;
+    const { noteId, file, viewMode } = stateBeforeUpdate;
+    const isUnderGlobalInfluence = stateBeforeUpdate.effectiveSettings.isGlobal;
 
     // Validate the proposed update against the schema
-    const validationResult = VersionControlSettingsSchema.partial().safeParse(settingsUpdate);
+    const validationResult = HistorySettingsSchema.partial().safeParse(settingsUpdate);
     if (!validationResult.success) {
         console.error("VC: Invalid settings update.", validationResult.error);
         uiService.showNotice("Failed to save settings: Invalid data.", 5000);
@@ -192,24 +207,47 @@ export const updateSettings = (settingsUpdate: Partial<VersionControlSettings>):
         debouncerInfo?.debouncer.cancel();
         plugin.autoSaveDebouncers.delete(file.path);
     }
-    dispatch(actions.updateSettings(settingsUpdate));
+    
+    // Optimistic UI update
+    dispatch(actions.updateEffectiveSettings({ ...stateBeforeUpdate.effectiveSettings, ...settingsUpdate }));
     backgroundTaskManager.syncWatchMode();
 
     try {
         if (isUnderGlobalInfluence) {
-            dispatch(updateGlobalSettings(settingsUpdate));
+            // Update Global Settings based on view mode
+            if (viewMode === 'versions') {
+                const newVersionSettings = { ...plugin.settings.versionHistorySettings, ...settingsUpdate };
+                dispatch(updateGlobalSettings({ versionHistorySettings: newVersionSettings }));
+            } else {
+                const newEditSettings = { ...plugin.settings.editHistorySettings, ...settingsUpdate };
+                dispatch(updateGlobalSettings({ editHistorySettings: newEditSettings }));
+            }
         } else {
             if (!noteId) {
                 throw new Error("Cannot save per-note settings without an active note ID.");
             }
-            await manifestManager.updateNoteManifest(noteId, (manifest) => {
-                const branch = manifest.branches[manifest.currentBranch];
-                if (branch) {
-                    if (!branch.settings) branch.settings = {};
-                    branch.settings.isGlobal = false;
-                    Object.assign(branch.settings, settingsUpdate);
+            // Update Per-Note Settings
+            if (viewMode === 'versions') {
+                await manifestManager.updateNoteManifest(noteId, (manifest) => {
+                    const branch = manifest.branches[manifest.currentBranch];
+                    if (branch) {
+                        if (!branch.settings) branch.settings = {};
+                        branch.settings.isGlobal = false;
+                        Object.assign(branch.settings, settingsUpdate);
+                    }
+                });
+            } else {
+                const editManifest = await editHistoryManager.getEditManifest(noteId);
+                if (editManifest) {
+                    const branch = editManifest.branches[editManifest.currentBranch];
+                    if (branch) {
+                        if (!branch.settings) branch.settings = {};
+                        branch.settings.isGlobal = false;
+                        Object.assign(branch.settings, settingsUpdate);
+                        await editHistoryManager.saveEditManifest(noteId, editManifest);
+                    }
                 }
-            });
+            }
         }
     } catch (error) {
         console.error(`VC: Failed to update settings. Reverting UI.`, error);
@@ -224,6 +262,7 @@ export const renameDatabasePath = (newPathRaw: string): AppThunk => async (dispa
     const uiService = container.get<UIService>(TYPES.UIService);
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
     const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
+    const storageService = container.get<StorageService>(TYPES.StorageService);
 
     const state = getState();
     if (state.isRenaming) {
@@ -254,7 +293,8 @@ export const renameDatabasePath = (newPathRaw: string): AppThunk => async (dispa
     uiService.showNotice(`Renaming database to "${newPath}"... Please wait.`);
 
     try {
-        await app.vault.adapter.rename(oldPath, newPath);
+        // Use StorageService for robust renaming with false-positive mitigation
+        await storageService.renameFolder(oldPath, newPath);
 
         const oldManifest = plugin.settings.centralManifest;
         const newManifest = produce(oldManifest, draft => {
@@ -287,6 +327,7 @@ export const renameDatabasePath = (newPathRaw: string): AppThunk => async (dispa
         const newPathExists = await app.vault.adapter.exists(newPath);
         if (newPathExists) {
             try {
+                // We use adapter directly here as this is a critical revert operation where we want explicit control
                 await app.vault.adapter.rename(newPath, oldPath);
                 uiService.showNotice("Reverted database move. Please check your vault.", 5000);
             } catch (revertError) {
@@ -459,6 +500,7 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: '
     }
     const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
     const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const editHistoryManager = container.get<EditHistoryManager>(TYPES.EditHistoryManager);
     const exportManager = container.get<ExportManager>(TYPES.ExportManager);
     const app = container.get<App>(TYPES.App);
 
@@ -473,12 +515,19 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: '
             throw new Error(`Manifest for note ID ${versionEntry.noteId} not found.`);
         }
         const currentNoteName = noteManifest.notePath.split('/').pop()?.replace(/\.md$/, '') || 'Untitled';
+        const viewMode = getState().viewMode;
 
         uiService.showNotice(`Preparing to export V${versionEntry.versionNumber} of "${currentNoteName}"...`, 3000);
         
-        const content = await versionManager.getVersionContent(versionEntry.noteId, versionEntry.id);
+        let content: string | null = null;
+        if (viewMode === 'versions') {
+             content = await versionManager.getVersionContent(versionEntry.noteId, versionEntry.id);
+        } else {
+             content = await editHistoryManager.getEditContent(versionEntry.noteId, versionEntry.id);
+        }
+
         if (content === null) {
-            throw new Error(`Could not load content for version V${versionEntry.versionNumber}.`);
+            throw new Error(`Could not load content for ${viewMode === 'versions' ? 'version' : 'edit'}.`);
         }
         
         const versionData: VersionData = {
@@ -515,8 +564,10 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: '
             }
             
             const sanitizedNoteName = customSanitizeFileName(currentNoteName);
-            const versionIdSuffix = versionData.name ? customSanitizeFileName(versionData.name) : `V${versionData.versionNumber}`;
-            const exportFileName = `Version - ${sanitizedNoteName} - ${versionIdSuffix}.${format}`;
+            const typeLabel = viewMode === 'versions' ? 'Version' : 'Edit';
+            const idLabel = viewMode === 'versions' ? `V${versionData.versionNumber}` : `Edit ${versionData.versionNumber}`;
+            const versionIdSuffix = versionData.name ? customSanitizeFileName(versionData.name) : customSanitizeFileName(idLabel);
+            const exportFileName = `${typeLabel} - ${sanitizedNoteName} - ${versionIdSuffix}.${format}`;
             const exportFilePath = await exportManager.writeFile(selectedFolder, exportFileName, exportContent);
             
             uiService.showNotice(`Successfully exported to ${exportFilePath}`, 7000);

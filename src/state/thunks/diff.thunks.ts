@@ -5,8 +5,9 @@ import type { VersionHistoryEntry, DiffTarget, DiffType } from '../../types';
 import { AppStatus, type ActionItem } from '../state';
 import { UIService } from '../../services/ui-service';
 import { DiffManager } from '../../services/diff-manager';
+import { EditHistoryManager } from '../../core/edit-history-manager';
 import { TYPES } from '../../types/inversify.types';
-import { isPluginUnloading } from './ThunkUtils';
+import { isPluginUnloading } from '../utils/settingsUtils';
 
 /**
  * Thunks for generating and displaying diffs between versions.
@@ -22,7 +23,10 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
         return;
     }
 
-    const otherVersions = state.history.filter(v => v.id !== version1.id);
+    const { viewMode } = state;
+    const activeList = viewMode === 'versions' ? state.history : state.editHistory;
+    const otherVersions = activeList.filter(v => v.id !== version1.id);
+    
     const currentStateTarget: DiffTarget = {
         id: 'current',
         name: 'Current Note State',
@@ -71,23 +75,44 @@ export const generateAndShowDiffInPanel = (version1: VersionHistoryEntry, versio
 
     const uiService = container.get<UIService>(TYPES.UIService);
     const diffManager = container.get<DiffManager>(TYPES.DiffManager);
+    const editHistoryManager = container.get<EditHistoryManager>(TYPES.EditHistoryManager);
     
     const initialState = getState();
     if (initialState.status !== AppStatus.READY || !initialState.noteId || !initialState.file) return;
-    const { noteId } = initialState;
+    const { noteId, viewMode } = initialState;
 
     uiService.showNotice("Generating diff...", 2000);
     const decoder = new TextDecoder('utf-8');
 
+    // Helper to fetch content based on view mode
+    const fetchContent = async (target: DiffTarget): Promise<string | ArrayBuffer | null> => {
+        if (target.id === 'current') {
+            // For current state, we delegate to diffManager which usually reads from file or editor
+            return diffManager.getContent(noteId, target);
+        }
+        
+        // For history entries
+        if (viewMode === 'versions') {
+            return diffManager.getContent(noteId, target as VersionHistoryEntry);
+        } else {
+            // For edits, fetch from IndexedDB
+            return editHistoryManager.getEditContent(noteId, target.id);
+        }
+    };
+
     try {
         // Fetch content (potentially ArrayBuffer)
-        const rawContent1 = await diffManager.getContent(noteId, version1);
-        const rawContent2 = await diffManager.getContent(noteId, version2);
+        const rawContent1 = await fetchContent(version1);
+        const rawContent2 = await fetchContent(version2);
         
         const stateAfterContentFetch = getState();
         if (isPluginUnloading(container) || stateAfterContentFetch.status !== AppStatus.READY || stateAfterContentFetch.noteId !== noteId || !stateAfterContentFetch.file) {
             uiService.showNotice("View context changed while fetching content. Diff cancelled.", 4000);
             return;
+        }
+
+        if (rawContent1 === null || rawContent2 === null) {
+             throw new Error("Failed to retrieve content for diff.");
         }
 
         // Decode contents for UI state (strings required for display)
@@ -193,6 +218,11 @@ export const scrollToLineInEditor = (line: number): AppThunk => (_dispatch, getS
 
     if (state.status !== AppStatus.READY || !state.file) {
         uiService.showNotice("Cannot scroll: no active note in version control view.", 4000);
+        return;
+    }
+
+    if (state.file.extension === 'base') {
+        // Disable scroll for .base files as they may not be open in a compatible editor
         return;
     }
     
