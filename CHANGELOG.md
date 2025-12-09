@@ -4,11 +4,13 @@
 
 #### ✨ New Features
 
-* **Edit History (Per-Branch Automatic Snapshots):** Introduced "Edit history" to provide passive, automatic, granular snapshots of all changes you make.
-    * There are now two history types (on a per-branch basis): **Version history** for saving intentional milestones, and **Edit history** for capturing granular changes.
-    * Edit history conserves resources by saving only highly compressed diffs (similar to Git) between changes, while Version history continues to save the full content.
-    * Initially, Edit history data is stored solely in IndexedDB.
-    * *Note:* This is an early stable version. While major problems are unlikely, minor inconsistencies may occur (Version history operates as before). Please report any issues found!
+* **Edit History (Per Branch):** Introducing passive, automatic snapshots of every change you make.
+    * There are now two types of history: **Version History** (for intentional, milestone saves) and **Edit History** (for granular, automatic changes).
+    * Edit History conserves resources by saving only highly compressed diffs (like Git) between changes, while Version History continues to save the full content.
+    * Currently, Edit History data is stored solely in IndexedDB (request a feature for disk storage).
+    * **Switching Views:** Simply click on the "Version History" header text (at the top left corner of the version control view in the right sidebar) to toggle between "Version History" and "Edit History."
+
+* **Early Stable Release:** This is an early stable release of the Edit History feature. While major problems are unlikely, please open an issue if you encounter any minor inconsistencies. Your feedback is highly valued!
 
 ***
 
