@@ -12,7 +12,7 @@ import { BackgroundTaskManager } from '../../core/tasks/BackgroundTaskManager';
 import { ManifestManager } from '../../core/manifest-manager';
 import { PluginEvents } from '../../core/plugin-events';
 import { TYPES } from '../../types/inversify.types';
-import { isPluginUnloading } from '../utils/settingsUtils';
+import { resolveSettings, isPluginUnloading } from '../utils/settingsUtils';
 import type VersionControlPlugin from '../../main';
 
 /**
@@ -56,7 +56,16 @@ export const saveNewVersion = (options: { isAuto?: boolean } = {}): AppThunk => 
             return;
         }
 
-        const result = await versionManager.saveNewVersionForFile(liveFile, { isAuto, settings: initialState.settings });
+        // Construct a hybrid settings object that satisfies VersionManager's loose typing.
+        // It needs VersionControlSettings properties (for ID generation, from Global) 
+        // AND flattened HistorySettings (for logic like minLinesChanged, from Effective).
+        const effectiveHistorySettings = initialState.effectiveSettings;
+        const hybridSettings = {
+            ...initialState.settings, // Global VersionControlSettings (contains ID formats)
+            ...effectiveHistorySettings // Flattened effective history settings (overrides logic flags)
+        };
+
+        const result = await versionManager.saveNewVersionForFile(liveFile, { isAuto, settings: hybridSettings });
 
         const stateAfterSave = getState();
         if (isPluginUnloading(container) || stateAfterSave.status !== AppStatus.READY || stateAfterSave.file?.path !== initialFileFromState.path) {
@@ -117,26 +126,18 @@ export const performAutoSave = (file: TFile): AppThunk => async (dispatch, getSt
     const noteId = await noteManager.getNoteId(file) ?? await manifestManager.getNoteIdByPath(file.path);
     if (!noteId) return;
 
-    const globalSettings = plugin.settings;
-    let effectiveSettings: VersionControlSettings = { ...globalSettings };
-    try {
-        const noteManifest = await manifestManager.loadNoteManifest(noteId);
-        const currentBranch = noteManifest?.branches[noteManifest.currentBranch];
-        const perBranchSettings = currentBranch?.settings;
-        const isUnderGlobalInfluence = perBranchSettings?.isGlobal === true || perBranchSettings === undefined;
-        if (!isUnderGlobalInfluence) {
-            const definedBranchSettings = Object.fromEntries(
-                Object.entries(perBranchSettings ?? {}).filter(([, v]) => v !== undefined)
-            );
-            effectiveSettings = { ...globalSettings, ...definedBranchSettings };
-        }
-    } catch (e) { /* use global on error */ }
+    // Resolve effective settings properly to respect local overrides
+    const historySettings = await resolveSettings(noteId, 'version', container);
+    const hybridSettings = {
+        ...plugin.settings,
+        ...historySettings
+    };
 
     const result = await versionManager.saveNewVersionForFile(file, {
         name: 'Auto-save', 
         force: false, 
         isAuto: true, 
-        settings: effectiveSettings
+        settings: hybridSettings
     });
   
     if (result.status === 'saved' && result.newVersionEntry) {
@@ -324,26 +325,18 @@ export const restoreVersion = (versionId: string): AppThunk => async (dispatch, 
             throw new Error(`Restore failed. Note's version control ID has changed or was removed. Expected "${initialNoteIdFromState}", found "${currentNoteIdOnDisk}".`);
         }
 
-        const globalSettings = plugin.settings;
-        let effectiveSettings: VersionControlSettings = { ...globalSettings };
-        try {
-            const noteManifest = await manifestManager.loadNoteManifest(initialNoteIdFromState);
-            const currentBranch = noteManifest?.branches[noteManifest.currentBranch];
-            const perBranchSettings = currentBranch?.settings;
-            const isUnderGlobalInfluence = perBranchSettings?.isGlobal === true || perBranchSettings === undefined;
-            if (!isUnderGlobalInfluence) {
-                const definedBranchSettings = Object.fromEntries(
-                    Object.entries(perBranchSettings ?? {}).filter(([, v]) => v !== undefined)
-                );
-                effectiveSettings = { ...globalSettings, ...definedBranchSettings };
-            }
-        } catch (e) { /* use global on error */ }
+        // Resolve effective settings properly to respect local overrides
+        const historySettings = await resolveSettings(initialNoteIdFromState, 'version', container);
+        const hybridSettings = {
+            ...plugin.settings,
+            ...historySettings
+        };
 
         await versionManager.saveNewVersionForFile(liveFile, { 
             name: `Backup before restoring V${versionId.substring(0,6)}...`, 
             force: true, 
             isAuto: false, 
-            settings: effectiveSettings 
+            settings: hybridSettings 
         });
 
         const stateAfterBackup = getState();

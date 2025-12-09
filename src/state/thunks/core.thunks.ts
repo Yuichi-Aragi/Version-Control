@@ -11,7 +11,7 @@ import { EditHistoryManager } from '../../core/edit-history-manager';
 import { CleanupManager } from '../../core/tasks/cleanup-manager';
 import { BackgroundTaskManager } from '../../core/tasks/BackgroundTaskManager';
 import { TYPES } from '../../types/inversify.types';
-import { isPluginUnloading } from '../utils/settingsUtils';
+import { resolveSettings, isPluginUnloading } from '../utils/settingsUtils';
 import type VersionControlPlugin from '../../main';
 import { saveNewEdit } from './edit-history.thunks';
 import { isPathAllowed } from '../../utils/path-filter';
@@ -22,67 +22,25 @@ import { isPathAllowed } from '../../utils/path-filter';
 
 export const loadEffectiveSettingsForNote = (noteId: string | null): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
-    const editHistoryManager = container.get<EditHistoryManager>(TYPES.EditHistoryManager);
     const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
     const state = getState();
     const viewMode = state.viewMode;
 
-    const globalSettings = plugin.settings;
-    let effectiveSettings: HistorySettings;
+    // Determine type based on viewMode
+    const type = viewMode === 'versions' ? 'version' : 'edit';
     
-    // Determine which global defaults to use based on view mode
-    const globalDefaults = viewMode === 'versions' 
-        ? globalSettings.versionHistorySettings 
-        : globalSettings.editHistorySettings;
+    let effectiveSettings: HistorySettings;
 
     if (noteId) {
-        try {
-            let perBranchSettings: Partial<HistorySettings> | undefined;
-            
-            // Always load NoteManifest first to get the authoritative current branch.
-            // This is critical because during branch switching, the NoteManifest is updated first,
-            // while the EditManifest might still point to the old branch until loadEditHistory runs.
-            const noteManifest = await manifestManager.loadNoteManifest(noteId);
-            const currentBranchName = noteManifest?.currentBranch;
-
-            if (viewMode === 'versions') {
-                perBranchSettings = currentBranchName ? Object.fromEntries(
-                    Object.entries(noteManifest?.branches[currentBranchName]?.settings || {}).filter(([, v]) => v !== undefined)
-                ) : undefined;
-            } else {
-                // For edits, we use the branch name from NoteManifest to look up settings in EditManifest.
-                // This ensures we load settings for the *target* branch, not the stale one.
-                const editManifest = await editHistoryManager.getEditManifest(noteId);
-                
-                // If the branch exists in EditManifest, use its settings.
-                // If it's a new branch (not in EditManifest yet), perBranchSettings will be undefined,
-                // causing fallback to global settings (which is correct for a new branch).
-                if (currentBranchName && editManifest?.branches[currentBranchName]) {
-                    perBranchSettings = Object.fromEntries(
-                        Object.entries(editManifest.branches[currentBranchName]?.settings || {}).filter(([, v]) => v !== undefined)
-                    );
-                }
-            }
-
-            const isUnderGlobalInfluence = perBranchSettings?.isGlobal === true || perBranchSettings === undefined;
-
-            if (isUnderGlobalInfluence) {
-                effectiveSettings = { ...globalDefaults, isGlobal: true };
-            } else {
-                const definedBranchSettings = Object.fromEntries(
-                    Object.entries(perBranchSettings ?? {}).filter(([, v]) => v !== undefined)
-                );
-                effectiveSettings = { ...globalDefaults, ...definedBranchSettings, isGlobal: false };
-            }
-        } catch (error) {
-            console.error(`VC: Could not load per-note settings for note ${noteId}. Using global settings.`, error);
-            effectiveSettings = { ...globalDefaults, isGlobal: true };
-        }
+        effectiveSettings = await resolveSettings(noteId, type, container);
     } else {
-        effectiveSettings = { ...globalDefaults, isGlobal: true };
+        // No note context, use global defaults directly
+        effectiveSettings = type === 'version' 
+            ? { ...plugin.settings.versionHistorySettings, isGlobal: true }
+            : { ...plugin.settings.editHistorySettings, isGlobal: true };
     }
 
+    // Only dispatch if changed to prevent render loops
     if (JSON.stringify(getState().effectiveSettings) !== JSON.stringify(effectiveSettings)) {
         dispatch(actions.updateEffectiveSettings(effectiveSettings));
     }

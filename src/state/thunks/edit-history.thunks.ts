@@ -82,6 +82,8 @@ export const loadEditHistory = (noteId: string): AppThunk => async (dispatch, _g
             versionNumber: data.versionNumber,
             timestamp: data.timestamp,
             size: data.size,
+            compressedSize: data.compressedSize,
+            uncompressedSize: data.uncompressedSize,
             ...(data.name && { name: data.name }),
             ...(data.description && { description: data.description }),
             wordCount: data.wordCount,
@@ -224,13 +226,15 @@ export const saveNewEdit = (isAuto = false): AppThunk => async (dispatch, getSta
         const editId = `E${nextVersionNumber}_${Date.now()}`;
         const textStats = calculateTextStats(content);
         const timestamp = new Date().toISOString();
-        const size = new Blob([content]).size;
+        const uncompressedSize = new Blob([content]).size;
 
         // Update Manifest
         branch.versions[editId] = {
             versionNumber: nextVersionNumber,
             timestamp,
-            size,
+            size: uncompressedSize, // Legacy/Default size field
+            uncompressedSize: uncompressedSize, // Explicit uncompressed size
+            // compressedSize will be populated by the worker
             wordCount: textStats.wordCount,
             wordCountWithMd: textStats.wordCountWithMd,
             charCount: textStats.charCount,
@@ -251,7 +255,10 @@ export const saveNewEdit = (isAuto = false): AppThunk => async (dispatch, getSta
             branchName,
             versionNumber: nextVersionNumber,
             timestamp,
-            size,
+            size: uncompressedSize,
+            uncompressedSize: uncompressedSize,
+            // Note: compressedSize is not available immediately in the thunk without reloading from worker
+            // UI will fallback to uncompressedSize until reload
             wordCount: textStats.wordCount,
             wordCountWithMd: textStats.wordCountWithMd,
             charCount: textStats.charCount,
