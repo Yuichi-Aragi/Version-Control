@@ -27,9 +27,6 @@ export const appSlice = createSlice({
         // --- State Machine Transition Actions ---
         resetToInitializing(state) {
             state.status = AppStatus.INITIALIZING;
-            // We preserve file, noteId, and viewMode to allow initializeView to correctly
-            // determine if it should maintain the current view mode or reset it.
-            // However, we clear all data to ensure a clean slate UI (Placeholder).
             state.history = [];
             state.editHistory = [];
             state.currentBranch = null;
@@ -45,11 +42,30 @@ export const appSlice = createSlice({
             state.watchModeCountdown = null;
         },
         initializeView(state, action: PayloadAction<ActiveNoteInfo>) {
-            const { file } = action.payload;
+            const { file, noteId } = action.payload;
             
-            // Only reset viewMode if we are switching to a completely different file context
-            if (state.file?.path !== file?.path) {
-                 state.viewMode = 'versions';
+            // Detect context change: Different file path OR Different Note ID
+            // This ensures we catch cases where the file object reference changes but path is same,
+            // or where we switch to a different note entirely.
+            const isContextChange = state.file?.path !== file?.path || (state.noteId && state.noteId !== noteId);
+
+            if (isContextChange) {
+                 state.viewMode = 'versions'; // Reset view mode to default on context switch
+                 
+                 // STRICT: Close context-dependent panels on context change.
+                 // Only global panels like 'changelog' should persist across note switches.
+                 if (state.panel?.type !== 'changelog') {
+                     state.panel = null;
+                 }
+                 
+                 // Reset context-specific UI state
+                 state.diffRequest = null;
+                 state.highlightedVersionId = null;
+                 state.namingVersionId = null;
+                 state.isManualVersionEdit = false;
+                 state.isSearchActive = false;
+                 state.searchQuery = '';
+                 state.watchModeCountdown = null;
             }
             
             if (!file) {
@@ -64,36 +80,31 @@ export const appSlice = createSlice({
                     state.panel = null;
                 }
             } else {
-                // Timeline panel should NOT persist on context change (switching notes), similar to diff/preview.
-                const shouldPreservePanel =
-                    (state.panel?.type === 'diff' || state.panel?.type === 'preview' || state.panel?.type === 'description' || state.panel?.type === 'stacked');
-
-                // Avoid unnecessary loading states if the view is already correct
-                if (state.status === AppStatus.READY && state.file?.path === file.path && !state.isProcessing) {
-                    if (state.noteId === action.payload.noteId && action.payload.source !== 'manifest') {
+                // Avoid unnecessary loading states if the view is already correct and context hasn't changed
+                if (state.status === AppStatus.READY && !isContextChange && !state.isProcessing) {
+                    if (state.noteId === noteId && action.payload.source !== 'manifest') {
                         return; // No change needed
                     }
                 }
+
                 state.status = AppStatus.LOADING;
                 state.file = file;
-                // Reset other fields
+                // Reset data fields
                 state.noteId = null;
                 state.history = [];
                 state.editHistory = [];
                 state.currentBranch = null;
                 state.availableBranches = [];
-                state.isManualVersionEdit = false;
-                if (!shouldPreservePanel && state.panel?.type !== 'changelog') {
-                    state.panel = null;
-                }
+                
+                // Note: We intentionally cleared panel above if context changed. 
+                // If context didn't change (e.g. reload or save), panel persists.
             }
         },
         historyLoadedSuccess(state, action: PayloadAction<{ file: TFile; noteId: string | null; history: VersionHistoryEntry[], currentBranch: string, availableBranches: string[] }>) {
             if (state.file?.path === action.payload.file.path) {
-                // If we are just refreshing the same note (e.g. post-save), we DO preserve the timeline.
-                const shouldPreservePanel =
-                    (state.panel?.type === 'diff' || state.panel?.type === 'preview' || state.panel?.type === 'description' || state.panel?.type === 'stacked' || state.panel?.type === 'timeline');
-
+                // If we are just refreshing the same note (e.g. post-save), we DO preserve the timeline/panels.
+                // The strict clearing in initializeView handles the context switch case.
+                
                 state.status = AppStatus.READY;
                 state.noteId = action.payload.noteId;
                 state.history = action.payload.history;
@@ -101,10 +112,6 @@ export const appSlice = createSlice({
                 state.availableBranches = action.payload.availableBranches;
                 state.isProcessing = false;
                 
-                if (!shouldPreservePanel && state.panel?.type !== 'changelog') {
-                    state.panel = null;
-                }
-
                 state.namingVersionId = null;
                 state.isManualVersionEdit = false;
                 state.highlightedVersionId = null;
@@ -112,11 +119,9 @@ export const appSlice = createSlice({
             }
         },
         editHistoryLoadedSuccess(state, action: PayloadAction<{ editHistory: VersionHistoryEntry[], currentBranch?: string | null, availableBranches?: string[] }>) {
-             // If we are loading or ready, we update. This allows transition from LOADING -> READY.
              if (state.status === AppStatus.LOADING || state.status === AppStatus.READY) {
                  state.editHistory = action.payload.editHistory;
                  
-                 // Update branch info if provided (crucial for initialization in Edit mode)
                  if (action.payload.currentBranch !== undefined) {
                      state.currentBranch = action.payload.currentBranch;
                  }
@@ -128,32 +133,25 @@ export const appSlice = createSlice({
                  state.isProcessing = false;
              }
         },
-        // NEW: Specific action for clearing history during branch switch.
-        // We set status to LOADING to force UI components to reset/show skeletons.
-        // This prevents "stale state" rendering and ensures a clean transition.
         clearHistoryForBranchSwitch(state, action: PayloadAction<{ currentBranch: string, availableBranches: string[] }>) {
             state.status = AppStatus.LOADING;
             state.history = [];
             state.editHistory = [];
             state.currentBranch = action.payload.currentBranch;
             state.availableBranches = action.payload.availableBranches;
-            state.isProcessing = false; // We rely on LOADING status for "busy" UI
+            state.isProcessing = false;
         },
         setViewMode(state, action: PayloadAction<ViewMode>) {
             state.viewMode = action.payload;
             
             // STRICT CLEANUP: Prevent bleed over of state from previous mode
-            state.panel = null; // Close any open panel (settings, diff, etc.)
+            state.panel = null; 
             state.namingVersionId = null;
             state.isManualVersionEdit = false;
             state.highlightedVersionId = null;
             state.diffRequest = null;
             state.isSearchActive = false;
             state.searchQuery = '';
-            
-            // Note: We do NOT clear history/editHistory here to allow potential caching/fast switching,
-            // but the UI should strictly render based on viewMode.
-            // The thunk handling this action should dispatch a reload of the relevant history.
         },
         clearActiveNote(state) {
             state.status = AppStatus.PLACEHOLDER;
@@ -168,7 +166,7 @@ export const appSlice = createSlice({
             }
             state.error = null;
             state.isManualVersionEdit = false;
-            state.viewMode = 'versions'; // Reset to default
+            state.viewMode = 'versions';
         },
 
         // --- Actions specific to ReadyState ---
@@ -181,7 +179,6 @@ export const appSlice = createSlice({
         openPanel(state, action: PayloadAction<NonNullable<PanelState>>) {
             const panelToOpen = action.payload;
 
-            // Changelog is special: it can be shown in almost any state.
             if (panelToOpen.type === 'changelog') {
                 if (state.status === AppStatus.INITIALIZING || state.status === AppStatus.READY || state.status === AppStatus.PLACEHOLDER || state.status === AppStatus.LOADING) {
                     state.panel = panelToOpen;
@@ -191,7 +188,6 @@ export const appSlice = createSlice({
 
             const isOverlayCandidate = panelToOpen.type === 'action' || panelToOpen.type === 'confirmation';
 
-            // If the description panel is open, stack action/confirmation panels on top.
             if (state.panel?.type === 'description' && isOverlayCandidate) {
                 state.panel = {
                     type: 'stacked',
@@ -201,13 +197,11 @@ export const appSlice = createSlice({
                 return;
             }
             
-            // If already stacked, replace the overlay.
             if (state.panel?.type === 'stacked' && isOverlayCandidate) {
                 state.panel.overlay = panelToOpen;
                 return;
             }
 
-            // All other panels are note-dependent and require a fully ready state.
             if (state.status === AppStatus.READY) {
                 state.panel = panelToOpen;
                 state.isProcessing = false;
@@ -217,13 +211,11 @@ export const appSlice = createSlice({
             }
         },
         closePanel(state) {
-            // If a panel is stacked, closing only removes the top layer.
             if (state.panel?.type === 'stacked') {
                 state.panel = state.panel.base;
                 return;
             }
 
-            // A panel can be closed in any state where it could be open.
             if (state.status === AppStatus.INITIALIZING || state.status === AppStatus.READY || state.status === AppStatus.PLACEHOLDER || state.status === AppStatus.LOADING) {
                 state.panel = null;
             }
@@ -246,7 +238,6 @@ export const appSlice = createSlice({
             if (state.status === AppStatus.READY) {
                 state.editHistory.unshift(action.payload.newEdit);
                 state.isProcessing = false;
-                // Prompt edit for edits too? Yes, if settings enabled
                 const shouldPromptEdit = state.effectiveSettings.enableVersionNaming || state.effectiveSettings.enableVersionDescription;
                 state.namingVersionId = shouldPromptEdit ? action.payload.newEdit.id : null;
                 state.isManualVersionEdit = false;
@@ -266,7 +257,6 @@ export const appSlice = createSlice({
         },
         updateVersionDetailsInState(state, action: PayloadAction<{ versionId: string; name?: string; description?: string }>) {
             if (state.status === AppStatus.READY) {
-                // Update in both lists to be safe, though usually only one is active
                 const updateList = (list: VersionHistoryEntry[]) => {
                     const versionIndex = list.findIndex(v => v.id === action.payload.versionId);
                     if (versionIndex > -1) {
@@ -339,7 +329,7 @@ export const appSlice = createSlice({
                     diffType: 'lines',
                     diffChanges: null,
                 };
-                state.panel = null; // Close any open panel when starting a diff
+                state.panel = null;
             }
         },
         diffGenerationSucceeded(state, action: PayloadAction<{ version1Id: string; version2Id: string; diffChanges: Change[] }>) {
