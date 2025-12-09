@@ -1,15 +1,16 @@
 import { memo, useCallback } from 'react';
 import { useAppDispatch, useAppSelector } from '../../../hooks/useRedux';
 import { thunks } from '../../../../state/thunks';
-import type { VersionControlSettings } from '../../../../types';
+import type { HistorySettings } from '../../../../types';
 import { SettingComponent } from '../../SettingComponent';
 
-const createToggleSetting = (name: string, desc: string, settingKey: keyof VersionControlSettings) => 
+const createToggleSetting = (name: string, desc: string, settingKey: keyof HistorySettings) => 
     memo(({ disabled }: { disabled: boolean }) => {
         const dispatch = useAppDispatch();
-        const isEnabled = useAppSelector(state => !!state.settings[settingKey]);
+        // Read from effectiveSettings
+        const isEnabled = useAppSelector(state => !!state.effectiveSettings[settingKey]);
         const handleToggle = useCallback((val: boolean) => {
-            dispatch(thunks.updateSettings({ [settingKey]: val } as Partial<VersionControlSettings>));
+            dispatch(thunks.updateSettings({ [settingKey]: val } as Partial<HistorySettings>));
         }, [dispatch, settingKey]);
         
         return (

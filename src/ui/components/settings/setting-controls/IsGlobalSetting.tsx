@@ -5,7 +5,7 @@ import { SettingComponent } from '../../SettingComponent';
 
 export const IsGlobalSetting: React.FC<{ disabled: boolean }> = memo(({ disabled }) => {
     const dispatch = useAppDispatch();
-    const isGlobal = useAppSelector(state => state.settings.isGlobal ?? true);
+    const isGlobal = useAppSelector(state => state.effectiveSettings.isGlobal ?? true);
     const handleToggle = useCallback((val: boolean) => {
         dispatch(thunks.toggleGlobalSettings(val));
     }, [dispatch]);

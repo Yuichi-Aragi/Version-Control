@@ -2,7 +2,7 @@ import { memo, useCallback, type FC } from 'react';
 import { isEqual } from 'lodash-es';
 import { useAppDispatch, useAppSelector } from '../../../hooks/useRedux';
 import { thunks } from '../../../../state/thunks';
-import type { VersionControlSettings } from '../../../../types';
+import type { HistorySettings } from '../../../../types';
 import { SettingComponent } from '../../SettingComponent';
 import { validateNumber } from '../settingsUtils';
 import { SliderWithInputControl } from '../controls/SliderWithInputControl';
@@ -13,10 +13,10 @@ type Unit = 'seconds' | 'days' | 'lines';
 interface ToggleSliderWithMinLinesConfig {
     toggleName: string;
     toggleDesc: string;
-    toggleKey: keyof VersionControlSettings;
+    toggleKey: keyof HistorySettings;
     sliderName: string;
     sliderDesc: (currentValue: number) => string;
-    sliderKey: keyof VersionControlSettings;
+    sliderKey: keyof HistorySettings;
     min: number;
     max: number;
     step: number;
@@ -26,25 +26,24 @@ interface ToggleSliderWithMinLinesConfig {
 
 /**
  * Factory for creating a setting group: Toggle -> (Slider + MinLinesControl).
- * Used for AutoSave and WatchMode settings.
  */
 export const createToggleSliderWithMinLinesSetting = (config: ToggleSliderWithMinLinesConfig): FC<{ disabled: boolean }> => {
     const Component = memo(({ disabled }: { disabled: boolean }) => {
         const dispatch = useAppDispatch();
         
         const { enabled, value } = useAppSelector(state => ({
-            enabled: !!state.settings[config.toggleKey],
-            value: state.settings[config.sliderKey] as number,
+            enabled: !!state.effectiveSettings[config.toggleKey],
+            value: state.effectiveSettings[config.sliderKey] as number,
         }), isEqual);
         
         const handleToggle = useCallback((v: boolean) => {
-            dispatch(thunks.updateSettings({ [config.toggleKey]: v } as Partial<VersionControlSettings>));
+            dispatch(thunks.updateSettings({ [config.toggleKey]: v } as Partial<HistorySettings>));
         }, [dispatch]);
         
         const handleSliderChange = useCallback((v: number) => {
             try {
                 const validatedValue = validateNumber(v, config.min, config.max);
-                dispatch(thunks.updateSettings({ [config.sliderKey]: validatedValue } as Partial<VersionControlSettings>));
+                dispatch(thunks.updateSettings({ [config.sliderKey]: validatedValue } as Partial<HistorySettings>));
             } catch (error) {
                 console.error(`Invalid ${config.sliderName.toLowerCase()} value:`, error);
             }

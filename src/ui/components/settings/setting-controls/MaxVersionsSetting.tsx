@@ -5,7 +5,7 @@ import { SettingComponent } from '../../SettingComponent';
 
 export const MaxVersionsSetting: React.FC<{ disabled: boolean }> = memo(({ disabled }) => {
     const dispatch = useAppDispatch();
-    const maxVersions = useAppSelector(state => state.settings.maxVersionsPerNote);
+    const maxVersions = useAppSelector(state => state.effectiveSettings.maxVersionsPerNote);
     
     const handleChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
         try {

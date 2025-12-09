@@ -2,12 +2,12 @@ import { memo, useCallback } from 'react';
 import { isEqual } from 'lodash-es';
 import { useAppDispatch, useAppSelector } from '../../../hooks/useRedux';
 import { thunks } from '../../../../state/thunks';
-import type { VersionControlSettings } from '../../../../types';
+import type { HistorySettings } from '../../../../types';
 import { SettingComponent } from '../../SettingComponent';
 
 interface TextStatSettingConfig {
-    enableKey: keyof VersionControlSettings;
-    includeSyntaxKey: keyof VersionControlSettings;
+    enableKey: keyof HistorySettings;
+    includeSyntaxKey: keyof HistorySettings;
     enableName: string;
     enableDesc: string;
     includeSyntaxName: string;
@@ -18,16 +18,16 @@ const createTextStatSetting = (config: TextStatSettingConfig) =>
     memo(({ disabled }: { disabled: boolean }) => {
         const dispatch = useAppDispatch();
         const { isEnabled, includeSyntax } = useAppSelector(state => ({
-            isEnabled: !!state.settings[config.enableKey],
-            includeSyntax: !!state.settings[config.includeSyntaxKey],
+            isEnabled: !!state.effectiveSettings[config.enableKey],
+            includeSyntax: !!state.effectiveSettings[config.includeSyntaxKey],
         }), isEqual);
 
         const handleEnableToggle = useCallback((val: boolean) => {
-            dispatch(thunks.updateSettings({ [config.enableKey]: val } as Partial<VersionControlSettings>));
+            dispatch(thunks.updateSettings({ [config.enableKey]: val } as Partial<HistorySettings>));
         }, [dispatch, config.enableKey]);
 
         const handleSyntaxToggle = useCallback((val: boolean) => {
-            dispatch(thunks.updateSettings({ [config.includeSyntaxKey]: val } as Partial<VersionControlSettings>));
+            dispatch(thunks.updateSettings({ [config.includeSyntaxKey]: val } as Partial<HistorySettings>));
         }, [dispatch, config.includeSyntaxKey]);
 
         return (
