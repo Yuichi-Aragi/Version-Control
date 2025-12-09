@@ -40,9 +40,17 @@ export async function resolveSettings(
         const currentBranch = noteManifest.currentBranch;
         let perBranchSettings: Partial<HistorySettings> | undefined;
         
+        // Helper to filter out undefined values for exactOptionalPropertyTypes compatibility
+        const filterDefinedSettings = (settings: Record<string, unknown> | undefined): Partial<HistorySettings> | undefined => {
+            if (!settings) return undefined;
+            return Object.fromEntries(
+                Object.entries(settings).filter(([, v]) => v !== undefined)
+            ) as Partial<HistorySettings>;
+        };
+
         if (type === 'version') {
             const branch = noteManifest.branches[currentBranch];
-            perBranchSettings = branch?.settings;
+            perBranchSettings = filterDefinedSettings(branch?.settings);
         } else {
             // For edits, we use the branch name from NoteManifest to query EditManifest.
             // This ensures we are looking at the settings for the active context, even if
@@ -50,7 +58,7 @@ export async function resolveSettings(
             const editManifest = await editHistoryManager.getEditManifest(noteId);
             if (editManifest) {
                 const branch = editManifest.branches[currentBranch];
-                perBranchSettings = branch?.settings;
+                perBranchSettings = filterDefinedSettings(branch?.settings);
             }
         }
         
