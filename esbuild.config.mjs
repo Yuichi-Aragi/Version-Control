@@ -103,6 +103,7 @@ async function createBuildOptions() {
   const diffWorkerCode = await buildWorkerCode('src/workers/diff.worker.ts');
   const timelineWorkerCode = await buildWorkerCode('src/workers/timeline.worker.ts');
   const editHistoryWorkerCode = await buildWorkerCode('src/workers/edit-history.worker.ts');
+  const compressionWorkerCode = await buildWorkerCode('src/workers/compression.worker.ts');
 
   const entryPoints = ["src/main.ts"];
   if (fileExists("src/styles.css")) {
@@ -130,6 +131,7 @@ async function createBuildOptions() {
       "diffWorkerString": JSON.stringify(diffWorkerCode),
       "timelineWorkerString": JSON.stringify(timelineWorkerCode),
       "editHistoryWorkerString": JSON.stringify(editHistoryWorkerCode),
+      "compressionWorkerString": JSON.stringify(compressionWorkerCode),
       // Ensure production mode for libraries that use process.env.NODE_ENV
       "process.env.NODE_ENV": JSON.stringify(isDevelopment ? "development" : "production"),
       "global": "window", // Ensure browser globals
