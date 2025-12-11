@@ -12,12 +12,9 @@ If you're a writer, a perfectionist, or someone who iterates through multiple dr
 
 ## 🎯 A Different Philosophy
 
-Here's the thing: **Git is amazing, but it wasn't designed for writers.**
-
-Git treats your entire vault (or folder) as a single branch—something like `main` or `dev`. That's perfect for code, but when you're writing, you don't want to version a folder. You want to version *a note*. A single piece of writing. A specific idea.
+**Git is amazing, but it wasn't designed for writers.** Git treats your entire vault as a single branch, but when you're writing, you don't want to version a folder—you want to version *a note*. A single piece of writing. A specific idea.
 
 **This plugin flips that model:**
-
 - **Git versions folders** → **This plugin versions individual files**
 - **Git treats a vault as a branch** → **This plugin treats each note as its own repository**
 - **Git makes you leave the file to branch** → **This plugin lets you branch *within* the note**
@@ -61,16 +58,67 @@ As of now, this plugin provides version control for:
 
 ---
 
-## Why Choose This Plugin?
+## 🚀 Key Features That Transform Your Workflow
 
-This plugin is designed for writers, thinkers, and perfectionists who want a simple, intuitive, and robust way to manage the evolution of their notes. If you've ever found yourself creating multiple copies of a file just to explore a new idea, or wished you could go back to a previous version of a paragraph, this plugin is for you.
+### 💾 **Save Intentional Snapshots**
+Create meaningful version milestones with custom names and descriptions. Save "First complete thought," "After research," "Final before rewrite" – exactly when YOU decide it's worth preserving.
 
-### Key Advantages
+### 👀 **Preview & Restore with Confidence**
+Quickly glance at any old version's content without leaving your current file. When you find something you want, restore it with a single click. The plugin automatically saves a backup of your current content before restoring, so you can experiment fearlessly.
 
-*   **Per-File Version Control:** Unlike Git, which versions your entire vault, this plugin focuses on individual notes. This means you can track the history of a single piece of writing without the complexity of commits, branches, or repositories.
-*   **Simplicity and Intuition:** If you find Git's learning curve steep or its features excessive for your needs, this plugin offers a straightforward alternative. It's designed to "just work" out of the box, with a clear and accessible interface.
-*   **Mobile-Friendly:** Running a full Git client on mobile or tablets can be impractical. This plugin provides a reliable, self-contained versioning system that works seamlessly across all your devices, including mobile.
-*   **Best of Both Worlds:** The core Version History is intentional—you control when to save meaningful milestones. But optional Edit History adds automatic protection in the background, so you're covered either way.
+### 🔍 **Advanced Comparison (Diff) Engine**
+See exactly what changed between any two versions with multiple comparison modes:
+- **Line Diff**: Traditional line-by-line comparison
+- **Word Diff**: See exactly which words changed
+- **Character Diff**: Catch even the smallest modifications
+- **Smart Diff**: Intelligent comparison that understands context
+- **Panel or Window View**: Choose how you want to review changes
+
+### 🌿 **Create Deviations (New Notes)**
+Turn any old version into a completely separate file. Perfect for major rewrites, spin-off ideas, or exploring completely different directions without losing your original work.
+
+### 🌳 **Branch Within the Same Note**
+Need to try a different direction within the *same file*? Create branches to work on parallel ideas. Each branch has its own independent history, so you can experiment freely without affecting your main draft.
+
+### ⏱️ **Dual History System**
+**Version History** (intentional snapshots you control) + **Edit History** (automatic background protection). Choose what works best for your workflow—or use both for maximum flexibility.
+
+### 📊 **Timeline View**
+See your note's evolution as a chronological list with:
+- Event cards showing version history (intentional) vs edit history (automatic)
+- Expandable details showing exactly what changed between versions
+- Search functionality to find specific changes or time periods
+- Combined or separate views of Version and Edit history
+
+### 🧹 **Smart Management**
+Keep your history tidy with intelligent cleanup, bulk operations, and customizable retention policies that preserve important milestones while managing storage efficiently.
+
+### 📤 **Export Your History**
+Export your work in multiple formats:
+- **Markdown**: Human-readable format that works anywhere
+- **JSON**: Structured data for programmatic use
+- **NDJSON**: Streaming JSON format for large datasets
+- **Plain Text**: Simple text format
+
+### 🎨 **Flexible Interface**
+Choose between viewing modes that fit your workflow:
+- **Card View**: Rich cards showing all version details at a glance
+- **List View**: Compact, minimal interface for focused work
+- **Dark/Light Mode**: Automatically adapts to your Obsidian theme
+- **Customizable Display**: Show/hide names, descriptions, timestamps, and statistics
+
+### ⚙️ **Granular Settings & Automation**
+Customize every aspect with global or per-note settings:
+- **Auto-save settings**: Save versions automatically on file save or at intervals
+- **Smart triggers**: Save only when significant changes occur (word count, line count, character count)
+- **Watch mode**: Background monitoring with customizable intervals
+- **Path filtering**: Automatically register or exclude notes based on file paths
+
+### 📱 **Mobile-First Design**
+Unlike Git, this plugin works seamlessly across all your devices with full feature parity, touch-optimized interface, and responsive design that adapts to any screen size.
+
+### 🔒 **Privacy & Data Control**
+Your data stays yours with local storage only, portable Markdown format, persistent data that survives plugin removal, and optional compression for space efficiency.
 
 ---
 
@@ -99,130 +147,56 @@ The plugin is designed to be intuitive and fit seamlessly with your Obsidian the
 
 ---
 
-## What Can This Plugin Do For You?
-
-Have you ever been editing a note, trying to perfect it, only to realize you've lost a great paragraph from an earlier draft? Or maybe you want to explore a different angle for your writing without creating a dozen "Copy of..." files?
-
-This plugin solves that. It allows you to save "snapshots" of your notes at any point in time. Think of it like a manual save point in a video game, but for your thoughts. You can create as many versions as you need, give them names, write description (to explain the "why" behind any change), and easily jump back to any previous state.
-
----
-
-## Key Features
-
-*   💾 **Save Snapshots:** At any time, save the current state of your note as a new version. You can give it a custom name (e.g., "First Draft," "Added Research Links") for easy reference custom description to explain the "why" behind any change).
-
-*   👀 **Preview & Restore:** Quickly glance at the content of any old version without commitment. If you like what you see, restore it with a single click. Don't worry—the plugin automatically saves a backup of your current content before restoring!
-
-*   🔍 **Advanced Comparison (Diff):** See exactly what changed between any two versions. Go beyond standard line-by-line comparison with advanced modes like **Word**, **Character**, and **Smart Diff** to pinpoint every modification.
-
-*   🌿 **Create Deviations (New Note):** Want to turn an old version into a completely separate file? Create a "deviation" to start a brand-new note from any point in your history, perfect for major rewrites or spin-off ideas.
-
-*   🌳 **Explore with Branches (Same Note):** Need to try a different direction within the *same file*? Create a "branch" to work on parallel ideas. Each branch has its own independent history, so you can experiment freely without affecting your main draft.
-
-*   ⚙️ **Smart Cleanup:** Keep your history tidy. Set a maximum number of versions per note, or automatically clean up versions older than a certain number of days.
-
-*   📤 **Export Your History:** Need to back up your work or use it elsewhere? Export the entire version history of a note to various formats, including Markdown, JSON, and plain text.
-
-*   💅 **Flexible Interface:** Choose between a detailed **Card View** that shows all actions at a glance, or a sleek, **Compact List View** for a more minimal look.
-
----
-
 ## How is this different from Obsidian's File Recovery?
 
-You might be thinking, "Doesn't Obsidian already have a File Recovery plugin?" And you're right! The built-in [File Recovery](https://help.obsidian.md/plugins/file-recovery) is excellent and useful for most users. But I wanted more control, more features, and a more comprehensive approach.
+**Obsidian File Recovery:** A basic, passive safety net for "oops" moments.
 
-Honestly, as a very anxious person, I wanted to see my version history right there in the sidebar, confirming my changes are saved, instead of having to open the file recovery modal via a command. I wanted to save named versions *when I want to*, mark creative milestones, and have powerful features like branching and diffing. This plugin was born from that need for control and visibility.
+**Version Control (This Plugin):** A comprehensive toolkit—intentional milestones for your creative workflow *plus* automatic edit tracking for peace of mind.
 
-Here's a quick breakdown:
+Here's the key differences:
 
-*   **Intentional Milestones:** This plugin's core feature (Version History) lets you save **manual, intentional snapshots** with meaningful names like "Brainstorming complete" or "Final draft before rewrite." File Recovery only saves automatic snapshots at intervals—no naming, no intentional milestones.
-
-*   **Optional Automatic Protection:** This plugin *also* offers Edit History—automatic snapshots similar to File Recovery, but with smarter diff-based compression and a visible timeline. You get automatic protection *plus* the ability to see and navigate your edit history.
-
-*   **Creative Workflow vs. Disaster Recovery:** This plugin is designed for your **creative workflow**. Features like naming versions, creating new notes from old versions ("deviations"), branching, and easily previewing content are built to help you iterate and explore ideas. File Recovery is purely a **disaster recovery** tool.
-
-*   **Always-On UI vs. On-Demand Modal:** Your note's history is always visible and accessible in the sidebar with this plugin. With File Recovery, you access it through settings or a command when you realize you need to restore something. It's not designed to be part of your constant workflow.
-
-**In simple terms:**
-*   **Obsidian File Recovery:** A basic, passive safety net for "oops" moments.
-*   **Version Control (This Plugin):** A comprehensive toolkit—intentional milestones for your creative workflow *plus* automatic edit tracking for peace of mind.
+| Aspect | File Recovery | This Plugin |
+|--------|---------------|-------------|
+| **Control** | Automatic snapshots only | Manual, intentional milestones + automatic protection |
+| **Naming** | No custom names | Meaningful names like "Brainstorming complete" |
+| **UI** | Hidden modal | Always-visible sidebar interface |
+| **Purpose** | Disaster recovery | Creative workflow enhancement |
+| **Features** | Basic restore | Branching, diffing, timeline, export, deviations |
+| **Visibility** | On-demand | Integrated into your daily workflow |
 
 ---
 
-## Two Types of History: Version History & Edit History
+## Two Types of History
 
-This plugin offers two complementary approaches to tracking your work—each designed for a different purpose.
+This plugin offers two complementary approaches:
 
-### 🎯 Version History (Intentional Snapshots)
+### 🎯 **Version History** (Intentional Snapshots)
+- **When**: Only when you explicitly choose to save
+- **Purpose**: Creative milestones and meaningful drafts
+- **Storage**: `.versiondb` folder (in your vault)
+- **Format**: Full Markdown copies
+- **Best for**: Perfectionists and conscious creators
 
-This is the core philosophy of this plugin. Version History captures **manual, intentional snapshots** that *you* decide to save. These are your creative milestones—moments when you've reached a meaningful point in your writing and want to preserve it.
+### ⏱️ **Edit History** (Automatic Snapshots)
+- **When**: Based on your settings (file save, intervals, change thresholds)
+- **Purpose**: Safety net and session recovery
+- **Storage**: IndexedDB (browser database)
+- **Format**: Compressed diffs (space-efficient)
+- **Best for**: "Oops" moments and seeing how you evolved
 
-*   **When it's saved:** Only when you explicitly choose to save a version.
-*   **How it's stored:** As standard Markdown (`.md`) files inside a hidden `.versiondb` folder in your vault.
-*   **Full copies:** Each version is saved as a complete, standalone copy of your note.
-*   **Portable & Accessible:** Because versions are plain Markdown files, they remain accessible and readable even without the plugin.
-
-This is for **perfectionists, writers, and conscious creators** who want to be in control of their creative evolution.
-
-### ⏱️ Edit History (Automatic Passive Snapshots)
-
-Edit History works differently—it captures **automatic, passive snapshots** in the background as you work. Think of it as an invisible safety net that tracks your progress without interrupting your flow.
-
-*   **When it's saved:** Automatically, based on your settings (e.g., on file save, at intervals, or when minimum changes are detected).
-*   **How it's stored:** In your browser's IndexedDB (a local database), **not** in your vault folder.
-*   **Delta compression:** Unlike Version History, Edit History uses smart diff-based compression—only the *changes* between edits are stored, making it extremely space-efficient.
-*   **Worker-based:** All processing happens in a background Web Worker, ensuring zero impact on your writing performance.
-
-This is for **those "oops" moments**—when you accidentally delete something or want to see how your writing evolved over a session.
-
-### 📊 How They Differ From Each Other
-
-| Feature | Version History | Edit History |
-|---------|-----------------|--------------|
-| **Trigger** | Manual (you decide) | Automatic (passive) |
-| **Purpose** | Creative milestones | Safety net / session recovery |
-| **Storage Location** | `.versiondb` folder (in vault) | IndexedDB (browser database) |
-| **Storage Format** | Full Markdown copies | Compressed diffs (delta chains) |
-| **Portability** | ✅ Files move with your vault | ❌ Browser-specific |
-| **Persistence** | ✅ Survives plugin removal | ❌ Browser database |
-| **Space Efficiency** | Each version = full copy | Only changes stored |
-
-### 🆚 How Both Differ From Git
-
-**Git is amazing—but it wasn't designed for writers.** Here's why this plugin takes a different approach:
-
-| Aspect | Git | This Plugin |
-|--------|-----|-------------|
-| **Scope** | Versions entire folders/repositories | Versions individual notes |
-| **Mental Model** | Your vault is a branch (`main`, `dev`) | Each note is its own repository |
-| **Branching** | Leave the file, switch branches | Branch *within* the same note |
-| **Complexity** | Commits, staging, push/pull | Just "Save Version" |
-| **Mobile Support** | Impractical on mobile | Works seamlessly across devices |
-
-**The key insight:** When you're writing, you don't want to version a folder—you want to version *a thought*. A single note. A specific idea. This plugin gives you that focused control.
+**The key insight:** When you're writing, you don't want to version a folder—you want to version *a thought*. This plugin gives you that focused control.
 
 ---
 
-## Data Storage and Persistence
+## Quick Start Guide
 
-### Version History Storage
+For immediate use:
 
-**Your version data stays with you.** All Version History data is stored locally within your Obsidian vault in a hidden folder (specifically, a folder named `.versiondb`). Inside this folder, the data for each version is saved as standard Markdown (`.md`) files.
-
-This structure ensures data persistence and privacy:
-*   **Local Storage:** Your version history never leaves your vault or connects to an external service.
-*   **Data Stays:** Your version history and all associated data will remain in your vault even if you uninstall or remove the plugin.
-*   **Accessible Format:** Because it is stored as standard Markdown files, your data is always accessible and readable, even without the plugin.
-
-### Edit History Storage
-
-Edit History uses a different approach optimized for efficiency:
-*   **IndexedDB:** Stored in your browser's local IndexedDB database (named `VersionControlEditHistoryDB`), not in your vault folder.
-*   **Delta Compression:** Uses intelligent diff-based storage—full snapshots are saved periodically, with subsequent edits stored as compressed differences (diffs).
-*   **Space Efficient:** This approach dramatically reduces storage overhead while maintaining full reconstruction capability.
-*   **Browser-Specific:** Because it uses IndexedDB, Edit History is specific to each browser/device and doesn't sync with your vault.
-
-**Note:** If you clear your browser data or switch devices, Edit History won't transfer. For important milestones, always save an intentional Version.
+1. **Save your first version**: Click the `+` button in the bottom-right corner
+2. **Switch between histories**: Click "Version History" or "Edit History" in the header
+3. **Access settings**: Click the gear icon in the top-right corner
+4. **View timeline**: Click the menu button (☰) → "Timeline"
+5. **Create branches**: Click the menu button (☰) → "Branches"
 
 ---
 
