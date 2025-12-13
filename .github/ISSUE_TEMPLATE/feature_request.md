@@ -3,7 +3,7 @@ name: Feature request
 about: Suggest an idea for this project
 title: ''
 labels: enhancement
-assignees: Yuichi-Aragi
+assignees: Yuichi-Aragi, Lae-Aragi
 
 ---
 
