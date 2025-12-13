@@ -1,6 +1,6 @@
 import { App, TFolder, Vault } from "obsidian";
 import { injectable, inject } from 'inversify';
-import { TYPES } from "../../types/inversify.types";
+import { TYPES } from '@/types/inversify.types';
 
 /**
  * A low-level service for direct, robust interactions with the vault's file system adapter.

@@ -1,11 +1,11 @@
 import { App } from "obsidian";
 import { injectable, inject } from "inversify";
-import { PathService } from "./path-service";
-import type { NoteManifest } from "../../types";
-import { TYPES } from "../../types/inversify.types";
-import { QueueService } from "../../services/queue-service";
-import { CompressionManager } from "../compression-manager";
-import type VersionControlPlugin from "../../main";
+import { PathService } from "@/core";
+import type { NoteManifest } from "@/types";
+import { TYPES } from '@/types/inversify.types';
+import { QueueService } from "@/services";
+import { CompressionManager } from "@/core";
+import type VersionControlPlugin from "@/main";
 
 /**
  * Repository for managing the content of individual versions.
