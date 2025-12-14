@@ -1,6 +1,6 @@
 import clsx from 'clsx';
 import { type FC, memo } from 'react';
-import { Icon } from '../Icon';
+import { Icon } from '@/ui/components';
 
 export interface SettingsActionProps { 
     text: string; 
