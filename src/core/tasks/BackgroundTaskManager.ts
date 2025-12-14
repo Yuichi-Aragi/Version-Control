@@ -1,14 +1,15 @@
 import { injectable, inject } from 'inversify';
 import { Component } from 'obsidian';
-import type { AppStore } from '../../state/store';
-import { thunks } from '../../state/thunks';
-import { AppStatus } from '../../state/state';
-import { actions } from '../../state/appSlice';
-import { TYPES } from '../../types/inversify.types';
-import type { ManifestManager } from '../manifest-manager';
-import type { EditHistoryManager } from '../edit-history-manager';
-import type VersionControlPlugin from '../../main';
-import type { HistorySettings } from '../../types';
+import { pickBy, isUndefined } from 'es-toolkit';
+import type { AppStore } from '@/state';
+import { thunks } from '@/state';
+import { AppStatus } from '@/state';
+import { appSlice } from '@/state';
+import { TYPES } from '@/types/inversify.types';
+import type { ManifestManager } from '@/core';
+import type { EditHistoryManager } from '@/core';
+import type VersionControlPlugin from '@/main';
+import type { HistorySettings } from '@/types';
 
 /**
  * Manages periodic background tasks for the plugin, specifically watch mode auto-saving.
@@ -62,7 +63,7 @@ export class BackgroundTaskManager extends Component {
     if (!currentNoteId || state.status !== AppStatus.READY) {
       this.stopTimer();
       this.activeNoteId = null;
-      this.store.dispatch(actions.setWatchModeCountdown(null));
+      this.store.dispatch(appSlice.actions.setWatchModeCountdown(null));
       return;
     }
 
@@ -106,7 +107,29 @@ export class BackgroundTaskManager extends Component {
       this.startTimer();
     } else {
       this.stopTimer();
-      this.store.dispatch(actions.setWatchModeCountdown(null));
+      this.store.dispatch(appSlice.actions.setWatchModeCountdown(null));
+    }
+  }
+
+  /**
+   * Resets the timer for a specific mode (version or edit).
+   * Call this when a manual save occurs to "skip" the immediate next auto-save turn.
+   * This ensures idempotency: manual saves push back the auto-save schedule.
+   */
+  public resetTimer(type: 'version' | 'edit'): void {
+    const now = Date.now();
+    if (type === 'version') {
+      if (this.versionInterval !== null) {
+        this.nextVersionSaveTime = now + this.versionInterval;
+        // Force immediate UI update for countdown if visible
+        this.tick(); 
+      }
+    } else {
+      if (this.editInterval !== null) {
+        this.nextEditSaveTime = now + this.editInterval;
+        // Force immediate UI update for countdown if visible
+        this.tick();
+      }
     }
   }
 
@@ -160,7 +183,7 @@ export class BackgroundTaskManager extends Component {
     
     // Dispatch only if changed to avoid Redux noise
     if (state.watchModeCountdown !== countdown) {
-      this.store.dispatch(actions.setWatchModeCountdown(countdown));
+      this.store.dispatch(appSlice.actions.setWatchModeCountdown(countdown));
     }
   }
 
@@ -184,13 +207,22 @@ export class BackgroundTaskManager extends Component {
   }
 
   /**
+   * Filters out undefined values from settings using es-toolkit pickBy.
+   * Used for exactOptionalPropertyTypes compatibility.
+   */
+  private filterDefinedSettings(settings: Record<string, unknown> | undefined): Partial<HistorySettings> | undefined {
+    if (!settings) return undefined;
+    return pickBy(settings, (value) => !isUndefined(value)) as Partial<HistorySettings>;
+  }
+
+  /**
    * Resolves settings for a specific note and type, respecting the active branch
    * and global/local overrides. This duplicates logic from settingsUtils to ensure
    * isolation and independence from the global 'effectiveSettings' state.
    */
   private async resolveSettings(noteId: string, type: 'version' | 'edit'): Promise<HistorySettings> {
-    const globalDefaults = type === 'version' 
-        ? this.plugin.settings.versionHistorySettings 
+    const globalDefaults = type === 'version'
+        ? this.plugin.settings.versionHistorySettings
         : this.plugin.settings.editHistorySettings;
 
     const noteManifest = await this.manifestManager.loadNoteManifest(noteId);
@@ -199,27 +231,21 @@ export class BackgroundTaskManager extends Component {
     const currentBranch = noteManifest.currentBranch;
     let perBranchSettings: Partial<HistorySettings> | undefined;
 
-    // Helper to filter out undefined values for exactOptionalPropertyTypes compatibility
-    const filterDefinedSettings = (settings: Record<string, unknown> | undefined): Partial<HistorySettings> | undefined => {
-        if (!settings) return undefined;
-        return Object.fromEntries(
-            Object.entries(settings).filter(([, v]) => v !== undefined)
-        ) as Partial<HistorySettings>;
-    };
-
     if (type === 'version') {
-        perBranchSettings = filterDefinedSettings(noteManifest.branches[currentBranch]?.settings);
+        perBranchSettings = this.filterDefinedSettings(noteManifest.branches[currentBranch]?.settings);
     } else {
         const editManifest = await this.editHistoryManager.getEditManifest(noteId);
-        perBranchSettings = filterDefinedSettings(editManifest?.branches[currentBranch]?.settings);
+        perBranchSettings = this.filterDefinedSettings(editManifest?.branches[currentBranch]?.settings);
     }
 
     const isUnderGlobalInfluence = perBranchSettings?.isGlobal !== false;
     if (isUnderGlobalInfluence) {
         return { ...globalDefaults, isGlobal: true };
     } else {
-         const definedBranchSettings = Object.fromEntries(
-            Object.entries(perBranchSettings ?? {}).filter(([, v]) => v !== undefined)
+        // Filter undefineds using es-toolkit pickBy to ensure clean merge
+        const definedBranchSettings = pickBy(
+            perBranchSettings ?? {},
+            (value) => !isUndefined(value)
         );
         return { ...globalDefaults, ...definedBranchSettings, isGlobal: false };
     }
