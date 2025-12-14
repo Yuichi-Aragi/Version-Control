@@ -1,8 +1,8 @@
 import type { FC } from 'react';
-import { useAppDispatch } from '../hooks/useRedux';
-import type { AppError } from '../../types';
-import { thunks } from '../../state/thunks';
-import { Icon } from './Icon';
+import { useAppDispatch } from '@/ui/hooks';
+import type { AppError } from '@/types';
+import { thunks } from '@/state';
+import { Icon } from '@/ui/components';
 
 interface ErrorDisplayProps {
     error: AppError;
