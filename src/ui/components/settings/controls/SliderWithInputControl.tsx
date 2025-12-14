@@ -8,9 +8,9 @@ import {
     type ChangeEvent,
 } from 'react';
 import { debounce, type Debouncer } from 'obsidian';
-import { clamp } from 'lodash-es';
+import { clamp } from 'es-toolkit';
 import clsx from 'clsx';
-import { parseIntervalToSeconds, formatSecondsToInput } from '../settingsUtils';
+import { parseIntervalToSeconds, formatSecondsToInput } from '@/ui/components/settings/utils';
 
 type Unit = 'seconds' | 'days' | 'lines';
 
