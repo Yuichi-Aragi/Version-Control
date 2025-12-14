@@ -1,8 +1,8 @@
-import { escapeRegExp as lodashEscapeRegExp } from 'lodash-es';
+import { escapeRegExp as esToolkitEscapeRegExp } from 'es-toolkit';
 
 /**
  * Escapes special characters in a string to make it safe for use in regular expressions.
- * This function wraps lodash's escapeRegExp implementation with additional validation.
+ * This function wraps es-toolkit's escapeRegExp implementation with additional validation.
  * 
  * @param str - The string to escape. Must be a non-null string.
  * @returns The escaped string with special regex characters properly escaped.
@@ -20,5 +20,5 @@ export const escapeRegExp = (str: string): string => {
     }
     
     // Use lodash's implementation
-    return lodashEscapeRegExp(str);
+    return esToolkitEscapeRegExp(str);
 };
