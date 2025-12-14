@@ -1,5 +1,5 @@
 import { App, normalizePath } from "obsidian";
-import { trim, trimStart, trimEnd, isEmpty } from 'lodash-es';
+import { trim, trimStart, trimEnd, isEmpty } from 'es-toolkit/compat';
 
 // Constants for better maintainability and magic number elimination
 const DEFAULT_FILENAME = "Untitled Export";
