@@ -1,12 +1,13 @@
 import type { FC } from 'react';
-import { useAppSelector } from '../../hooks/useRedux';
+import { useAppSelector } from '@/ui/hooks';
 import { PreviewPanel } from './PreviewPanel';
 import { DiffPanel } from './DiffPanel';
 import { ConfirmationPanel } from './ConfirmationPanel';
 import { ActionPanel } from './ActionPanel';
 import { ChangelogPanel } from './ChangelogPanel';
 import { TimelinePanel } from './TimelinePanel';
-import type { PanelState } from '../../../state/state';
+import { DashboardPanel } from './DashboardPanel';
+import type { PanelState } from '@/state';
 
 const renderPanelComponent = (p: NonNullable<PanelState>): React.ReactNode => {
     switch (p.type) {
@@ -24,6 +25,8 @@ const renderPanelComponent = (p: NonNullable<PanelState>): React.ReactNode => {
             return <ChangelogPanel panelState={p} />;
         case 'timeline':
             return <TimelinePanel panelState={p} />;
+        case 'dashboard':
+            return <DashboardPanel />;
         default:
             return null;
     }

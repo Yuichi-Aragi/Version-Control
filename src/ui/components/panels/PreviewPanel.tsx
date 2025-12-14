@@ -1,15 +1,15 @@
 import { MarkdownRenderer, moment, Component } from 'obsidian';
 import { type FC, useCallback, useState, useRef, useLayoutEffect, useEffect, useMemo } from 'react';
 import type { VirtuosoHandle } from 'react-virtuoso';
-import { useAppSelector } from '../../hooks/useRedux';
-import type { PreviewPanel as PreviewPanelState } from '../../../state/state';
-import { Icon } from '../Icon';
-import { VirtualizedPlaintext } from '../shared/VirtualizedPlaintext';
-import { useApp } from '../../AppContext';
+import { useAppSelector } from '@/ui/hooks';
+import type { PreviewPanel as PreviewPanelState } from '@/state';
+import { Icon } from '@/ui/components';
+import { VirtualizedPlaintext } from '@/ui/components/shared';
+import { useApp } from '@/ui/AppContext';
 import clsx from 'clsx';
-import { escapeRegExp } from '../../utils/strings';
-import { usePanelClose } from '../../hooks/usePanelClose';
-import { usePanelSearch } from '../../hooks/usePanelSearch';
+import { escapeRegExp } from '@/ui/utils/strings';
+import { usePanelClose } from '@/ui/hooks';
+import { usePanelSearch } from '@/ui/hooks';
 
 interface PreviewPanelProps {
     panelState: PreviewPanelState;
