@@ -22,28 +22,90 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
           check-latest: true
+     #     cache: 'pnpm'
 
-      - name: Check for package-lock.json
-        id: check_lockfile
+      - name: Configure pnpm to allow esbuild scripts
+        run: echo 'allowed-dep-scripts=esbuild' >> .npmrc
+
+      - name: Clean up npm lockfile
         run: |
-          if [ -f package-lock.json ]; then
-            echo "lockfile_exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "lockfile_exists=false" >> $GITHUB_OUTPUT
+          # Remove package-lock.json if it exists
+          if [ -f "package-lock.json" ]; then
+            echo "🗑️ Removing package-lock.json"
+            rm package-lock.json
           fi
 
-      - name: Install dependencies (npm ci or install)
+      - name: Detect and handle lockfile state
+        id: lockfile-check
         run: |
-          if [ "${{ steps.check_lockfile.outputs.lockfile_exists }}" = "true" ]; then
-            npm ci || npm install
-          else
-            npm install
+          echo "🔍 Checking lockfile state..."
+          
+          # Check if lockfile exists
+          if [ ! -f "pnpm-lock.yaml" ]; then
+            echo "📦 No lockfile found. Will generate new one."
+            echo "lockfile_action=generate" >> $GITHUB_OUTPUT
+            echo "lockfile_status=missing" >> $GITHUB_OUTPUT
+            exit 0
           fi
+          
+          # Backup current lockfile for comparison
+          cp pnpm-lock.yaml pnpm-lock.yaml.backup
+          
+          echo "🔬 Checking if lockfile is up-to-date..."
+          
+          # Try to install with frozen lockfile to check if it's outdated
+          if pnpm install --lockfile-only --frozen-lockfile 2>/dev/null; then
+            echo "✅ Lockfile is up-to-date."
+            echo "lockfile_action=use-frozen" >> $GITHUB_OUTPUT
+            echo "lockfile_status=current" >> $GITHUB_OUTPUT
+          else
+            echo "🔄 Lockfile is outdated. Will update it."
+            echo "lockfile_action=update" >> $GITHUB_OUTPUT
+            echo "lockfile_status=outdated" >> $GITHUB_OUTPUT
+          fi
+          
+          # Clean up backup
+          rm -f pnpm-lock.yaml.backup
+
+      - name: Install dependencies based on lockfile state
+        id: install-deps
+        run: |
+          LOCKFILE_ACTION="${{ steps.lockfile-check.outputs.lockfile_action }}"
+          echo "🚀 Executing action: $LOCKFILE_ACTION"
+          
+          case "$LOCKFILE_ACTION" in
+            "generate")
+              echo "📦 Generating new pnpm-lock.yaml..."
+              pnpm install
+              echo "lockfile_changed=true" >> $GITHUB_OUTPUT
+              echo "lockfile_message=New lockfile generated" >> $GITHUB_OUTPUT
+              ;;
+            "use-frozen")
+              echo "📦 Using frozen lockfile..."
+              pnpm install --frozen-lockfile
+              echo "lockfile_changed=false" >> $GITHUB_OUTPUT
+              echo "lockfile_message=Lockfile unchanged" >> $GITHUB_OUTPUT
+              ;;
+            "update")
+              echo "🔄 Updating outdated lockfile..."
+              pnpm install
+              echo "lockfile_changed=true" >> $GITHUB_OUTPUT
+              echo "lockfile_message=Lockfile updated" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "❌ Unknown lockfile action: $LOCKFILE_ACTION"
+              exit 1
+              ;;
+          esac
+          
+          echo "✅ Dependencies installed successfully"
 
       - name: Run Version Sync and Release Script
         run: |
@@ -59,23 +121,49 @@ jobs:
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REF_NAME: ${{ github.ref_name }} # Pass branch name to the script
+          GITHUB_REF_NAME: ${{ github.ref_name }}
 
       - name: Commit and Push Changes
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Stage potential changes, ignoring errors if files don't exist
-          git add versions.json package.json package-lock.json --ignore-errors
+          # Initialize variables for commit message
+          COMMIT_PARTS=("chore(release): Sync versions for ${{ github.sha }}")
+          
+          # Handle pnpm-lock.yaml if it was changed
+          if [ "${{ steps.install-deps.outputs.lockfile_changed }}" = "true" ]; then
+            echo "📝 Staging pnpm-lock.yaml"
+            git add pnpm-lock.yaml --ignore-errors
+            COMMIT_PARTS+=("${{ steps.install-deps.outputs.lockfile_message }}")
+          fi
+          
+          # Stage version files
+          git add versions.json package.json --ignore-errors
+          
+          # Check if version files were modified
+          if git diff --quiet versions.json package.json 2>/dev/null; then
+            VERSION_CHANGED=false
+          else
+            VERSION_CHANGED=true
+            echo "📝 Staging version files"
+            git add versions.json package.json --ignore-errors
+          fi
           
           # Check if there are any staged changes
           if ! git diff --staged --quiet; then
-            echo "Changes detected in version files. Committing and pushing..."
-            git commit -m "chore(release): Sync versions for ${{ github.sha }}"
+            echo "📤 Changes detected. Committing and pushing..."
+            
+            # Build commit message from parts
+            COMMIT_MESSAGE=$(IFS=" - "; echo "${COMMIT_PARTS[*]}")
+            
+            git commit -m "$COMMIT_MESSAGE"
             
             # Push the commit to the branch that triggered the workflow
+            echo "🚀 Pushing to ${{ github.ref_name }}"
             git push origin HEAD:${{ github.ref_name }}
+            
+            echo "✅ Changes committed and pushed successfully"
           else
-            echo "No changes to version files to commit."
+            echo "ℹ️ No changes to commit."
           fi
