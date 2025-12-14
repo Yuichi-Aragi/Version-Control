@@ -1,26 +1,26 @@
 import { memo, useEffect } from 'react';
 import { useForm, type SubmitHandler } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
-import { thunks } from '../../../state/thunks';
-import { SettingComponent } from '../SettingComponent';
+import { valibotResolver } from '@hookform/resolvers/valibot';
+import { useAppDispatch, useAppSelector } from '@/ui/hooks';
+import { thunks } from '@/state';
+import { SettingComponent } from '@/ui/components';
 import { ValidatedInput } from './controls/ValidatedControls';
-import { 
-    DatabasePathSchema, 
-    FrontmatterKeySchema, 
+import {
+    DatabasePathSchema,
+    FrontmatterKeySchema,
     NoteIdFormatSchema,
-    VersionIdFormatSchema 
-} from './settingsUtils';
-import { z } from 'zod';
+    VersionIdFormatSchema
+} from '@/ui/components/settings/utils';
+import * as v from 'valibot';
 import { AutoRegisterSettings } from './setting-controls/AutoRegisterSettings';
 
 // --- Database Path Setting ---
 
-const DatabasePathFormSchema = z.object({
+const DatabasePathFormSchema = v.object({
     databasePath: DatabasePathSchema
 });
 
-type DatabasePathFormValues = z.infer<typeof DatabasePathFormSchema>;
+type DatabasePathFormValues = v.InferOutput<typeof DatabasePathFormSchema>;
 
 const DatabasePathSetting: React.FC = memo(() => {
     const dispatch = useAppDispatch();
@@ -28,7 +28,7 @@ const DatabasePathSetting: React.FC = memo(() => {
 
     const { control, handleSubmit, reset, formState: { isValid, isDirty } } = useForm<DatabasePathFormValues>({
         mode: 'onChange',
-        resolver: zodResolver(DatabasePathFormSchema),
+        resolver: valibotResolver(DatabasePathFormSchema),
         defaultValues: { databasePath }
     });
 
@@ -72,11 +72,11 @@ DatabasePathSetting.displayName = 'DatabasePathSetting';
 
 // --- Frontmatter Key Setting ---
 
-const FrontmatterKeyFormSchema = z.object({
+const FrontmatterKeyFormSchema = v.object({
     key: FrontmatterKeySchema
 });
 
-type FrontmatterKeyFormValues = z.infer<typeof FrontmatterKeyFormSchema>;
+type FrontmatterKeyFormValues = v.InferOutput<typeof FrontmatterKeyFormSchema>;
 
 const FrontmatterKeySetting: React.FC = memo(() => {
     const dispatch = useAppDispatch();
@@ -84,7 +84,7 @@ const FrontmatterKeySetting: React.FC = memo(() => {
 
     const { control, handleSubmit, reset, formState: { isValid, isDirty } } = useForm<FrontmatterKeyFormValues>({
         mode: 'onChange',
-        resolver: zodResolver(FrontmatterKeyFormSchema),
+        resolver: valibotResolver(FrontmatterKeyFormSchema),
         defaultValues: { key: frontmatterKey }
     });
 
@@ -153,12 +153,12 @@ CompressionSetting.displayName = 'CompressionSetting';
 
 // --- ID Format Settings ---
 
-const IdFormatFormSchema = z.object({
+const IdFormatFormSchema = v.object({
     noteIdFormat: NoteIdFormatSchema,
     versionIdFormat: VersionIdFormatSchema
 });
 
-type IdFormatFormValues = z.infer<typeof IdFormatFormSchema>;
+type IdFormatFormValues = v.InferOutput<typeof IdFormatFormSchema>;
 
 const IdFormatSettings: React.FC = memo(() => {
     const dispatch = useAppDispatch();
@@ -167,7 +167,7 @@ const IdFormatSettings: React.FC = memo(() => {
     
     const { control, handleSubmit, reset, formState: { isValid, isDirty } } = useForm<IdFormatFormValues>({
         mode: 'onChange',
-        resolver: zodResolver(IdFormatFormSchema),
+        resolver: valibotResolver(IdFormatFormSchema),
         defaultValues: { noteIdFormat, versionIdFormat }
     });
 
@@ -224,9 +224,10 @@ IdFormatSettings.displayName = 'IdFormatSettings';
 
 interface GlobalSettingsProps {
     showTitle?: boolean;
+    includeDefaults?: boolean;
 }
 
-export const GlobalSettings: React.FC<GlobalSettingsProps> = memo(({ showTitle = true }) => {
+export const GlobalSettings: React.FC<GlobalSettingsProps> = memo(({ showTitle = true, includeDefaults = true }) => {
     return (
         <div className="v-settings-section" role="region" aria-labelledby="global-settings-title">
             {showTitle && <h2 id="global-settings-title">Global Plugin Settings</h2>}
@@ -235,25 +236,29 @@ export const GlobalSettings: React.FC<GlobalSettingsProps> = memo(({ showTitle =
             <CompressionSetting />
             <IdFormatSettings />
             
-            <div style={{marginTop: '20px', borderTop: '1px solid var(--background-modifier-border)', paddingTop: '10px'}}>
-                <h3 id="global-version-defaults-title">
-                    Global Version History Defaults
-                </h3>
-                <p className="setting-item-description">
-                    These settings apply to all notes using Version History unless overridden.
-                </p>
-                <AutoRegisterSettings settingKey="versionHistorySettings" />
-            </div>
+            {includeDefaults && (
+                <>
+                    <div style={{marginTop: '20px', borderTop: '1px solid var(--background-modifier-border)', paddingTop: '10px'}}>
+                        <h3 id="global-version-defaults-title">
+                            Global Version History Defaults
+                        </h3>
+                        <p className="setting-item-description">
+                            These settings apply to all notes using Version History unless overridden.
+                        </p>
+                        <AutoRegisterSettings settingKey="versionHistorySettings" />
+                    </div>
 
-            <div style={{marginTop: '20px', borderTop: '1px solid var(--background-modifier-border)', paddingTop: '10px'}}>
-                <h3 id="global-edit-defaults-title">
-                    Global Edit History Defaults
-                </h3>
-                <p className="setting-item-description">
-                    These settings apply to all notes using Edit History unless overridden.
-                </p>
-                <AutoRegisterSettings settingKey="editHistorySettings" />
-            </div>
+                    <div style={{marginTop: '20px', borderTop: '1px solid var(--background-modifier-border)', paddingTop: '10px'}}>
+                        <h3 id="global-edit-defaults-title">
+                            Global Edit History Defaults
+                        </h3>
+                        <p className="setting-item-description">
+                            These settings apply to all notes using Edit History unless overridden.
+                        </p>
+                        <AutoRegisterSettings settingKey="editHistorySettings" />
+                    </div>
+                </>
+            )}
         </div>
     );
 });

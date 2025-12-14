@@ -1,7 +1,7 @@
 import { TFile } from 'obsidian';
-import type { VersionControlSettings, HistorySettings, VersionHistoryEntry, AppError, DiffTarget, DiffRequest, DiffType, Change, TimelineEvent, TimelineSettings, ViewMode } from '../types';
-export type { TimelineEvent } from '../types';
-import { DEFAULT_SETTINGS } from '../constants';
+import type { VersionControlSettings, HistorySettings, VersionHistoryEntry, AppError, DiffTarget, DiffRequest, DiffType, Change, TimelineEvent, TimelineSettings, ViewMode } from '@/types';
+export type { TimelineEvent } from '@/types';
+import { DEFAULT_SETTINGS } from '@/constants';
 import type { AppThunk } from './store';
 
 // ===================================================================================
@@ -66,6 +66,10 @@ export interface TimelinePanel {
     settings: TimelineSettings;
 }
 
+export interface DashboardPanel {
+    type: 'dashboard';
+}
+
 /** A generic item for the ActionPanel. */
 export interface ActionItem<T> {
     id: string;
@@ -86,6 +90,15 @@ export interface ActionPanel<T> {
     // Optional handler for when user tries to create a new item from the filter input
     onCreateAction?: (value: string) => AppThunk;
     showFilter?: boolean; // Whether to show a filter/search input.
+    /**
+     * Optional context actions for items (e.g., right-click menu).
+     * Returns a list of actions where the data is the action ID.
+     */
+    contextActions?: (item: ActionItem<T>) => ActionItem<string>[];
+    /**
+     * Handler for when a context action is chosen.
+     */
+    onContextAction?: (actionId: string, itemData: T) => AppThunk;
 }
 
 /** A state for stacking an overlay panel (like confirmation) on top of the description panel. */
@@ -95,7 +108,7 @@ export interface StackedPanel {
     overlay: ActionPanel<any> | ConfirmationPanel;
 }
 
-export type PanelState = ConfirmationPanel | PreviewPanel | DiffPanel | SettingsPanel | ActionPanel<any> | ChangelogPanel | DescriptionPanel | TimelinePanel | StackedPanel | null;
+export type PanelState = ConfirmationPanel | PreviewPanel | DiffPanel | SettingsPanel | ActionPanel<any> | ChangelogPanel | DescriptionPanel | TimelinePanel | DashboardPanel | StackedPanel | null;
 
 // --- Core Application State ---
 

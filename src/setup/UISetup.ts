@@ -1,8 +1,8 @@
 import { Plugin, WorkspaceLeaf, FileView } from 'obsidian';
-import type { AppStore } from '../state/store';
-import { thunks } from '../state/thunks';
-import { VIEW_TYPE_VERSION_CONTROL } from '../constants';
-import { VersionControlView } from '../ui/version-control-view';
+import type { AppStore } from '@/state';
+import { thunks } from '@/state';
+import { VIEW_TYPE_VERSION_CONTROL } from '@/constants';
+import { VersionControlView } from '@/ui/version-control-view';
 
 /**
  * Registers all custom views with Obsidian.

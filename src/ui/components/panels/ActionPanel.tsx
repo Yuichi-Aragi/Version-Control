@@ -2,12 +2,13 @@ import { debounce } from 'obsidian';
 import clsx from 'clsx';
 import { type FC, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { useAppDispatch } from '../../hooks/useRedux';
-import type { ActionPanel as ActionPanelState, ActionItem } from '../../../state/state';
-import { Icon } from '../Icon';
-import { usePanelClose } from '../../hooks/usePanelClose';
-import { useBackdropClick } from '../../hooks/useBackdropClick';
-import { useDelayedFocus } from '../../hooks/useDelayedFocus';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { useAppDispatch } from '@/ui/hooks';
+import type { ActionPanel as ActionPanelState, ActionItem } from '@/state';
+import { Icon } from '@/ui/components';
+import { usePanelClose } from '@/ui/hooks';
+import { useBackdropClick } from '@/ui/hooks';
+import { useDelayedFocus } from '@/ui/hooks';
 
 interface ActionPanelProps {
     panelState: ActionPanelState<any>;
@@ -19,12 +20,15 @@ interface ItemComponentProps {
     item: ActionItem<any>;
     isFocused: boolean;
     isDrawer: boolean;
+    contextActions?: ActionItem<string>[] | undefined;
     onChoose: () => void;
     onFocus: () => void;
+    onContextAction?: (actionId: string) => void;
 }
 
-const ItemComponent: FC<ItemComponentProps> = memo(({ item, isFocused, isDrawer, onChoose, onFocus }) => {
+const ItemComponent: FC<ItemComponentProps> = memo(({ item, isFocused, isDrawer, contextActions, onChoose, onFocus, onContextAction }) => {
     const itemRef = useRef<HTMLDivElement>(null);
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
 
     useEffect(() => {
         if (isFocused) {
@@ -34,13 +38,43 @@ const ItemComponent: FC<ItemComponentProps> = memo(({ item, isFocused, isDrawer,
 
     const iconToShow = item.isSelected ? 'check' : item.icon;
 
+    const handleContextMenu = useCallback((e: React.MouseEvent) => {
+        if (contextActions && contextActions.length > 0) {
+            e.preventDefault();
+            setIsMenuOpen(true);
+        }
+    }, [contextActions]);
+
+    // Helper to render the trigger icon if actions exist
+    const renderTrigger = () => {
+        if (!contextActions || contextActions.length === 0) return null;
+        
+        return (
+            <DropdownMenu.Trigger asChild>
+                <div 
+                    className="v-action-item-more" 
+                    onClick={(e) => { 
+                        e.stopPropagation(); 
+                        // Trigger handles state toggle automatically
+                    }}
+                >
+                    <Icon name="more-vertical" />
+                </div>
+            </DropdownMenu.Trigger>
+        );
+    };
+
     const content = (
         <div
             ref={itemRef}
             className={clsx('v-action-panel-item', { 'is-selected': item.isSelected })}
             tabIndex={-1}
-            onClick={onChoose}
+            onClick={(e) => {
+                e.stopPropagation();
+                onChoose();
+            }}
             onFocus={onFocus}
+            onContextMenu={handleContextMenu}
         >
             {iconToShow && (
                 <span className="v-action-item-icon">
@@ -51,8 +85,36 @@ const ItemComponent: FC<ItemComponentProps> = memo(({ item, isFocused, isDrawer,
                 <div className="v-action-item-text">{item.text}</div>
                 {item.subtext && <div className="v-action-item-subtext">{item.subtext}</div>}
             </div>
+            {renderTrigger()}
         </div>
     );
+
+    if (contextActions && contextActions.length > 0) {
+        return (
+            <DropdownMenu.Root open={isMenuOpen} onOpenChange={setIsMenuOpen}>
+                {isDrawer ? <div className="v-action-panel-list-item-wrapper">{content}</div> : content}
+                
+                <DropdownMenu.Portal>
+                    <DropdownMenu.Content className="v-actionbar-dropdown-content" sideOffset={5} collisionPadding={10} align="end">
+                        {contextActions.map(action => (
+                            <DropdownMenu.Item 
+                                key={action.id} 
+                                className="v-actionbar-dropdown-item" 
+                                onSelect={(e) => {
+                                    e.preventDefault();
+                                    setIsMenuOpen(false);
+                                    onContextAction?.(action.id);
+                                }}
+                            >
+                                <span>{action.text}</span>
+                                {action.icon && <Icon name={action.icon} />}
+                            </DropdownMenu.Item>
+                        ))}
+                    </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+        );
+    }
 
     return isDrawer ? <div className="v-action-panel-list-item-wrapper">{content}</div> : content;
 });
@@ -65,7 +127,7 @@ export const ActionPanel: FC<ActionPanelProps> = ({ panelState }) => {
     const filterInputRef = useRef<HTMLInputElement>(null);
     const virtuosoRef = useRef<VirtuosoHandle>(null);
 
-    const { items, onCreateAction } = panelState;
+    const { items, onCreateAction, contextActions, onContextAction } = panelState;
     // FIX: Use a more robust check for drawer mode that is resilient to whitespace.
     const isDrawer = panelState.title?.trim() === 'Switch or create branch';
 
@@ -100,6 +162,12 @@ export const ActionPanel: FC<ActionPanelProps> = ({ panelState }) => {
             dispatch(panelState.onChooseAction(item.data));
         }
     }, [dispatch, panelState.onChooseAction, onCreateAction]);
+
+    const handleContextAction = useCallback((actionId: string, itemData: any) => {
+        if (onContextAction) {
+            dispatch(onContextAction(actionId, itemData));
+        }
+    }, [dispatch, onContextAction]);
 
     const debouncedSetFilter = useMemo(() => debounce(setFilterQuery, 150, true), []);
 
@@ -161,8 +229,10 @@ export const ActionPanel: FC<ActionPanelProps> = ({ panelState }) => {
                             item={item}
                             isFocused={index === focusedIndex}
                             isDrawer={isDrawer}
+                            contextActions={contextActions ? contextActions(item) : undefined}
                             onChoose={() => chooseItem(item)}
                             onFocus={() => setFocusedIndex(index)}
+                            onContextAction={(actionId) => handleContextAction(actionId, item.data)}
                         />
                     )}
                 />
@@ -175,8 +245,10 @@ export const ActionPanel: FC<ActionPanelProps> = ({ panelState }) => {
                 item={item}
                 isFocused={index === focusedIndex}
                 isDrawer={isDrawer}
+                contextActions={contextActions ? contextActions(item) : undefined}
                 onChoose={() => chooseItem(item)}
                 onFocus={() => setFocusedIndex(index)}
+                onContextAction={(actionId) => handleContextAction(actionId, item.data)}
             />
         ));
     };

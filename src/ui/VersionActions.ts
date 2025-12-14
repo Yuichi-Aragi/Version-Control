@@ -1,6 +1,6 @@
-import type { AppStore } from '../state/store'; 
-import type { VersionHistoryEntry } from '../types';
-import { thunks } from '../state/thunks/index';
+import type { AppStore } from '@/state'; 
+import type { VersionHistoryEntry } from '@/types';
+import { thunks } from '@/state';
 
 export interface VersionActionConfig {
     id: string;

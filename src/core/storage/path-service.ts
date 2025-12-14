@@ -1,13 +1,36 @@
 import { normalizePath } from "obsidian";
 import { injectable, inject } from 'inversify';
-import { DEFAULT_DB_PATH } from "../../constants";
-import { TYPES } from "../../types/inversify.types";
-import type VersionControlPlugin from "../../main";
+import * as v from 'valibot';
+import { DEFAULT_DB_PATH } from "@/constants";
+import { TYPES } from '@/types/inversify.types';
+import type VersionControlPlugin from "@/main";
+
+/**
+ * Valibot schema for validating noteId inputs.
+ * Ensures the noteId is a non-empty string with reasonable length constraints.
+ */
+const NoteIdSchema = v.pipe(
+    v.string('noteId must be a string'),
+    v.nonEmpty('noteId cannot be empty'),
+    v.maxLength(500, 'noteId cannot exceed 500 characters'),
+    v.transform((s: string): string => s.trim())
+);
+
+/**
+ * Valibot schema for validating versionId inputs.
+ * Ensures the versionId is a non-empty string with reasonable length constraints.
+ */
+const VersionIdSchema = v.pipe(
+    v.string('versionId must be a string'),
+    v.nonEmpty('versionId cannot be empty'),
+    v.maxLength(500, 'versionId cannot exceed 500 characters'),
+    v.transform((s: string): string => s.trim())
+);
 
 /**
  * A centralized, robust, and defensively programmed service for generating all database-related file and folder paths.
  * Ensures consistency, type safety, error resilience, and backward compatibility.
- * All methods are strictly guarded against invalid inputs and edge cases.
+ * All methods are strictly guarded against invalid inputs and edge cases using valibot validation.
  */
 @injectable()
 export class PathService {
@@ -156,28 +179,32 @@ export class PathService {
     }
 
     /**
-     * Validates that a noteId is a non-empty, non-whitespace string.
+     * Validates that a noteId is a non-empty, non-whitespace string using valibot.
      * @param {unknown} noteId - The note identifier to validate.
      * @param {string} methodName - Name of the calling method for error context.
      * @throws {Error} If validation fails.
      * @private
      */
     private validateNoteId(noteId: unknown, methodName: string): asserts noteId is string {
-        if (typeof noteId !== 'string' || noteId.trim().length === 0) {
-            throw new Error(`PathService.${methodName}: Invalid noteId provided. Expected non-empty string, received: ${noteId === null ? 'null' : noteId === undefined ? 'undefined' : JSON.stringify(noteId)}`);
+        const result = v.safeParse(NoteIdSchema, noteId);
+        if (!result.success) {
+            const messages = result.issues.map(issue => issue.message).join('; ');
+            throw new Error(`PathService.${methodName}: Invalid noteId - ${messages}`);
         }
     }
 
     /**
-     * Validates that a versionId is a non-empty, non-whitespace string.
+     * Validates that a versionId is a non-empty, non-whitespace string using valibot.
      * @param {unknown} versionId - The version identifier to validate.
      * @param {string} methodName - Name of the calling method for error context.
      * @throws {Error} If validation fails.
      * @private
      */
     private validateVersionId(versionId: unknown, methodName: string): asserts versionId is string {
-        if (typeof versionId !== 'string' || versionId.trim().length === 0) {
-            throw new Error(`PathService.${methodName}: Invalid versionId provided. Expected non-empty string, received: ${versionId === null ? 'null' : versionId === undefined ? 'undefined' : JSON.stringify(versionId)}`);
+        const result = v.safeParse(VersionIdSchema, versionId);
+        if (!result.success) {
+            const messages = result.issues.map(issue => issue.message).join('; ');
+            throw new Error(`PathService.${methodName}: Invalid versionId - ${messages}`);
         }
     }
 

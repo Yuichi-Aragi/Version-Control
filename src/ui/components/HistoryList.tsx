@@ -1,14 +1,14 @@
 import { moment } from 'obsidian';
-import { orderBy } from 'lodash-es';
+import { orderBy } from 'es-toolkit';
 import clsx from 'clsx';
 import { type FC, useEffect, useRef, useState, useTransition, memo } from 'react';
 import { Virtuoso } from 'react-virtuoso';
-import { useAppSelector } from '../hooks/useRedux';
-import { AppStatus } from '../../state/state';
-import type { VersionHistoryEntry as VersionHistoryEntryType } from '../../types';
-import { formatFileSize } from '../utils/dom';
-import { HistoryEntry } from './HistoryEntry';
-import { Icon } from './Icon';
+import { useAppSelector } from '@/ui/hooks';
+import { AppStatus } from '@/state';
+import type { VersionHistoryEntry as VersionHistoryEntryType } from '@/types';
+import { formatFileSize } from '@/ui/utils/dom';
+import { HistoryEntry } from '@/ui/components';
+import { Icon } from '@/ui/components';
 
 const SkeletonEntry: FC<{ isListView: boolean }> = memo(({ isListView }) => (
     <div className={clsx('v-history-entry', 'is-skeleton', { 'is-list-view': isListView })} aria-hidden>

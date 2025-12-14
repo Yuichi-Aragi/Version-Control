@@ -2,11 +2,11 @@ import { debounce } from 'obsidian';
 import clsx from 'clsx';
 import { type FC, type ChangeEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
-import { AppStatus } from '../../state/state';
-import { actions } from '../../state/appSlice';
-import { thunks } from '../../state/thunks';
-import { Icon } from './Icon';
+import { useAppDispatch, useAppSelector } from '@/ui/hooks';
+import { AppStatus } from '@/state';
+import { appSlice } from '@/state';
+import { thunks } from '@/state';
+import { Icon } from '@/ui/components';
 
 export const ActionBar: FC = () => {
     const dispatch = useAppDispatch();
@@ -67,21 +67,21 @@ export const ActionBar: FC = () => {
 
     const handleToggleSearch = useCallback(() => {
         if (status !== AppStatus.READY) return;
-        dispatch(actions.toggleSearch(!isSearchActive));
+        dispatch(appSlice.actions.toggleSearch(!isSearchActive));
     }, [dispatch, status, isSearchActive]);
 
     const handleToggleSettings = useCallback((event: React.MouseEvent) => {
         event.stopPropagation();
         if (status !== AppStatus.READY) return;
         if (panel?.type === 'settings') {
-            dispatch(actions.closePanel());
+            dispatch(appSlice.actions.closePanel());
         } else {
-            dispatch(actions.openPanel({ type: 'settings' }));
+            dispatch(appSlice.actions.openPanel({ type: 'settings' }));
         }
     }, [dispatch, status, panel]);
 
     const debouncedSearch = useCallback(debounce((value: string) => {
-        dispatch(actions.setSearchQuery(value));
+        dispatch(appSlice.actions.setSearchQuery(value));
     }, 300), [dispatch]);
 
     const handleSearchInputChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
@@ -93,20 +93,20 @@ export const ActionBar: FC = () => {
     const handleSearchKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Escape') {
             setLocalQuery('');
-            dispatch(actions.setSearchQuery(''));
-            dispatch(actions.toggleSearch(false));
+            dispatch(appSlice.actions.setSearchQuery(''));
+            dispatch(appSlice.actions.toggleSearch(false));
         }
     }, [dispatch]);
 
     const handleCaseToggle = useCallback((event: React.MouseEvent) => {
         event.preventDefault();
-        dispatch(actions.setSearchCaseSensitivity(!isSearchCaseSensitive));
+        dispatch(appSlice.actions.setSearchCaseSensitivity(!isSearchCaseSensitive));
     }, [dispatch, isSearchCaseSensitive]);
 
     const handleClearSearch = useCallback((event: React.MouseEvent) => {
         event.preventDefault();
         setLocalQuery('');
-        dispatch(actions.setSearchQuery(''));
+        dispatch(appSlice.actions.setSearchQuery(''));
         searchInputRef.current?.focus();
     }, [dispatch]);
 
@@ -124,6 +124,11 @@ export const ActionBar: FC = () => {
     const handleOpenTimeline = useCallback(() => {
         if (status !== AppStatus.READY || isBusy) return;
         dispatch(thunks.openTimeline());
+    }, [dispatch, status, isBusy]);
+
+    const handleOpenDashboard = useCallback(() => {
+        if (status !== AppStatus.READY || isBusy) return;
+        dispatch(thunks.openDashboard());
     }, [dispatch, status, isBusy]);
 
     useEffect(() => {
@@ -180,6 +185,10 @@ export const ActionBar: FC = () => {
                                     <span>Timeline</span>
                                     <Icon name="history" />
                                 </DropdownMenu.Item>
+                                <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenDashboard}>
+                                    <span>Dashboard</span>
+                                    <Icon name="layout-dashboard" />
+                                </DropdownMenu.Item>
                             </DropdownMenu.Content>
                         </DropdownMenu.Portal>
                     </DropdownMenu.Root>
@@ -192,7 +201,7 @@ export const ActionBar: FC = () => {
                             </button>
                         )}
                         {settings.enableWatchMode && watchModeCountdown !== null && !isProcessing && (
-                            <div className="v-watch-mode-timer">({watchModeCountdown}s)</div>
+                            <div className="v-watch-mode-timer" title="Time until next auto-save">({watchModeCountdown}s)</div>
                         )}
                     </div>
                 </div>

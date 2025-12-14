@@ -401,3 +401,33 @@
     width: 100%;
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
+
+/* --- Settings Tab Navigation --- */
+.v-settings-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--background-modifier-border);
+    margin-bottom: var(--size-4-4);
+    gap: var(--size-4-4);
+}
+
+.v-settings-tab {
+    padding: var(--size-4-2) var(--size-4-1);
+    cursor: pointer;
+    color: var(--text-muted);
+    font-weight: var(--font-medium);
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s ease;
+    background: none;
+    border-top: none;
+    border-left: none;
+    border-right: none;
+}
+
+.v-settings-tab:hover {
+    color: var(--text-normal);
+}
+
+.v-settings-tab.is-active {
+    color: var(--text-normal);
+    border-bottom-color: var(--interactive-accent);
+}

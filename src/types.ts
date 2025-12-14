@@ -1,5 +1,5 @@
 import type { TFile } from "obsidian";
-import { z } from "zod";
+import type * as v from "valibot";
 import type {
     VersionControlSettingsSchema,
     HistorySettingsSchema,
@@ -18,23 +18,23 @@ import type {
     TimelineSettingsSchema,
 } from "./schemas";
 
-// --- Inferred Types from Zod Schemas ---
+// --- Inferred Types from Valibot Schemas ---
 
-export type VersionControlSettings = z.infer<typeof VersionControlSettingsSchema>;
-export type HistorySettings = z.infer<typeof HistorySettingsSchema>;
-export type NoteEntry = z.infer<typeof NoteEntrySchema>;
-export type CentralManifest = z.infer<typeof CentralManifestSchema>;
-export type BranchState = z.infer<typeof BranchStateSchema>;
-export type Branch = z.infer<typeof BranchSchema>;
-export type NoteManifest = z.infer<typeof NoteManifestSchema>;
-export type VersionData = z.infer<typeof VersionDataSchema>;
-export type VersionHistoryEntry = z.infer<typeof VersionHistoryEntrySchema>;
-export type AppError = z.infer<typeof AppErrorSchema>;
-export type DiffType = z.infer<typeof DiffTypeSchema>;
-export type DiffTarget = z.infer<typeof DiffTargetSchema>;
-export type Change = z.infer<typeof ChangeSchema>;
-export type DiffRequest = z.infer<typeof DiffRequestSchema>;
-export type TimelineSettings = z.infer<typeof TimelineSettingsSchema>;
+export type VersionControlSettings = v.InferOutput<typeof VersionControlSettingsSchema>;
+export type HistorySettings = v.InferOutput<typeof HistorySettingsSchema>;
+export type NoteEntry = v.InferOutput<typeof NoteEntrySchema>;
+export type CentralManifest = v.InferOutput<typeof CentralManifestSchema>;
+export type BranchState = v.InferOutput<typeof BranchStateSchema>;
+export type Branch = v.InferOutput<typeof BranchSchema>;
+export type NoteManifest = v.InferOutput<typeof NoteManifestSchema>;
+export type VersionData = v.InferOutput<typeof VersionDataSchema>;
+export type VersionHistoryEntry = v.InferOutput<typeof VersionHistoryEntrySchema>;
+export type AppError = v.InferOutput<typeof AppErrorSchema>;
+export type DiffType = v.InferOutput<typeof DiffTypeSchema>;
+export type DiffTarget = v.InferOutput<typeof DiffTargetSchema>;
+export type Change = v.InferOutput<typeof ChangeSchema>;
+export type DiffRequest = v.InferOutput<typeof DiffRequestSchema>;
+export type TimelineSettings = v.InferOutput<typeof TimelineSettingsSchema>;
 
 // --- Other Types ---
 
@@ -69,8 +69,10 @@ export interface CompressionWorkerApi {
      * Compresses content using GZIP.
      * Accepts string or ArrayBuffer.
      * Returns ArrayBuffer (GZIP binary) via transfer.
+     * @param content The content to compress.
+     * @param level Compression level (0-9). Default is 9.
      */
-    compress(content: string | ArrayBuffer): Promise<ArrayBuffer>;
+    compress(content: string | ArrayBuffer, level?: number): Promise<ArrayBuffer>;
 
     /**
      * Decompresses GZIP content.
@@ -78,19 +80,27 @@ export interface CompressionWorkerApi {
      * Returns string.
      */
     decompress(content: ArrayBuffer): Promise<string>;
+
+    /**
+     * Creates a ZIP archive from multiple files.
+     * @param files Map of filename to content (string or ArrayBuffer).
+     * @param level Compression level (0-9). Default is 9.
+     * @returns ArrayBuffer (ZIP binary) via transfer.
+     */
+    createZip(files: Record<string, string | ArrayBuffer>, level?: number): Promise<ArrayBuffer>;
 }
 
 /**
  * Defines the API exposed by the timeline web worker.
  * Handles both IndexedDB interactions and diff computation for timeline events.
- * 
- * Note: Data-heavy methods return ArrayBuffer (serialized JSON) to allow 
+ *
+ * Note: Data-heavy methods return ArrayBuffer (serialized JSON) to allow
  * zero-copy transfer of ownership from worker to main thread.
  */
 export interface TimelineWorkerApi {
     /** Returns ArrayBuffer containing serialized TimelineEvent[] */
     getTimeline(noteId: string, branchName: string, source: 'version' | 'edit'): Promise<ArrayBuffer>;
-    
+
     /** Returns ArrayBuffer containing serialized TimelineEvent */
     generateAndStoreEvent(
         noteId: string,
@@ -135,12 +145,14 @@ export interface EditWorkerApi {
     getEditContent(noteId: string, branchName: string, editId: string): Promise<ArrayBuffer | null>;
 
     getEditManifest(noteId: string): Promise<NoteManifest | null>;
-    
+
     saveEditManifest(noteId: string, manifest: NoteManifest): Promise<void>;
 
     deleteEdit(noteId: string, branchName: string, editId: string): Promise<void>;
-    
+
     deleteNoteHistory(noteId: string): Promise<void>;
+
+    deleteBranch(noteId: string, branchName: string): Promise<void>;
 
     renameEdit(noteId: string, oldEditId: string, newEditId: string): Promise<void>;
 
@@ -173,7 +185,7 @@ export interface TimelineEvent {
     timestamp: string; // ISO string of the 'toVersion'
     diffData: Change[];
     stats: TimelineStats;
-    
+
     // Metadata for display
     toVersionName?: string;
     toVersionNumber: number;

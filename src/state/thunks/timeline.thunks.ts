@@ -1,14 +1,15 @@
-import type { AppThunk } from '../store';
-import { actions } from '../appSlice';
-import { AppStatus } from '../state';
-import { TimelineManager } from '../../core/timeline-manager';
-import { ManifestManager } from '../../core/manifest-manager';
-import { EditHistoryManager } from '../../core/edit-history-manager';
-import { UIService } from '../../services/ui-service';
-import { TYPES } from '../../types/inversify.types';
-import { isPluginUnloading } from '../utils/settingsUtils';
-import type { TimelineSettings } from '../../types';
-import { TimelineSettingsSchema } from '../../schemas';
+import type { AppThunk } from '@/state';
+import * as v from 'valibot';
+import { appSlice } from '@/state';
+import { AppStatus } from '@/state';
+import { TimelineManager } from '@/core';
+import { ManifestManager } from '@/core';
+import { EditHistoryManager } from '@/core';
+import { UIService } from '@/services';
+import { TYPES } from '@/types/inversify.types';
+import { isPluginUnloading } from '@/state/utils/settingsUtils';
+import type { TimelineSettings } from '@/types';
+import { TimelineSettingsSchema } from '@/schemas';
 
 /**
  * Thunks related to the Timeline feature.
@@ -30,7 +31,7 @@ export const openTimeline = (): AppThunk => async (dispatch, getState, container
     const source = viewMode === 'versions' ? 'version' : 'edit';
 
     // Load settings from correct manifest based on view mode
-    let settings: TimelineSettings = TimelineSettingsSchema.parse({});
+    let settings: TimelineSettings = v.parse(TimelineSettingsSchema, {});
     try {
         if (source === 'version') {
             const manifest = await manifestManager.loadNoteManifest(noteId);
@@ -54,7 +55,7 @@ export const openTimeline = (): AppThunk => async (dispatch, getState, container
     }
 
     // Open the panel in loading state with settings
-    dispatch(actions.openPanel({ type: 'timeline', events: null, settings }));
+    dispatch(appSlice.actions.openPanel({ type: 'timeline', events: null, settings }));
 
     const timelineManager = container.get<TimelineManager>(TYPES.TimelineManager);
 
@@ -67,11 +68,11 @@ export const openTimeline = (): AppThunk => async (dispatch, getState, container
             return;
         }
 
-        dispatch(actions.setTimelineData(events));
+        dispatch(appSlice.actions.setTimelineData(events));
     } catch (error) {
         console.error("VC: Failed to load timeline.", error);
         uiService.showNotice("Failed to load timeline. Check console.");
-        dispatch(actions.closePanel());
+        dispatch(appSlice.actions.closePanel());
     }
 };
 
@@ -91,7 +92,7 @@ export const updateTimelineSettings = (newSettings: Partial<TimelineSettings>): 
     const updatedSettings = { ...currentSettings, ...newSettings };
 
     // Update UI immediately
-    dispatch(actions.setTimelineSettings(updatedSettings));
+    dispatch(appSlice.actions.setTimelineSettings(updatedSettings));
 
     // Persist to manifest based on source
     try {

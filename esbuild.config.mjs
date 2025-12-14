@@ -8,6 +8,46 @@ import { promisify } from "util";
 const execAsync = promisify(exec);
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 
+// Plugin to resolve @/ path alias to src/
+const aliasPlugin = {
+  name: 'alias-resolver',
+  setup(build) {
+    // Resolve @/* imports to src/*
+    build.onResolve({ filter: /^@\// }, (args) => {
+      const resolvedPath = path.resolve(__dirname, 'src', args.path.slice(2));
+
+      // Try to resolve the path with different extensions
+      const extensions = ['.ts', '.tsx', '.js', '.jsx'];
+
+      // First, check if the path exists as-is (with extension already)
+      if (fileExists(resolvedPath)) {
+        return { path: resolvedPath };
+      }
+
+      // Try adding extensions
+      for (const ext of extensions) {
+        const pathWithExt = resolvedPath + ext;
+        if (fileExists(pathWithExt)) {
+          return { path: pathWithExt };
+        }
+      }
+
+      // Try index files for directory imports
+      if (fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isDirectory()) {
+        for (const ext of extensions) {
+          const indexPath = path.join(resolvedPath, 'index' + ext);
+          if (fileExists(indexPath)) {
+            return { path: indexPath };
+          }
+        }
+      }
+
+      // Fallback to the resolved path (might fail later)
+      return { path: resolvedPath };
+    });
+  }
+};
+
 // Production mode by default, development only with explicit flag
 const isDevelopment = process.argv.includes("--development");
 const banner = `/*
@@ -24,17 +64,6 @@ const fileExists = (filePath) => {
   }
 };
 
-// Plugin to resolve zod/v4/core for @hookform/resolvers compatibility
-const zodAliasPlugin = {
-  name: 'zod-alias',
-  setup(build) {
-    build.onResolve({ filter: /^zod\/v4\/core$/ }, () => {
-      return { 
-        path: path.resolve(__dirname, 'node_modules', 'zod', 'v4', 'core', 'index.cjs') 
-      };
-    });
-  },
-};
 
 // Plugin to prevent Node.js modules
 const preventNodeModulesPlugin = {
@@ -67,6 +96,14 @@ async function buildWorkerCode(entryPoint) {
     platform: "browser", // Browser by default
     format: 'iife', // self-contained immediate-invoked function expression
     write: false,  // output to memory instead of a file
+    // Support for TypeScript decorators
+    tsconfigRaw: {
+      compilerOptions: {
+        experimentalDecorators: true,
+        emitDecoratorMetadata: true,
+        useDefineForClassFields: true,
+      },
+    },
     // Ensure no development code gets bundled
     define: {
       "process.env.NODE_ENV": JSON.stringify(isDevelopment ? "development" : "production"),
@@ -85,7 +122,7 @@ async function buildWorkerCode(entryPoint) {
     // Mark Node.js packages as external
 //    packages: "external",
     // Add plugins for worker builds too
-    plugins: [zodAliasPlugin, preventNodeModulesPlugin],
+    plugins: [aliasPlugin, preventNodeModulesPlugin],
   });
 
   if (result.outputFiles && result.outputFiles.length > 0) {
@@ -101,11 +138,11 @@ async function buildWorkerCode(entryPoint) {
 async function createBuildOptions() {
   // 1. Build the workers and get their code as strings.
   const diffWorkerCode = await buildWorkerCode('src/workers/diff.worker.ts');
-  const timelineWorkerCode = await buildWorkerCode('src/workers/timeline.worker.ts');
-  const editHistoryWorkerCode = await buildWorkerCode('src/workers/edit-history.worker.ts');
+  const timelineWorkerCode = await buildWorkerCode('src/workers/timeline/index.ts');
+  const editHistoryWorkerCode = await buildWorkerCode('src/workers/edit-history/index.ts');
   const compressionWorkerCode = await buildWorkerCode('src/workers/compression.worker.ts');
 
-  const entryPoints = ["src/main.ts"];
+  const entryPoints = ["src/main/index.ts"];
   if (fileExists("src/styles.css")) {
     entryPoints.push("src/styles.css");
   }
@@ -125,6 +162,20 @@ async function createBuildOptions() {
     minifyIdentifiers: !isDevelopment,
     minifySyntax: !isDevelopment,
     outdir: ".",
+    // JSX configuration for React 17+ automatic runtime
+    jsx: "automatic",
+    loader: {
+      '.tsx': 'tsx',
+      '.ts': 'ts',
+    },
+    // Support for TypeScript decorators
+    tsconfigRaw: {
+      compilerOptions: {
+        experimentalDecorators: true,
+        emitDecoratorMetadata: true,
+        useDefineForClassFields: true,
+      },
+    },
     // 2. Define the global constants. `JSON.stringify` ensures the code is correctly
     // escaped and wrapped in quotes to be a valid string in the final bundle.
     define: {
@@ -152,7 +203,7 @@ async function createBuildOptions() {
     // Ensure no Node.js polyfills are included
     inject: [],
     // Add both plugins
-    plugins: [zodAliasPlugin, preventNodeModulesPlugin],
+    plugins: [aliasPlugin, preventNodeModulesPlugin],
   };
 
   return buildOptions;

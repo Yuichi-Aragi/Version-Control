@@ -1,19 +1,20 @@
 import { memo, useCallback } from 'react';
-import { isEqual } from 'lodash-es';
-import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
-import { AppStatus } from '../../../state/state';
-import { thunks } from '../../../state/thunks';
+import { isEqual } from 'es-toolkit';
+import { useAppDispatch, useAppSelector } from '@/ui/hooks';
+import { AppStatus } from '@/state';
+import { thunks } from '@/state';
 import { SettingsAction } from './SettingsAction';
 import { IsGlobalSetting } from './setting-controls/IsGlobalSetting';
 import { NoteSettingsControls } from './setting-controls/NoteSettingsControls';
 
 export const NoteSpecificSettings: React.FC = memo(() => {
     const dispatch = useAppDispatch();
-    const { status, file, noteId, history, isGlobal, viewMode } = useAppSelector(state => ({
+    const { status, file, noteId, history, editHistory, isGlobal, viewMode } = useAppSelector(state => ({
         status: state.status,
         file: state.file,
         noteId: state.noteId,
         history: state.history,
+        editHistory: state.editHistory,
         isGlobal: state.effectiveSettings.isGlobal,
         viewMode: state.viewMode,
     }), isEqual);
@@ -33,10 +34,11 @@ export const NoteSpecificSettings: React.FC = memo(() => {
     }, [dispatch, noteId]);
     
     const handleDeleteAll = useCallback(() => {
-        if (noteId && history.length > 0) {
+        const hasItems = viewMode === 'versions' ? history.length > 0 : editHistory.length > 0;
+        if (noteId && hasItems) {
             dispatch(thunks.requestDeleteAll());
         }
-    }, [dispatch, noteId, history.length]);
+    }, [dispatch, noteId, history.length, editHistory.length, viewMode]);
     
     const handleViewChangelog = useCallback(() => {
         dispatch(thunks.showChangelogPanel({ forceRefresh: true }));
@@ -53,6 +55,8 @@ export const NoteSpecificSettings: React.FC = memo(() => {
     if (status !== AppStatus.READY || !file) return null;
     const areControlsDisabled = !noteId;
     const modeLabel = viewMode === 'versions' ? 'Version History' : 'Edit History';
+    const deleteLabel = viewMode === 'versions' ? 'Delete all versions' : 'Delete all edits';
+    const hasItems = viewMode === 'versions' ? history.length > 0 : editHistory.length > 0;
 
     return (
         <>
@@ -71,11 +75,11 @@ export const NoteSpecificSettings: React.FC = memo(() => {
                     
                     {/* Destructive Action - Bottom Row (Full Width) */}
                     <SettingsAction 
-                        text="Delete all versions" 
+                        text={deleteLabel}
                         icon="trash-2" 
                         onClick={handleDeleteAll} 
                         isWarning 
-                        disabled={!noteId || history.length === 0} 
+                        disabled={!noteId || !hasItems} 
                     />
                 </div>
             </div>

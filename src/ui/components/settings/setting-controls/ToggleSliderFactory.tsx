@@ -1,20 +1,21 @@
 import { memo, useCallback, type FC } from 'react';
-import { isEqual } from 'lodash-es';
-import { useAppDispatch, useAppSelector } from '../../../hooks/useRedux';
-import { thunks } from '../../../../state/thunks';
-import type { HistorySettings } from '../../../../types';
-import { SettingComponent } from '../../SettingComponent';
-import { validateNumber } from '../settingsUtils';
-import { SliderWithInputControl } from '../controls/SliderWithInputControl';
+import { isEqual } from 'es-toolkit';
+import { useAppDispatch, useAppSelector } from '@/ui/hooks';
+import { thunks } from '@/state';
+import type { HistorySettings, ViewMode } from '@/types';
+import { SettingComponent } from '@/ui/components';
+import { validateNumber } from '@/ui/components/settings/utils';
+import { SliderWithInputControl } from '@/ui/components/settings/controls';
 
 type Unit = 'seconds' | 'days' | 'lines';
+type TextResolver = string | ((mode: ViewMode) => string);
 
 interface ToggleSliderConfig {
-    toggleName: string;
-    toggleDesc: string;
+    toggleName: TextResolver;
+    toggleDesc: TextResolver;
     toggleKey: keyof HistorySettings;
-    sliderName: string;
-    sliderDesc: (currentValue: number) => string;
+    sliderName: TextResolver;
+    sliderDesc: (currentValue: number, mode: ViewMode) => string;
     sliderKey: keyof HistorySettings;
     min: number;
     max: number;
@@ -23,6 +24,9 @@ interface ToggleSliderConfig {
     placeholder: string;
 }
 
+const resolveText = (text: TextResolver, mode: ViewMode) => 
+    typeof text === 'function' ? text(mode) : text;
+
 /**
  * Factory function to create toggle+slider setting components.
  */
@@ -30,9 +34,10 @@ export const createToggleSliderSetting = (config: ToggleSliderConfig): FC<{ disa
     const Component = memo(({ disabled }: { disabled: boolean }) => {
         const dispatch = useAppDispatch();
         
-        const { enabled, value } = useAppSelector(state => ({
+        const { enabled, value, viewMode } = useAppSelector(state => ({
             enabled: !!state.effectiveSettings[config.toggleKey],
             value: state.effectiveSettings[config.sliderKey] as number,
+            viewMode: state.viewMode,
         }), isEqual);
         
         const handleToggle = useCallback((v: boolean) => {
@@ -44,25 +49,30 @@ export const createToggleSliderSetting = (config: ToggleSliderConfig): FC<{ disa
                 const validatedValue = validateNumber(v, config.min, config.max);
                 dispatch(thunks.updateSettings({ [config.sliderKey]: validatedValue } as Partial<HistorySettings>));
             } catch (error) {
-                console.error(`Invalid ${config.sliderName.toLowerCase()} value:`, error);
+                console.error(`Invalid value:`, error);
             }
         }, [dispatch]);
+
+        const resolvedToggleName = resolveText(config.toggleName, viewMode);
+        const resolvedToggleDesc = resolveText(config.toggleDesc, viewMode);
+        const resolvedSliderName = resolveText(config.sliderName, viewMode);
+        const resolvedSliderDesc = config.sliderDesc(value, viewMode);
         
         return (
             <>
-                <SettingComponent name={config.toggleName} desc={config.toggleDesc}>
+                <SettingComponent name={resolvedToggleName} desc={resolvedToggleDesc}>
                     <input 
                         type="checkbox" 
                         checked={enabled} 
                         onChange={e => handleToggle(e.target.checked)} 
                         disabled={disabled}
-                        aria-label={`Toggle ${config.toggleName.toLowerCase()}`}
+                        aria-label={`Toggle ${resolvedToggleName.toLowerCase()}`}
                     />
                 </SettingComponent>
                 {enabled && (
                     <SettingComponent 
-                        name={config.sliderName} 
-                        desc={config.sliderDesc(value)}
+                        name={resolvedSliderName} 
+                        desc={resolvedSliderDesc}
                     >
                         <SliderWithInputControl
                             min={config.min} 

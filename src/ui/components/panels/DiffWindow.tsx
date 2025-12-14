@@ -1,11 +1,11 @@
 import { type FC, useEffect, useRef, useState, useLayoutEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import clsx from 'clsx';
-import { useAppDispatch } from '../../hooks/useRedux';
-import { actions } from '../../../state/appSlice';
+import { useAppDispatch } from '@/ui/hooks';
+import { appSlice } from '@/state';
 import { DiffPanel } from './DiffPanel';
-import type { DiffPanel as DiffPanelState } from '../../../state/state';
-import { Icon } from '../Icon';
+import type { DiffPanel as DiffPanelState } from '@/state';
+import { Icon } from '@/ui/components';
 
 interface DiffWindowProps {
     panelState: DiffPanelState;
@@ -105,7 +105,7 @@ export const DiffWindow: FC<DiffWindowProps> = ({ panelState }) => {
     }, []);
 
     const handleClose = useCallback(() => {
-        dispatch(actions.closePanel());
+        dispatch(appSlice.actions.closePanel());
     }, [dispatch]);
 
     const handleToggleResizeMode = useCallback(() => {

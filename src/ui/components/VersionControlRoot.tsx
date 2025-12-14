@@ -1,17 +1,17 @@
 import clsx from 'clsx';
 import { type FC, useCallback, useState, useRef, useLayoutEffect } from 'react';
-import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
-import { AppStatus } from '../../state/state';
-import { Placeholder } from './Placeholder';
+import { useAppDispatch, useAppSelector } from '@/ui/hooks';
+import { AppStatus } from '@/state';
+import { Placeholder } from '@/ui/components';
 import { ErrorDisplay } from './ErrorDisplay';
 import { ActionBar } from './ActionBar';
 import { HistoryList } from './HistoryList';
 import { PanelContainer } from './panels/PanelContainer';
 import { SettingsPanel } from './SettingsPanel';
 import { DiffWindow } from './panels/DiffWindow';
-import { thunks } from '../../state/thunks';
-import { Icon } from './Icon';
-import { HistoryListHeader } from './HistoryListHeader';
+import { thunks } from '@/state';
+import { Icon } from '@/ui/components';
+import { HistoryListHeader } from '@/ui/components';
 
 export const VersionControlRoot: FC = () => {
     const dispatch = useAppDispatch();

@@ -1,9 +1,9 @@
 import { MarkdownRenderer, Component } from 'obsidian';
 import { type FC, useRef, useLayoutEffect } from 'react';
-import type { ChangelogPanel as ChangelogPanelState } from '../../../state/state';
-import { Icon } from '../Icon';
-import { useApp } from '../../AppContext';
-import { usePanelClose } from '../../hooks/usePanelClose';
+import type { ChangelogPanel as ChangelogPanelState } from '@/state';
+import { Icon } from '@/ui/components';
+import { useApp } from '@/ui/AppContext';
+import { usePanelClose } from '@/ui/hooks';
 
 interface ChangelogPanelProps {
     panelState: ChangelogPanelState;

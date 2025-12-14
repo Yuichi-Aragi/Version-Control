@@ -1,55 +1,67 @@
 import { memo, useCallback } from 'react';
-import { useAppDispatch, useAppSelector } from '../../../hooks/useRedux';
-import { thunks } from '../../../../state/thunks';
-import type { HistorySettings } from '../../../../types';
-import { SettingComponent } from '../../SettingComponent';
+import { useAppDispatch, useAppSelector } from '@/ui/hooks';
+import { thunks } from '@/state';
+import type { HistorySettings, ViewMode } from '@/types';
+import { SettingComponent } from '@/ui/components';
 
-const createToggleSetting = (name: string, desc: string, settingKey: keyof HistorySettings) => 
+type TextResolver = string | ((mode: ViewMode) => string);
+
+const resolveText = (text: TextResolver, mode: ViewMode) => 
+    typeof text === 'function' ? text(mode) : text;
+
+const createToggleSetting = (name: TextResolver, desc: TextResolver, settingKey: keyof HistorySettings) => 
     memo(({ disabled }: { disabled: boolean }) => {
         const dispatch = useAppDispatch();
-        // Read from effectiveSettings
-        const isEnabled = useAppSelector(state => !!state.effectiveSettings[settingKey]);
+        // Read from effectiveSettings and viewMode
+        const { isEnabled, viewMode } = useAppSelector(state => ({
+            isEnabled: !!state.effectiveSettings[settingKey],
+            viewMode: state.viewMode
+        }));
+        
         const handleToggle = useCallback((val: boolean) => {
             dispatch(thunks.updateSettings({ [settingKey]: val } as Partial<HistorySettings>));
         }, [dispatch, settingKey]);
         
+        const resolvedName = resolveText(name, viewMode);
+        const resolvedDesc = resolveText(desc, viewMode);
+        
         return (
-            <SettingComponent name={name} desc={desc}>
+            <SettingComponent name={resolvedName} desc={resolvedDesc}>
                 <input 
                     type="checkbox" 
                     checked={isEnabled} 
                     onChange={e => handleToggle(e.target.checked)} 
                     disabled={disabled}
-                    aria-label={`Toggle ${name.toLowerCase()}`}
+                    aria-label={`Toggle ${resolvedName.toLowerCase()}`}
                 />
             </SettingComponent>
         );
     });
 
 export const EnableNamingSetting = createToggleSetting(
-    'Enable version naming', 
-    'If enabled, prompts for a version name when saving a new version.', 
+    (mode) => `Enable ${mode === 'versions' ? 'version' : 'edit'} naming`,
+    (mode) => `If enabled, prompts for a ${mode === 'versions' ? 'version' : 'edit'} name when saving a new ${mode === 'versions' ? 'version' : 'edit'}.`,
     'enableVersionNaming'
 );
 EnableNamingSetting.displayName = 'EnableNamingSetting';
 
 export const EnableDescriptionSetting = createToggleSetting(
-    'Enable version description',
-    'If enabled, prompts for a version description when saving a new version.',
+    (mode) => `Enable ${mode === 'versions' ? 'version' : 'edit'} description`,
+    (mode) => `If enabled, prompts for a description when saving a new ${mode === 'versions' ? 'version' : 'edit'}.`,
     'enableVersionDescription'
 );
 EnableDescriptionSetting.displayName = 'EnableDescriptionSetting';
 
 export const ShowDescriptionInListSetting = createToggleSetting(
     'Show description in list',
-    'If enabled, displays the version description in the history list instead of action buttons.',
+    (mode) => `If enabled, displays the ${mode === 'versions' ? 'version' : 'edit'} description in the history list instead of action buttons.`,
     'showDescriptionInList'
 );
 ShowDescriptionInListSetting.displayName = 'ShowDescriptionInListSetting';
 
 export const ListViewSetting = createToggleSetting(
     'Compact list view', 
-    'Display version history as a compact list. Otherwise, shows as cards.', 
+    (mode) => `Display ${mode === 'versions' ? 'version' : 'edit'} history as a compact list. Otherwise, shows as cards.`, 
     'isListView'
 );
 ListViewSetting.displayName = 'ListViewSetting';
@@ -63,7 +75,7 @@ RelativeTimestampSetting.displayName = 'RelativeTimestampSetting';
 
 export const RenderMarkdownSetting = createToggleSetting(
     'Render markdown in preview', 
-    'If enabled, version previews will render markdown. Otherwise, plain text.', 
+    (mode) => `If enabled, ${mode === 'versions' ? 'version' : 'edit'} previews will render markdown. Otherwise, plain text.`, 
     'renderMarkdownInPreview'
 );
 RenderMarkdownSetting.displayName = 'RenderMarkdownSetting';

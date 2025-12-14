@@ -1,11 +1,11 @@
 import type { FC } from 'react';
 import { useRef } from 'react';
-import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
-import { AppStatus } from '../../../state/state';
-import type { ConfirmationPanel as ConfirmationPanelState } from '../../../state/state';
-import { usePanelClose } from '../../hooks/usePanelClose';
-import { useBackdropClick } from '../../hooks/useBackdropClick';
-import { useDelayedFocus } from '../../hooks/useDelayedFocus';
+import { useAppDispatch, useAppSelector } from '@/ui/hooks';
+import { AppStatus } from '@/state';
+import type { ConfirmationPanel as ConfirmationPanelState } from '@/state';
+import { usePanelClose } from '@/ui/hooks';
+import { useBackdropClick } from '@/ui/hooks';
+import { useDelayedFocus } from '@/ui/hooks';
 import { useCallback } from 'react';
 
 interface ConfirmationPanelProps {

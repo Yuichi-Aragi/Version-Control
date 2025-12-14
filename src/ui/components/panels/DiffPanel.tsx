@@ -5,15 +5,15 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
 import type { VirtuosoHandle, ListRange } from 'react-virtuoso';
 import clsx from 'clsx';
-import { useAppDispatch } from '../../hooks/useRedux';
-import { thunks } from '../../../state/thunks';
-import type { DiffPanel as DiffPanelState } from '../../../state/state';
-import type { Change, DiffType } from '../../../types';
-import { Icon } from '../Icon';
-import { VirtualizedDiff, processLineChanges, type DiffLineData } from '../shared/VirtualizedDiff';
-import { escapeRegExp } from '../../utils/strings';
-import { usePanelClose } from '../../hooks/usePanelClose';
-import { usePanelSearch } from '../../hooks/usePanelSearch';
+import { useAppDispatch } from '@/ui/hooks';
+import { thunks } from '@/state';
+import type { DiffPanel as DiffPanelState } from '@/state';
+import type { Change, DiffType } from '@/types';
+import { Icon } from '@/ui/components';
+import { VirtualizedDiff, processLineChanges, type DiffLineData } from '@/ui/components/shared/VirtualizedDiff';
+import { escapeRegExp } from '@/ui/utils/strings';
+import { usePanelClose } from '@/ui/hooks';
+import { usePanelSearch } from '@/ui/hooks';
 
 interface DiffPanelProps {
     panelState: DiffPanelState;

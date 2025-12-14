@@ -1,6 +1,6 @@
 import { type FC, useEffect, useRef, memo, useState, useCallback, useMemo, type ChangeEvent } from 'react';
 import { debounce, type Debouncer } from 'obsidian';
-import { validateString } from '../settingsUtils';
+import { validateString } from '@/ui/components/settings/utils';
 
 interface DebouncedTextareaProps {
     initialValue: string; 

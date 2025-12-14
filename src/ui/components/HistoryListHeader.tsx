@@ -1,9 +1,9 @@
 import clsx from 'clsx';
 import type { FC } from 'react';
 import { useMemo, useCallback } from 'react';
-import { AppStatus } from '../../state/state';
-import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
-import { thunks } from '../../state/thunks';
+import { AppStatus } from '@/state';
+import { useAppDispatch, useAppSelector } from '@/ui/hooks';
+import { thunks } from '@/state';
 
 interface HistoryListHeaderProps {
     status: AppStatus;

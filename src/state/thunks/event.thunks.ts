@@ -1,15 +1,15 @@
 import { TFile, type CachedMetadata, debounce } from 'obsidian';
-import type { AppThunk } from '../store';
-import { actions } from '../appSlice';
-import { AppStatus } from '../state';
-import { NoteManager } from '../../core/note-manager';
-import { ManifestManager } from '../../core/manifest-manager';
-import { TYPES } from '../../types/inversify.types';
-import { isPluginUnloading, resolveSettings } from '../utils/settingsUtils';
-import type VersionControlPlugin from '../../main';
+import type { AppThunk } from '@/state';
+import { appSlice } from '@/state';
+import { AppStatus } from '@/state';
+import { NoteManager } from '@/core';
+import { ManifestManager } from '@/core';
+import { TYPES } from '@/types/inversify.types';
+import { isPluginUnloading, resolveSettings } from '@/state/utils/settingsUtils';
+import type VersionControlPlugin from '@/main';
 import { initializeView } from './core.thunks';
-import { performAutoSave } from './version.thunks';
-import { saveNewEdit } from './edit-history.thunks';
+import { performAutoSave } from '@/state/thunks/version';
+import { saveNewEdit } from '@/state/thunks/edit-history';
 
 /**
  * Thunks related to handling application and vault events.
@@ -130,7 +130,7 @@ export const handleFileDelete = (file: TFile): AppThunk => async (dispatch, getS
 
     const state = getState();
     if (state.file?.path === file.path || (deletedNoteId && state.noteId === deletedNoteId)) {
-        dispatch(actions.clearActiveNote()); 
+        dispatch(appSlice.actions.clearActiveNote()); 
     }
 };
 

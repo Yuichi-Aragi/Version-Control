@@ -1,8 +1,8 @@
 import { useMemo, type FC, type Ref, useEffect, useRef, useLayoutEffect } from 'react';
 import { Virtuoso, type VirtuosoHandle, type ListRange } from 'react-virtuoso';
-import type { Change, DiffType } from '../../../types';
+import type { Change, DiffType } from '@/types';
 import clsx from 'clsx';
-import { HighlightedText } from './HighlightedText';
+import { HighlightedText } from '@/ui/components/shared';
 
 export interface DiffLineSegment {
     text: string;

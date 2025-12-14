@@ -1,11 +1,11 @@
 import clsx from 'clsx';
 import { type FC, useEffect, useRef, memo, useCallback } from 'react';
-import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
-import { thunks } from '../../state/thunks';
+import { useAppDispatch, useAppSelector } from '@/ui/hooks';
+import { thunks } from '@/state';
 import { GlobalSettings } from './settings/GlobalSettings';
 import { NoteSpecificSettings } from './settings/NoteSpecificSettings';
-import { Icon } from './Icon';
-import { actions } from '../../state/appSlice';
+import { Icon } from '@/ui/components';
+import { appSlice } from '@/state';
 
 const AUTO_CLOSE_DELAY_MS = 30000;
 
@@ -62,7 +62,7 @@ const SettingsPanelComponent: FC = () => {
                 <button 
                     className="clickable-icon v-panel-close" 
                     aria-label="Close settings" 
-                    onClick={() => dispatch(actions.closePanel())}
+                    onClick={() => dispatch(appSlice.actions.closePanel())}
                 >
                     <Icon name="x" />
                 </button>

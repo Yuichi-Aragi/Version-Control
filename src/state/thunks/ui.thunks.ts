@@ -1,22 +1,22 @@
 import { App, TFolder, TFile } from 'obsidian';
 import type { Container } from 'inversify';
-import type { AppThunk, AppStore } from '../store';
-import { actions } from '../appSlice';
-import type { VersionHistoryEntry, ViewMode } from '../../types';
-import { AppStatus, type ActionItem, type SortOrder, type SortProperty, type SortDirection } from '../state';
-import { CHANGELOG_URL } from '../../constants';
+import type { AppThunk, AppStore } from '@/state';
+import { appSlice } from '@/state';
+import type { VersionHistoryEntry, ViewMode } from '@/types';
+import { AppStatus, type ActionItem, type SortOrder, type SortProperty, type SortDirection } from '@/state';
+import { CHANGELOG_URL } from '@/constants';
 import { loadEffectiveSettingsForNote, loadHistoryForNoteId } from './core.thunks';
-import { UIService } from '../../services/ui-service';
-import { VersionManager } from '../../core/version-manager';
-import { EditHistoryManager } from '../../core/edit-history-manager';
-import { TYPES } from '../../types/inversify.types';
-import { isPluginUnloading } from '../utils/settingsUtils';
-import { versionActions } from '../../ui/VersionActions';
-import { editActions } from '../../ui/EditActions';
-import type VersionControlPlugin from '../../main';
-import { requestWithRetry } from '../../utils/network';
-import { loadEditHistory } from './edit-history.thunks';
-import { createBranch, switchBranch } from './version.thunks';
+import { UIService } from '@/services';
+import { VersionManager } from '@/core';
+import { EditHistoryManager } from '@/core';
+import { TYPES } from '@/types/inversify.types';
+import { isPluginUnloading } from '@/state/utils/settingsUtils';
+import { versionActions } from '@/ui/VersionActions';
+import { editActions } from '@/ui/EditActions';
+import type VersionControlPlugin from '@/main';
+import { requestWithRetry } from '@/utils/network';
+import { loadEditHistory } from '@/state/thunks/edit-history';
+import { createBranch, switchBranch, requestDeleteBranch } from '@/state/thunks/version';
 
 /**
  * Thunks related to UI interactions, such as opening panels, tabs, and modals.
@@ -59,10 +59,10 @@ export const toggleViewMode = (): AppThunk => async (dispatch, getState, contain
         ? plugin.settings.versionHistorySettings 
         : plugin.settings.editHistorySettings;
     
-    dispatch(actions.updateEffectiveSettings({ ...globalDefaults, isGlobal: true }));
+    dispatch(appSlice.actions.updateEffectiveSettings({ ...globalDefaults, isGlobal: true }));
 
     // 2. Update State (This clears panel, diffRequest, etc.)
-    dispatch(actions.setViewMode(newMode));
+    dispatch(appSlice.actions.setViewMode(newMode));
 
     // 3. Load Data for New Mode
     const { noteId, file } = state;
@@ -105,7 +105,7 @@ export const showChangelogPanel = (options: { forceRefresh?: boolean; isManualRe
 
     // For manual requests, forcefully close any existing panel to ensure the changelog is visible.
     if (isManualRequest && currentState.panel) {
-        dispatch(actions.closePanel());
+        dispatch(appSlice.actions.closePanel());
     }
     
     if (isFetchingChangelog) {
@@ -116,7 +116,7 @@ export const showChangelogPanel = (options: { forceRefresh?: boolean; isManualRe
     }
 
     if (!forceRefresh && changelogCache) {
-        dispatch(actions.openPanel({ type: 'changelog', content: changelogCache }));
+        dispatch(appSlice.actions.openPanel({ type: 'changelog', content: changelogCache }));
         // If showing from cache, it's a successful display, so update version.
         await updateVersionInSettings(container);
         return;
@@ -131,7 +131,7 @@ export const showChangelogPanel = (options: { forceRefresh?: boolean; isManualRe
     }
 
     isFetchingChangelog = true;
-    dispatch(actions.openPanel({ type: 'changelog', content: null })); // Show loading state
+    dispatch(appSlice.actions.openPanel({ type: 'changelog', content: null })); // Show loading state
     if (isManualRequest) {
         uiService.showNotice("Fetching latest changelog...", 2000);
     }
@@ -149,7 +149,7 @@ export const showChangelogPanel = (options: { forceRefresh?: boolean; isManualRe
         const canShowPanelNow = isManualRequest || stateAfterFetch.panel?.type === 'changelog';
 
         if (canShowPanelNow) {
-            dispatch(actions.openPanel({ type: 'changelog', content: changelogCache }));
+            dispatch(appSlice.actions.openPanel({ type: 'changelog', content: changelogCache }));
             // The version is updated ONLY after we have successfully committed to showing the panel.
             // This is the key to preventing the "version updated but panel not shown" bug.
             await updateVersionInSettings(container);
@@ -176,7 +176,7 @@ export const showChangelogPanel = (options: { forceRefresh?: boolean; isManualRe
         
         // If the loading panel is still open, close it on failure.
         if (getState().panel?.type === 'changelog') {
-            dispatch(actions.closePanel());
+            dispatch(appSlice.actions.closePanel());
         }
     } finally {
         if (!isPluginUnloading(container)) {
@@ -224,7 +224,7 @@ export const createDeviation = (version: VersionHistoryEntry): AppThunk => async
         const versionManager = container.get<VersionManager>(TYPES.VersionManager);
         const editHistoryManager = container.get<EditHistoryManager>(TYPES.EditHistoryManager);
         
-        dispatch(actions.closePanel()); // Close the folder selection panel immediately.
+        dispatch(appSlice.actions.closePanel()); // Close the folder selection panel immediately.
 
         const latestState = getState();
         if (latestState.status !== AppStatus.READY || latestState.noteId !== version.noteId) {
@@ -255,7 +255,7 @@ export const createDeviation = (version: VersionHistoryEntry): AppThunk => async
         }
     };
 
-    dispatch(actions.openPanel({
+    dispatch(appSlice.actions.openPanel({
         type: 'action',
         title: 'Create new note in...',
         items,
@@ -293,7 +293,7 @@ export const showVersionContextMenu = (version: VersionHistoryEntry): AppThunk =
         }
     };
 
-    dispatch(actions.openPanel({
+    dispatch(appSlice.actions.openPanel({
         type: 'action',
         title: `Actions for ${titlePrefix}${version.versionNumber}`,
         items,
@@ -331,11 +331,11 @@ export const showSortMenu = (): AppThunk => (dispatch, getState, container) => {
     });
 
     const onChooseAction = (sortOrder: SortOrder): AppThunk => (dispatch) => {
-        dispatch(actions.setSortOrder(sortOrder));
-        dispatch(actions.closePanel());
+        dispatch(appSlice.actions.setSortOrder(sortOrder));
+        dispatch(appSlice.actions.closePanel());
     };
 
-    dispatch(actions.openPanel({
+    dispatch(appSlice.actions.openPanel({
         type: 'action',
         title: 'Sort by',
         items,
@@ -365,12 +365,29 @@ export const showBranchSwitcher = (): AppThunk => (dispatch, getState) => {
         dispatch(createBranch(newBranchName));
     };
 
-    dispatch(actions.openPanel({
+    const contextActions = (item: ActionItem<string>): ActionItem<string>[] => {
+        // Prevent context menu on the special "Create new" item
+        if (item.id === '__create__') return [];
+        
+        return [
+            { id: 'delete', data: 'delete', text: 'Delete Branch', icon: 'trash' }
+        ];
+    };
+
+    const onContextAction = (actionId: string, branchName: string): AppThunk => (dispatch) => {
+        if (actionId === 'delete') {
+            dispatch(requestDeleteBranch(branchName));
+        }
+    };
+
+    dispatch(appSlice.actions.openPanel({
         type: 'action',
         title: 'Switch or create branch',
         items,
         onChooseAction,
         onCreateAction,
+        contextActions,
+        onContextAction,
         showFilter: true,
     }));
 };
@@ -384,6 +401,14 @@ export const showNotice = (message: string, duration?: number): AppThunk => (_di
 export const closeSettingsPanelWithNotice = (message: string, duration?: number): AppThunk => (dispatch, _getState, container) => {
     if (isPluginUnloading(container)) return;
     const uiService = container.get<UIService>(TYPES.UIService);
-    dispatch(actions.closePanel());
+    dispatch(appSlice.actions.closePanel());
     uiService.showNotice(message, duration);
+};
+
+export const openDashboard = (): AppThunk => (dispatch, getState, container) => {
+    if (isPluginUnloading(container)) return;
+    const state = getState();
+    if (state.status !== AppStatus.READY) return;
+
+    dispatch(appSlice.actions.openPanel({ type: 'dashboard' }));
 };

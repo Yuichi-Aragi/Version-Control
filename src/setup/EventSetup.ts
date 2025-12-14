@@ -1,9 +1,9 @@
 import { TFile, WorkspaceLeaf, debounce, TAbstractFile } from 'obsidian';
 import type { CachedMetadata } from 'obsidian';
-import type { AppStore } from '../state/store';
-import { thunks } from '../state/thunks';
-import { VIEW_TYPE_VERSION_CONTROL } from '../constants';
-import type VersionControlPlugin from '../main';
+import type { AppStore } from '@/state';
+import { thunks } from '@/state';
+import { VIEW_TYPE_VERSION_CONTROL } from '@/constants';
+import type VersionControlPlugin from '@/main';
 
 /**
  * Registers all listeners for global Obsidian events.

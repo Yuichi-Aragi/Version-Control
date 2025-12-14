@@ -1,5 +1,3 @@
-/* src/styles/panels.css */
-
 /* Panel Overlay System */
 .v-panel-container {
     position: absolute;
@@ -76,6 +74,137 @@
     background-color: var(--background-secondary);
     display: flex;
     flex-direction: column;
+}
+
+/* Dashboard Panel Styles */
+.v-panel-container.is-dashboard-like {
+    background-color: rgba(var(--background-primary-rgb), 0.8);
+    justify-content: flex-start; /* Align to top */
+    align-items: center;
+    padding: 0;
+    padding-top: var(--size-4-8); /* Appropriate top padding */
+    backdrop-filter: blur(2px);
+}
+
+.v-inline-panel.is-dashboard {
+    width: 100%;
+    height: auto; /* Shrink to fit content so clicks below close it */
+    max-height: 80%; /* Don't take full height */
+    padding-left: 4px; /* Absolute minimum horizontal padding */
+    padding-right: 4px;
+    background-color: transparent;
+    box-shadow: none;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.v-dashboard-card {
+    background-color: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-l);
+    padding: var(--size-4-4);
+    box-shadow: var(--shadow-l);
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-4);
+    animation: v-fade-in 0.2s ease-out;
+    max-width: 100%;
+    overflow: hidden;
+}
+
+.v-dashboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid var(--background-modifier-border);
+    padding-bottom: var(--size-4-2);
+}
+
+.v-dashboard-header h3 {
+    margin: 0;
+    font-size: var(--font-ui-medium);
+}
+
+.v-dashboard-subtitle {
+    font-size: var(--font-ui-small);
+    color: var(--text-muted);
+    font-family: var(--font-monospace);
+}
+
+/* New Dashboard Layout Structure */
+.v-dashboard-body {
+    display: flex;
+    align-items: flex-start;
+    position: relative;
+    overflow: hidden;
+}
+
+.v-dashboard-labels {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    /* Offset to match heatmap top padding (approx month label height) */
+    padding-top: 20px; 
+    padding-right: 6px;
+    font-size: 10px;
+    color: var(--text-muted);
+    font-family: var(--font-monospace);
+    user-select: none;
+    background: var(--background-secondary);
+    z-index: 2;
+}
+
+.v-dashboard-label-item {
+    height: 14px; /* Matches rectSize */
+    margin-bottom: 4px; /* Matches space */
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.v-dashboard-heatmap-wrapper {
+    flex-grow: 1;
+    overflow-x: auto;
+    overflow-y: hidden;
+    /* Hide scrollbar completely */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.v-dashboard-heatmap-wrapper::-webkit-scrollbar {
+    display: none;
+}
+
+.v-dashboard-content svg text {
+    fill: var(--text-muted) !important;
+    font-size: 10px;
+}
+
+/* Legend Styles */
+.v-dashboard-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 8px;
+    padding-top: 12px;
+    border-top: 1px solid var(--background-modifier-border);
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.v-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.v-legend-color {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    border: 1px solid var(--background-modifier-border);
 }
 
 @keyframes v-slide-in-left {

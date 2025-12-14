@@ -1,17 +1,18 @@
 import { injectable, inject } from 'inversify';
 import { produce, type Draft } from 'immer';
+import * as v from 'valibot';
 import type { App } from 'obsidian';
-import type { NoteManifest, Branch } from '../../types';
-import { NoteManifestSchema } from '../../schemas';
-import { PathService } from './path-service';
-import { TYPES } from '../../types/inversify.types';
-import { QueueService } from '../../services/queue-service';
-import { DEFAULT_BRANCH_NAME } from '../../constants';
+import type { NoteManifest, Branch } from '@/types';
+import { NoteManifestSchema } from '@/schemas';
+import { PathService } from '@/core';
+import { TYPES } from '@/types/inversify.types';
+import { QueueService } from '@/services';
+import { DEFAULT_BRANCH_NAME } from '@/constants';
 
-type V1NoteManifest = Omit<NoteManifest, 'branches' | 'currentBranch' | 'viewMode'> & {
-    versions: { [versionId: string]: any };
+type V1NoteManifest = Omit<NoteManifest, 'branches' | 'currentBranch'> & {
+    versions: { [versionId: string]: unknown };
     totalVersions: number;
-    settings?: any;
+    settings?: unknown;
 };
 
 interface CachedManifest {
@@ -21,14 +22,14 @@ interface CachedManifest {
 
 /**
  * Repository for managing Note Manifests.
- * 
+ *
  * ARCHITECTURE NOTE:
  * Uses the Public (Queued) / Internal (Unqueued) pattern to prevent deadlocks.
  * Implements "Check-Then-Act" caching strategy using file mtime.
  * Utilises Immer for all state modifications.
- * 
+ *
  * DEADLOCK PROTECTION:
- * Uses a 'manifest:' prefix for all queue keys to ensure isolation from 
+ * Uses a 'manifest:' prefix for all queue keys to ensure isolation from
  * other services (like VersionContentRepository) operating on the same noteId.
  */
 @injectable()
@@ -78,7 +79,7 @@ export class NoteManifestRepository {
                 lastModified: now,
             };
 
-            const newManifest = NoteManifestSchema.parse(newManifestData);
+            const newManifest = v.parse(NoteManifestSchema, newManifestData);
             await this._writeManifest(noteId, newManifest);
             return newManifest;
         });
@@ -104,7 +105,7 @@ export class NoteManifestRepository {
                 }
             });
 
-            const validatedManifest = NoteManifestSchema.parse(updatedManifest);
+            const validatedManifest = v.parse(NoteManifestSchema, updatedManifest);
             await this._writeManifest(noteId, validatedManifest);
             return validatedManifest;
         });
@@ -128,7 +129,7 @@ export class NoteManifestRepository {
         let stat;
         try {
             stat = await this.app.vault.adapter.stat(manifestPath);
-        } catch (e) {
+        } catch {
             stat = null;
         }
 
@@ -167,20 +168,20 @@ export class NoteManifestRepository {
                 }
             } catch (migrationError) {
                 console.error(`VC: Migration failed for note ${noteId}. Preserving original structure.`, migrationError);
-                // Continue with original manifestToParse if migration fails, 
+                // Continue with original manifestToParse if migration fails,
                 // allowing partial functionality or later recovery.
             }
             // -----------------------
 
-            const parseResult = NoteManifestSchema.safeParse(manifestToParse);
+            const parseResult = v.safeParse(NoteManifestSchema, manifestToParse);
             if (!parseResult.success) {
-                console.error(`VC: Manifest for note ${noteId} is invalid.`, parseResult.error);
+                console.error(`VC: Manifest for note ${noteId} is invalid.`, parseResult.issues);
                 await this.tryBackupCorruptFile(manifestPath);
                 this.cache.delete(noteId);
                 return null;
             }
-            
-            const validatedManifest = parseResult.data;
+
+            const validatedManifest = parseResult.output;
             this.cache.set(noteId, { data: validatedManifest, mtime: stat.mtime });
             return validatedManifest;
 
@@ -193,7 +194,7 @@ export class NoteManifestRepository {
 
     private async _readAndParseManifest(noteId: string): Promise<unknown | null> {
         const manifestPath = this.pathService.getNoteManifestPath(noteId);
-        
+
         return this.executeWithRetry(async () => {
             if (!(await this.app.vault.adapter.exists(manifestPath))) {
                 return null;
@@ -207,7 +208,7 @@ export class NoteManifestRepository {
     private async _writeManifest(noteId: string, data: NoteManifest): Promise<void> {
         const manifestPath = this.pathService.getNoteManifestPath(noteId);
         const content = JSON.stringify(data, null, 2);
-        
+
         try {
             await this.executeWithRetry(async () => {
                 await this.app.vault.adapter.write(manifestPath, content);
@@ -246,20 +247,20 @@ export class NoteManifestRepository {
             if (await this.app.vault.adapter.exists(path)) {
                 await this.app.vault.adapter.copy(path, backupPath);
             }
-        } catch (e) { /* ignore */ }
+        } catch { /* ignore */ }
     }
 
-    private isV1Manifest(obj: any): obj is V1NoteManifest {
-        return obj && typeof obj === 'object' && 'versions' in obj && !('branches' in obj);
+    private isV1Manifest(obj: unknown): obj is V1NoteManifest {
+        return obj !== null && typeof obj === 'object' && 'versions' in obj && !('branches' in obj);
     }
-    
+
     private migrateV1Manifest(v1Manifest: V1NoteManifest): NoteManifest {
         const mainBranch: Branch = {
-            versions: v1Manifest.versions,
+            versions: v1Manifest.versions as Branch['versions'],
             totalVersions: v1Manifest.totalVersions,
-            settings: v1Manifest.settings,
+            settings: v1Manifest.settings as Branch['settings'],
         };
-    
+
         return {
             noteId: v1Manifest.noteId,
             notePath: v1Manifest.notePath,
@@ -272,10 +273,11 @@ export class NoteManifestRepository {
         };
     }
 
-    private isLegacyBranchSettings(manifest: any): boolean {
-        if (!manifest || !manifest.branches) return false;
+    private isLegacyBranchSettings(manifest: unknown): boolean {
+        if (!manifest || typeof manifest !== 'object' || !('branches' in manifest)) return false;
+        const manifestObj = manifest as { branches: Record<string, { settings?: Record<string, unknown> }> };
         // Check if any branch has settings with deprecated keys
-        for (const branch of Object.values(manifest.branches) as any[]) {
+        for (const branch of Object.values(manifestObj.branches)) {
             if (branch.settings) {
                 if ('noteIdFormat' in branch.settings || 'versionIdFormat' in branch.settings || 'defaultExportFormat' in branch.settings) {
                     return true;
@@ -285,18 +287,18 @@ export class NoteManifestRepository {
         return false;
     }
 
-    private migrateLegacyBranchSettings(manifest: any): NoteManifest {
+    private migrateLegacyBranchSettings(manifest: unknown): NoteManifest {
         // Deep clone to ensure we don't mutate the input in place before we are ready
-        const newManifest = JSON.parse(JSON.stringify(manifest));
-        
+        const newManifest = JSON.parse(JSON.stringify(manifest)) as NoteManifest & { branches: Record<string, { settings?: Record<string, unknown> }> };
+
         if (newManifest.branches) {
             for (const branchName in newManifest.branches) {
                 const branch = newManifest.branches[branchName];
-                if (branch.settings) {
+                if (branch && branch.settings) {
                     // Remove keys that are no longer supported in per-branch settings
-                    delete branch.settings.noteIdFormat;
-                    delete branch.settings.versionIdFormat;
-                    delete branch.settings.defaultExportFormat;
+                    delete branch.settings['noteIdFormat'];
+                    delete branch.settings['versionIdFormat'];
+                    delete branch.settings['defaultExportFormat'];
                 }
             }
         }
