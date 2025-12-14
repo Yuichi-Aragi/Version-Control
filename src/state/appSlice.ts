@@ -3,8 +3,8 @@ import type { PayloadAction } from '@reduxjs/toolkit';
 import { TFile } from 'obsidian';
 import { AppStatus, getInitialState } from './state';
 import type { AppState, PanelState, SortOrder } from './state';
-import type { VersionControlSettings, HistorySettings, VersionHistoryEntry, AppError, DiffTarget, ActiveNoteInfo, DiffType, Change, TimelineEvent, TimelineSettings, ViewMode } from '../types';
-import { DEFAULT_SETTINGS } from '../constants';
+import type { VersionControlSettings, HistorySettings, VersionHistoryEntry, AppError, DiffTarget, ActiveNoteInfo, DiffType, Change, TimelineEvent, TimelineSettings, ViewMode } from '@/types';
+import { DEFAULT_SETTINGS } from '@/constants';
 
 const initialState: AppState = getInitialState(DEFAULT_SETTINGS);
 
@@ -241,6 +241,12 @@ export const appSlice = createSlice({
                 const shouldPromptEdit = state.effectiveSettings.enableVersionNaming || state.effectiveSettings.enableVersionDescription;
                 state.namingVersionId = shouldPromptEdit ? action.payload.newEdit.id : null;
                 state.isManualVersionEdit = false;
+            }
+        },
+        removeEditsSuccess(state, action: PayloadAction<{ ids: string[] }>) {
+            if (state.status === AppStatus.READY) {
+                const idsToRemove = new Set(action.payload.ids);
+                state.editHistory = state.editHistory.filter(edit => !idsToRemove.has(edit.id));
             }
         },
         startVersionEditing(state, action: PayloadAction<{ versionId: string }>) {
