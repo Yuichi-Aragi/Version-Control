@@ -1,7 +1,7 @@
 import { App, Notice, Component } from 'obsidian';
 import { injectable, inject } from 'inversify';
-import type { AppStore } from '../state/store';
-import { TYPES } from '../types/inversify.types';
+import type { AppStore } from '@/state';
+import { TYPES } from '@/types/inversify.types';
 
 /**
  * A dedicated service for managing all UI interactions, such as notices,
