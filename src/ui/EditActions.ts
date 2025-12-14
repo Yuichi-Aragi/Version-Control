@@ -1,5 +1,5 @@
 
-import { thunks } from '../state/thunks/index';
+import { thunks } from '@/state';
 import type { VersionActionConfig } from './VersionActions';
 
 export const editActions: VersionActionConfig[] = [

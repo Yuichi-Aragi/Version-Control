@@ -2,9 +2,9 @@ import { ItemView, WorkspaceLeaf, App } from "obsidian";
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider } from 'react-redux';
 import { StrictMode } from 'react';
-import { VIEW_TYPE_VERSION_CONTROL } from "../constants";
-import type { AppStore } from "../state/store";
-import { actions } from "../state/appSlice";
+import { VIEW_TYPE_VERSION_CONTROL } from '@/constants';
+import type { AppStore } from '@/state';
+import { appSlice } from '@/state';
 import { VersionControlRoot } from "./components/VersionControlRoot";
 import { AppContext } from "./AppContext";
 import { TimeProvider } from "./contexts/TimeContext";
@@ -62,10 +62,10 @@ export class VersionControlView extends ItemView {
         // is temporarily closed (e.g., by Obsidian on mobile to save resources).
         // Other panels are context-specific and should be cleared.
         if (state.panel?.type !== 'changelog') {
-            this.store.dispatch(actions.closePanel());
+            this.store.dispatch(appSlice.actions.closePanel());
         }
         
-        this.store.dispatch(actions.clearDiffRequest());
-        this.store.dispatch(actions.toggleSearch(false));
+        this.store.dispatch(appSlice.actions.clearDiffRequest());
+        this.store.dispatch(appSlice.actions.toggleSearch(false));
     }
 }

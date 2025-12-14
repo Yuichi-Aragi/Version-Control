@@ -2,7 +2,7 @@ import { App, PluginSettingTab, Plugin } from 'obsidian';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider } from 'react-redux';
 import { StrictMode } from 'react';
-import type { AppStore } from '../state/store';
+import type { AppStore } from '@/state';
 import { AppContext } from './AppContext';
 import { SettingsTabRoot } from './components/settings/SettingsTabRoot';
 
