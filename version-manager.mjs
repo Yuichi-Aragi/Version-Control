@@ -1,7 +1,8 @@
-import { readFileSync, writeFileSync, renameSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, existsSync, copyFileSync, unlinkSync } from 'fs';
 import { execSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import semver from 'semver';
 
 // --- Configurable Defaults ---
 const EXEC_TIMEOUT = 60_000; // 60s timeout for commands
@@ -76,45 +77,48 @@ function writeJsonFile(filePath, data) {
 }
 
 /**
- * Strips non-numeric suffixes from a version part (handles semver gracefully).
+ * Gets the latest version from versions.json with its minAppVersion.
+ * Returns null if versions.json is empty.
  */
-function normalizeVersionPart(part) {
-  const numeric = parseInt(part.replace(/\D.*$/, ''), 10);
-  return isNaN(numeric) ? 0 : numeric;
+function getLatestVersionEntry(versions) {
+  const versionKeys = Object.keys(versions);
+  if (versionKeys.length === 0) return null;
+  
+  const latestVersion = versionKeys.reduce((latest, v) => {
+    return semver.gt(v, latest) ? v : latest;
+  }, versionKeys[0]);
+  
+  return {
+    version: latestVersion,
+    minAppVersion: versions[latestVersion]
+  };
 }
 
 /**
- * Compares two semantic version strings (basic SemVer-safe).
- * Handles different lengths and ignores pre-release/build metadata for ordering.
- * @param {string} v1
- * @param {string} v2
- * @returns {number} 1 if v1 > v2, -1 if v1 < v2, 0 if equal
+ * Checks if the new version/minAppVersion should trigger a release.
+ * Returns true if either:
+ * 1. New version is greater than latest version
+ * 2. Version is the same but minAppVersion is greater
  */
-function compareVersions(v1, v2) {
-  const parts1 = (v1 || '').split('.').map(normalizeVersionPart);
-  const parts2 = (v2 || '').split('.').map(normalizeVersionPart);
-  const len = Math.max(parts1.length, parts2.length);
-
-  for (let i = 0; i < len; i++) {
-    const p1 = parts1[i] || 0;
-    const p2 = parts2[i] || 0;
-    if (p1 > p2) return 1;
-    if (p1 < p2) return -1;
+function shouldTriggerRelease(latestEntry, newVersion, newMinAppVersion) {
+  if (!latestEntry) return true; // First release
+  
+  const versionComparison = semver.compare(newVersion, latestEntry.version);
+  
+  if (versionComparison > 0) {
+    console.log(`📈 New version ${newVersion} is greater than latest ${latestEntry.version}`);
+    return true;
   }
-  return 0;
-}
-
-/**
- * Finds the latest semantic version from an array of version strings.
- * Avoids repeated sorting by a simple reducer.
- * @param {string[]} versionKeys
- * @returns {string|null}
- */
-function getLatestVersion(versionKeys) {
-  if (!versionKeys || versionKeys.length === 0) return null;
-  return versionKeys.reduce((latest, v) =>
-    compareVersions(v, latest) > 0 ? v : latest, versionKeys[0]
-  );
+  
+  if (versionComparison === 0) {
+    const minAppComparison = semver.compare(newMinAppVersion, latestEntry.minAppVersion);
+    if (minAppComparison > 0) {
+      console.log(`📈 Same version ${newVersion} but minAppVersion increased from ${latestEntry.minAppVersion} to ${newMinAppVersion}`);
+      return true;
+    }
+  }
+  
+  return false;
 }
 
 /**
@@ -125,7 +129,7 @@ async function retry(fn, attempts = 3, delayMs = 1000) {
   let lastError;
   for (let i = 0; i < attempts; i++) {
     try {
-      return fn();
+      return await fn();
     } catch (err) {
       lastError = err;
       if (i < attempts - 1) {
@@ -137,6 +141,54 @@ async function retry(fn, attempts = 3, delayMs = 1000) {
   throw lastError;
 }
 
+/**
+ * Ensures main.js is available for release by copying/renaming index.js
+ * Looks for index.js in common build output locations
+ */
+function ensureMainJsForRelease() {
+  console.log("🔍 Ensuring main.js is available for release...");
+  
+  // Common build output locations for Obsidian plugins
+  const possiblePaths = [
+    'main/index.js',
+    'dist/index.js',
+    'index.js',
+    'build/index.js'
+  ];
+  
+  let sourcePath = null;
+  
+  // Find the first existing index.js file
+  for (const path of possiblePaths) {
+    if (existsSync(path)) {
+      sourcePath = path;
+      console.log(`✅ Found index.js at: ${path}`);
+      break;
+    }
+  }
+  
+  if (!sourcePath) {
+    throw new Error('❌ Could not find index.js in any expected location: ' + possiblePaths.join(', '));
+  }
+  
+  // Copy index.js to main.js in the root directory
+  copyFileSync(sourcePath, 'main.js');
+  console.log(`✅ Copied ${sourcePath} to main.js`);
+  
+  // Verify the copy was successful
+  if (!existsSync('main.js')) {
+    throw new Error('❌ Failed to create main.js file');
+  }
+  
+  // Check if the file has content
+  const mainJsContent = readFileSync('main.js', 'utf-8');
+  if (mainJsContent.trim().length === 0) {
+    console.warn('⚠️  main.js appears to be empty');
+  } else {
+    console.log(`✅ main.js created successfully (${mainJsContent.length} bytes)`);
+  }
+}
+
 // --- Main Logic ---
 
 async function main() {
@@ -144,25 +196,28 @@ async function main() {
   const currentBranch = process.env.GITHUB_REF_NAME;
   console.log(`\n---\n🔄 Workflow triggered on branch: '${currentBranch || 'Unknown'}'\n---`);
 
-  const manifest = readJsonFile('manifest.json');
-  const versions = readJsonFile('versions.json');
-  const packageJson = readJsonFile('package.json');
-
+  // Read original files for backup
+  const originalManifestContent = readFileSync('manifest.json', 'utf-8');
   const originalVersionsContent = readFileSync('versions.json', 'utf-8');
   const originalPackageJsonContent = readFileSync('package.json', 'utf-8');
+  
+  const manifest = JSON.parse(originalManifestContent);
+  const versions = JSON.parse(originalVersionsContent);
+  const packageJson = JSON.parse(originalPackageJsonContent);
 
   const manifestVersion = manifest.version;
   const minAppVersion = manifest.minAppVersion;
 
-  // Ensure new version is newer than the last known version
-  const latestKnownVersion = getLatestVersion(Object.keys(versions));
-  if (latestKnownVersion && compareVersions(manifestVersion, latestKnownVersion) <= 0) {
-    console.log(`ℹ️ Manifest version '${manifestVersion}' is not newer than the latest known version '${latestKnownVersion}'. Nothing to do.`);
+  // Check if we should trigger a release
+  const latestEntry = getLatestVersionEntry(versions);
+  
+  if (!shouldTriggerRelease(latestEntry, manifestVersion, minAppVersion)) {
+    console.log(`ℹ️ No need to trigger release. Current: v${manifestVersion} (min ${minAppVersion}), Latest: v${latestEntry?.version} (min ${latestEntry?.minAppVersion})`);
     process.exit(0);
   }
 
   try {
-    console.log(`🚀 Starting update process for version: ${manifestVersion}`);
+    console.log(`🚀 Starting update process for version: ${manifestVersion} (minApp: ${minAppVersion})`);
 
     // Sync package.json
     if (packageJson.version !== manifestVersion) {
@@ -170,26 +225,23 @@ async function main() {
       writeJsonFile('package.json', packageJson);
     }
 
-    // Update versions.json only if missing
-    if (versions[manifestVersion] !== minAppVersion) {
-      versions[manifestVersion] = minAppVersion;
-      writeJsonFile('versions.json', versions);
-    }
-
     // Build
     console.log("🏗️ Running build...");
     try {
-      run('npm run build');
+      run('pnpm run build');
     } catch (buildError) {
-      // This allows the process to continue if the build fails, which may be desired
-      // if build artifacts aren't critical for the release assets.
-      console.error('⚠️ Build failed, but continuing to release. Error:', buildError.message);
+      console.error('❌ Build failed!');
+      console.error('Build error:', buildError.message);
+      throw new Error(`Build failed: ${buildError.message}`);
     }
+
+    // Ensure main.js is available by copying/renaming index.js
+    ensureMainJsForRelease();
 
     // Release
     const tagName = manifestVersion;
 
-    // Determine release assets, excluding styles.css if it's empty
+    // Determine release assets - always include main.js, manifest.json, and optionally styles.css
     const baseAssets = ['main.js', 'manifest.json'];
     const cssPath = 'styles.css';
     const finalAssets = [...baseAssets];
@@ -220,6 +272,18 @@ async function main() {
       run(`gh release create ${tagName} ${releaseAssets} --title "Version ${tagName}" --notes "Automated release for version ${tagName}."`)
     );
 
+    // Update versions.json only after successful release
+    if (versions[manifestVersion] !== minAppVersion) {
+      versions[manifestVersion] = minAppVersion;
+      writeJsonFile('versions.json', versions);
+    }
+
+    // Clean up the temporary main.js file (optional, but good practice)
+    if (existsSync('main.js')) {
+      unlinkSync('main.js');
+      console.log('🧹 Cleaned up temporary main.js file');
+    }
+
     console.log("🎉 Process completed successfully.");
 
   } catch (error) {
@@ -227,14 +291,22 @@ async function main() {
     console.error("Error message:", error.message);
     console.error("--- ⏪ INITIATING ROLLBACK ---");
 
-    // Restore files
+    // Clean up temporary main.js file if it exists
+    if (existsSync('main.js')) {
+      unlinkSync('main.js');
+      console.log("🧹 Removed temporary main.js file.");
+    }
+
+    // Restore original files
     writeFileSync('versions.json', originalVersionsContent, 'utf-8');
     console.log("↩️ Reverted versions.json.");
     writeFileSync('package.json', originalPackageJsonContent, 'utf-8');
     console.log("↩️ Reverted package.json.");
+    writeFileSync('manifest.json', originalManifestContent, 'utf-8');
+    console.log("↩️ Reverted manifest.json.");
 
     // Cleanup release/tag if created
-    const tagName = manifest.version;
+    const tagName = manifestVersion;
     console.log(`🧹 Attempting to remove release/tag '${tagName}'...`);
 
     if (runSilently(`gh release view ${tagName}`)) {
@@ -246,11 +318,17 @@ async function main() {
     }
 
     console.error("--- ROLLBACK COMPLETE ---");
+    console.error("❌ Release process failed. Check logs above for details.");
     process.exit(1);
   }
 }
 
-main().catch(err => {
-  console.error("An unexpected error occurred in the main execution block:", err);
-  process.exit(1);
-});
+// Only run if called directly
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch(err => {
+    console.error("An unexpected error occurred in the main execution block:", err);
+    process.exit(1);
+  });
+}
+
+export { main };
