@@ -1,11 +1,14 @@
 import { memo, useCallback, type ChangeEvent } from 'react';
-import { useAppDispatch, useAppSelector } from '../../../hooks/useRedux';
-import { thunks } from '../../../../state/thunks';
-import { SettingComponent } from '../../SettingComponent';
+import { useAppDispatch, useAppSelector } from '@/ui/hooks';
+import { thunks } from '@/state';
+import { SettingComponent } from '@/ui/components';
 
 export const MaxVersionsSetting: React.FC<{ disabled: boolean }> = memo(({ disabled }) => {
     const dispatch = useAppDispatch();
-    const maxVersions = useAppSelector(state => state.effectiveSettings.maxVersionsPerNote);
+    const { maxVersions, viewMode } = useAppSelector(state => ({
+        maxVersions: state.effectiveSettings.maxVersionsPerNote,
+        viewMode: state.viewMode
+    }));
     
     const handleChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
         try {
@@ -18,10 +21,14 @@ export const MaxVersionsSetting: React.FC<{ disabled: boolean }> = memo(({ disab
         }
     }, [dispatch]);
 
+    const noun = viewMode === 'versions' ? 'versions' : 'edits';
+    const name = `Max ${noun} per note`;
+    const desc = `Maximum number of ${noun} to keep per note. Oldest ${noun} are deleted first. Set to 0 for infinite. Current: ${maxVersions === 0 ? "infinite" : maxVersions}`;
+
     return (
         <SettingComponent 
-            name="Max versions per note" 
-            desc={`Maximum number of versions to keep per note. Oldest versions are deleted first. Set to 0 for infinite. Current: ${maxVersions === 0 ? "infinite" : maxVersions}`}
+            name={name} 
+            desc={desc}
         >
             <input 
                 type="number" 
@@ -30,7 +37,7 @@ export const MaxVersionsSetting: React.FC<{ disabled: boolean }> = memo(({ disab
                 value={String(maxVersions)} 
                 onChange={handleChange} 
                 disabled={disabled}
-                aria-label="Maximum versions per note"
+                aria-label={name}
             />
         </SettingComponent>
     );

@@ -1,20 +1,20 @@
 import { memo, useCallback, useMemo, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { debounce } from 'lodash-es';
-import { z } from 'zod';
-import { useAppDispatch, useAppSelector } from '../../../hooks/useRedux';
-import { thunks } from '../../../../state/thunks';
-import { SettingComponent } from '../../SettingComponent';
-import { ValidatedTextarea } from '../controls/ValidatedControls';
-import { RegexListSchema } from '../settingsUtils';
+import { valibotResolver } from '@hookform/resolvers/valibot';
+import { debounce } from 'es-toolkit';
+import * as v from 'valibot';
+import { useAppDispatch, useAppSelector } from '@/ui/hooks';
+import { thunks } from '@/state';
+import { SettingComponent } from '@/ui/components';
+import { ValidatedTextarea } from '@/ui/components/settings/controls';
+import { RegexListSchema } from '@/ui/components/settings/utils';
 
 
-const AutoRegisterFormSchema = z.object({
+const AutoRegisterFormSchema = v.object({
     filters: RegexListSchema
 });
 
-type AutoRegisterFormValues = z.infer<typeof AutoRegisterFormSchema>;
+type AutoRegisterFormValues = v.InferOutput<typeof AutoRegisterFormSchema>;
 
 interface AutoRegisterSettingsProps {
     settingKey: 'versionHistorySettings' | 'editHistorySettings';
@@ -37,7 +37,7 @@ export const AutoRegisterSettings: React.FC<AutoRegisterSettingsProps> = memo(({
 
     const { control, watch, reset, formState: { isValid } } = useForm<AutoRegisterFormValues>({
         mode: 'onChange',
-        resolver: zodResolver(AutoRegisterFormSchema),
+        resolver: valibotResolver(AutoRegisterFormSchema),
         defaultValues: { filters: pathFilters.join('\n') }
     });
 

@@ -1,7 +1,7 @@
 import { memo, useCallback } from 'react';
-import { useAppDispatch, useAppSelector } from '../../../hooks/useRedux';
-import { thunks } from '../../../../state/thunks';
-import { SettingComponent } from '../../SettingComponent';
+import { useAppDispatch, useAppSelector } from '@/ui/hooks';
+import { thunks } from '@/state';
+import { SettingComponent } from '@/ui/components';
 
 export const IsGlobalSetting: React.FC<{ disabled: boolean }> = memo(({ disabled }) => {
     const dispatch = useAppDispatch();

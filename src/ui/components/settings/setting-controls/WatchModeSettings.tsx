@@ -1,9 +1,9 @@
-import { formatInterval } from '../settingsUtils';
+import { formatInterval } from '@/ui/components/settings/utils';
 import { createToggleSliderWithMinLinesSetting } from './ToggleSliderWithMinLinesFactory';
 
 export const WatchModeSettings = createToggleSliderWithMinLinesSetting({
     toggleName: 'Enable watch mode',
-    toggleDesc: 'Automatically save a new version if the note has changed after a set interval.',
+    toggleDesc: (mode) => `Automatically save a new ${mode === 'versions' ? 'version' : 'edit'} if the note has changed after a set interval.`,
     toggleKey: 'enableWatchMode',
     sliderName: 'Watch mode interval',
     sliderDesc: (value) => `Time to wait before auto-saving. Current: ${formatInterval(value)}.`,
