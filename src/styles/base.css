@@ -200,7 +200,8 @@ body .version-control-view.version-control-view .v-inline-panel,
 body .version-control-view.version-control-view .v-version-content-preview,
 body .version-control-view.version-control-view .v-diff-content-wrapper,
 body .version-control-view.version-control-view .v-version-content-preview pre,
-body .version-control-view.version-control-view .v-version-content-preview .table-wrapper {
+body .version-control-view.version-control-view .v-version-content-preview .table-wrapper,
+body .version-control-view.version-control-view .v-dashboard-heatmap-wrapper {
     scrollbar-width: none;
     -ms-overflow-style: none;
 }
@@ -216,7 +217,8 @@ body .version-control-view.version-control-view .v-inline-panel::-webkit-scrollb
 body .version-control-view.version-control-view .v-version-content-preview::-webkit-scrollbar,
 body .version-control-view.version-control-view .v-diff-content-wrapper::-webkit-scrollbar,
 body .version-control-view.version-control-view .v-version-content-preview pre::-webkit-scrollbar,
-body .version-control-view.version-control-view .v-version-content-preview .table-wrapper::-webkit-scrollbar {
+body .version-control-view.version-control-view .v-version-content-preview .table-wrapper::-webkit-scrollbar,
+body .version-control-view.version-control-view .v-dashboard-heatmap-wrapper::-webkit-scrollbar {
     display: none;
 }
 
