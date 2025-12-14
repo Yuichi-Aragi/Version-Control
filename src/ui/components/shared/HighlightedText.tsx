@@ -1,6 +1,6 @@
 import { memo, Fragment } from 'react';
 import clsx from 'clsx';
-import { escapeRegExp } from '../../utils/strings';
+import { escapeRegExp } from '@/ui/utils/strings';
 
 interface HighlightedTextProps {
     text: string;
