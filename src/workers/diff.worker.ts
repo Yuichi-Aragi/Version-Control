@@ -2,7 +2,7 @@
 
 import { expose, transfer } from 'comlink';
 import { diffLines, diffWordsWithSpace, diffChars, type Change } from 'diff';
-import type { DiffType } from '../types';
+import type { DiffType } from '@/types';
 
 const decoder = new TextDecoder('utf-8');
 const encoder = new TextEncoder();
