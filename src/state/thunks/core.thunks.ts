@@ -1,18 +1,18 @@
 import { TFile, type WorkspaceLeaf, App, FileView } from 'obsidian';
-import type { AppThunk } from '../store';
-import { actions } from '../appSlice';
-import type { AppError, HistorySettings } from '../../types';
-import { NoteManager } from '../../core/note-manager';
-import { UIService } from '../../services/ui-service';
-import { VersionManager } from '../../core/version-manager';
-import { ManifestManager } from '../../core/manifest-manager';
-import { CleanupManager } from '../../core/tasks/cleanup-manager';
-import { BackgroundTaskManager } from '../../core/tasks/BackgroundTaskManager';
-import { TYPES } from '../../types/inversify.types';
-import { resolveSettings, isPluginUnloading } from '../utils/settingsUtils';
-import type VersionControlPlugin from '../../main';
-import { saveNewEdit } from './edit-history.thunks';
-import { isPathAllowed } from '../../utils/path-filter';
+import type { AppThunk } from '@/state';
+import { appSlice } from '@/state';
+import type { AppError, HistorySettings } from '@/types';
+import { NoteManager } from '@/core';
+import { UIService } from '@/services';
+import { VersionManager } from '@/core';
+import { ManifestManager } from '@/core';
+import { CleanupManager } from '@/core';
+import { BackgroundTaskManager } from '@/core';
+import { TYPES } from '@/types/inversify.types';
+import { resolveSettings, isPluginUnloading } from '@/state/utils/settingsUtils';
+import type VersionControlPlugin from '@/main';
+import { saveNewEdit } from '@/state/thunks/edit-history';
+import { isPathAllowed } from '@/utils/path-filter';
 
 /**
  * Thunks related to the core application lifecycle, such as view initialization and history loading.
@@ -40,7 +40,7 @@ export const loadEffectiveSettingsForNote = (noteId: string | null): AppThunk =>
 
     // Only dispatch if changed to prevent render loops
     if (JSON.stringify(getState().effectiveSettings) !== JSON.stringify(effectiveSettings)) {
-        dispatch(actions.updateEffectiveSettings(effectiveSettings));
+        dispatch(appSlice.actions.updateEffectiveSettings(effectiveSettings));
     }
 };
 
@@ -51,7 +51,7 @@ export const autoRegisterNote = (file: TFile): AppThunk => async (dispatch, getS
     const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
 
     // Set a loading state for the file
-    dispatch(actions.initializeView({ file, noteId: null, source: 'none' }));
+    dispatch(appSlice.actions.initializeView({ file, noteId: null, source: 'none' }));
     
     try {
         const result = await versionManager.saveNewVersionForFile(file, {
@@ -77,7 +77,7 @@ export const autoRegisterNote = (file: TFile): AppThunk => async (dispatch, getS
             message: `Could not automatically start version control for "${file.basename}".`,
             details: error instanceof Error ? error.message : String(error),
         };
-        dispatch(actions.reportError(appError));
+        dispatch(appSlice.actions.reportError(appError));
     } finally {
         if (!isPluginUnloading(container)) {
             backgroundTaskManager.syncWatchMode();
@@ -119,20 +119,20 @@ export const initializeView = (leaf?: WorkspaceLeaf | null): AppThunk => async (
 
             // Check Version History Auto-Reg
             if (versionSettings.autoRegisterNotes && isPathAllowed(activeNoteInfo.file.path, { pathFilters: versionSettings.pathFilters })) {
-                dispatch(actions.setViewMode('versions'));
+                dispatch(appSlice.actions.setViewMode('versions'));
                 dispatch(autoRegisterNote(activeNoteInfo.file));
                 return;
             }
 
             // Check Edit History Auto-Reg
             if (editSettings.autoRegisterNotes && isPathAllowed(activeNoteInfo.file.path, { pathFilters: editSettings.pathFilters })) {
-                dispatch(actions.setViewMode('edits'));
+                dispatch(appSlice.actions.setViewMode('edits'));
                 dispatch(saveNewEdit(true)); // Auto-save first edit
                 return;
             }
         }
 
-        dispatch(actions.initializeView(activeNoteInfo));
+        dispatch(appSlice.actions.initializeView(activeNoteInfo));
 
         if (activeNoteInfo.source === 'manifest' && activeNoteInfo.file && activeNoteInfo.noteId) {
             dispatch(reconcileNoteId(activeNoteInfo.file, activeNoteInfo.noteId));
@@ -154,7 +154,7 @@ export const initializeView = (leaf?: WorkspaceLeaf | null): AppThunk => async (
             message: "Could not initialize the version control view.",
             details: error instanceof Error ? error.message : String(error),
         };
-        dispatch(actions.reportError(appError));
+        dispatch(appSlice.actions.reportError(appError));
     }
 };
 
@@ -196,7 +196,7 @@ export const loadHistory = (file: TFile): AppThunk => async (dispatch, _getState
         const currentBranch = noteManifest?.currentBranch ?? '';
         const availableBranches = noteManifest ? Object.keys(noteManifest.branches) : [];
 
-        dispatch(actions.historyLoadedSuccess({ file, noteId, history, currentBranch, availableBranches }));
+        dispatch(appSlice.actions.historyLoadedSuccess({ file, noteId, history, currentBranch, availableBranches }));
 
         backgroundTaskManager.syncWatchMode();
 
@@ -207,7 +207,7 @@ export const loadHistory = (file: TFile): AppThunk => async (dispatch, _getState
             message: `Could not load version history for "${file.basename}".`,
             details: error instanceof Error ? error.message : String(error),
         };
-        dispatch(actions.reportError(appError));
+        dispatch(appSlice.actions.reportError(appError));
     }
 };
 
@@ -225,7 +225,7 @@ export const loadHistoryForNoteId = (file: TFile, noteId: string): AppThunk => a
         const currentBranch = noteManifest?.currentBranch ?? '';
         const availableBranches = noteManifest ? Object.keys(noteManifest.branches) : [];
         
-        dispatch(actions.historyLoadedSuccess({ file, noteId, history, currentBranch, availableBranches }));
+        dispatch(appSlice.actions.historyLoadedSuccess({ file, noteId, history, currentBranch, availableBranches }));
 
         backgroundTaskManager.syncWatchMode();
     } catch (error) {
@@ -235,7 +235,7 @@ export const loadHistoryForNoteId = (file: TFile, noteId: string): AppThunk => a
             message: `Could not load version history for "${file.basename}".`,
             details: error instanceof Error ? error.message : String(error),
         };
-        dispatch(actions.reportError(appError));
+        dispatch(appSlice.actions.reportError(appError));
     }
 };
 

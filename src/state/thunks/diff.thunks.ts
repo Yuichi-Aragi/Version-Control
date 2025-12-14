@@ -1,13 +1,13 @@
 import { moment, App, MarkdownView } from 'obsidian';
-import type { AppThunk } from '../store';
-import { actions } from '../appSlice';
-import type { VersionHistoryEntry, DiffTarget, DiffType } from '../../types';
-import { AppStatus, type ActionItem } from '../state';
-import { UIService } from '../../services/ui-service';
-import { DiffManager } from '../../services/diff-manager';
-import { EditHistoryManager } from '../../core/edit-history-manager';
-import { TYPES } from '../../types/inversify.types';
-import { isPluginUnloading } from '../utils/settingsUtils';
+import type { AppThunk } from '@/state';
+import { appSlice } from '@/state';
+import type { VersionHistoryEntry, DiffTarget, DiffType } from '@/types';
+import { AppStatus, type ActionItem } from '@/state';
+import { UIService } from '@/services';
+import { DiffManager } from '@/services';
+import { EditHistoryManager } from '@/core';
+import { TYPES } from '@/types/inversify.types';
+import { isPluginUnloading } from '@/state/utils/settingsUtils';
 
 /**
  * Thunks for generating and displaying diffs between versions.
@@ -59,7 +59,7 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
         dispatch(generateAndShowDiffInPanel(version1, selectedTarget));
     };
 
-    dispatch(actions.openPanel({
+    dispatch(appSlice.actions.openPanel({
         type: 'action',
         title: 'Compare with...',
         items,
@@ -71,7 +71,7 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
 export const generateAndShowDiffInPanel = (version1: VersionHistoryEntry, version2: DiffTarget): AppThunk => async (dispatch, getState, container) => {
     if (isPluginUnloading(container)) return;
 
-    dispatch(actions.closePanel());
+    dispatch(appSlice.actions.closePanel());
 
     const uiService = container.get<UIService>(TYPES.UIService);
     const diffManager = container.get<DiffManager>(TYPES.DiffManager);
@@ -120,7 +120,7 @@ export const generateAndShowDiffInPanel = (version1: VersionHistoryEntry, versio
         const content2Str = typeof rawContent2 === 'string' ? rawContent2 : decoder.decode(rawContent2);
 
         // --- Panel Mode Logic ---
-        dispatch(actions.startDiffGeneration({ 
+        dispatch(appSlice.actions.startDiffGeneration({ 
             version1, 
             version2, 
             content1: content1Str, 
@@ -134,17 +134,17 @@ export const generateAndShowDiffInPanel = (version1: VersionHistoryEntry, versio
         const finalState = getState();
         if (isPluginUnloading(container) || finalState.status !== AppStatus.READY || finalState.noteId !== noteId) {
             uiService.showNotice("View context changed, diff cancelled.", 3000);
-            dispatch(actions.clearDiffRequest());
+            dispatch(appSlice.actions.clearDiffRequest());
             return;
         }
         
-        dispatch(actions.diffGenerationSucceeded({ version1Id: version1.id, version2Id: version2.id, diffChanges }));
+        dispatch(appSlice.actions.diffGenerationSucceeded({ version1Id: version1.id, version2Id: version2.id, diffChanges }));
         uiService.showNotice("Diff is ready. Click the indicator to view.", 4000);
 
     } catch (error) {
         console.error("Version Control: Error generating diff.", error);
         uiService.showNotice("Failed to generate diff. Check the console for details.");
-        dispatch(actions.diffGenerationFailed({ version1Id: version1.id, version2Id: version2.id }));
+        dispatch(appSlice.actions.diffGenerationFailed({ version1Id: version1.id, version2Id: version2.id }));
     }
 };
 
@@ -167,8 +167,8 @@ export const viewReadyDiff = (renderMode: 'panel' | 'window' = 'panel'): AppThun
 
     const { version1, version2, diffChanges, diffType, content1, content2 } = diffRequest;
 
-    dispatch(actions.clearDiffRequest());
-    dispatch(actions.openPanel({ 
+    dispatch(appSlice.actions.clearDiffRequest());
+    dispatch(appSlice.actions.openPanel({ 
         type: 'diff', 
         version1, 
         version2, 
@@ -192,16 +192,16 @@ export const recomputeDiff = (newDiffType: DiffType): AppThunk => async (dispatc
     const noteId = state.noteId;
     if (!noteId) return;
 
-    dispatch(actions.startReDiffing({ newDiffType }));
+    dispatch(appSlice.actions.startReDiffing({ newDiffType }));
     try {
         // Here we only have strings in state.panel, so we pass strings.
         // The worker handles strings as well.
         const diffChanges = await diffManager.computeDiff(noteId, version1.id, version2.id, content1, content2, newDiffType);
-        dispatch(actions.reDiffingSucceeded({ diffChanges }));
+        dispatch(appSlice.actions.reDiffingSucceeded({ diffChanges }));
     } catch (error) {
         console.error("Version Control: Failed to re-compute diff.", error);
         uiService.showNotice("Failed to re-compute diff. Check console.", 4000);
-        dispatch(actions.reDiffingFailed());
+        dispatch(appSlice.actions.reDiffingFailed());
     }
 };
 
