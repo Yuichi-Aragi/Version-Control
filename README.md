@@ -1,6 +1,6 @@
 <div align="center">
 
-![Banner](assets/1000202057.jpg)
+![Banner](https://github.com/Lae-Aragi/Version-Control/blob/7fa9fdea45c5ab373cec5997aa990ef013070b75/assets/1000202057.jpg)
 
 </div>
 
