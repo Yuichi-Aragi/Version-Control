@@ -1,5 +1,18 @@
 ***
 
+**Version: 1.9.35**
+
+#### ✨ New Features
+
+* **Dashboard Heatmap:** Introduced a new "Dashboard" feature that displays a heatmap, visualizing the number of versions/edits you created each day.
+* **Compressed Export Support:** Added support for exporting versions and edits in compressed **zip** and **gzip** formats.
+
+#### 🎨 Improvements & UX
+
+* **Edit History Stability:** The edit history feature has been stabilized and is now as reliable as the main version history, moving out of its previous early-stage status.
+
+***
+
 **Version: 1.9.34**
 
 #### 🎨 Improvements & UX
