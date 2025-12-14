@@ -1,11 +1,11 @@
 import { App, TFile, WorkspaceLeaf, MarkdownView, type FrontMatterCache, FileView } from "obsidian";
 import { injectable, inject } from 'inversify';
-import { ManifestManager } from "./manifest-manager";
-import type { ActiveNoteInfo } from "../types";
-import { generateNoteId, extractUuidFromId, extractTimestampFromId } from "../utils/id";
-import { TYPES } from "../types/inversify.types";
-import type VersionControlPlugin from "../main";
-import { EditHistoryManager } from "./edit-history-manager";
+import { ManifestManager } from "@/core";
+import type { ActiveNoteInfo } from "@/types";
+import { generateNoteId, extractUuidFromId, extractTimestampFromId } from "@/utils/id";
+import { TYPES } from '@/types/inversify.types';
+import type VersionControlPlugin from "@/main";
+import { EditHistoryManager } from "@/core";
 
 @injectable()
 export class NoteManager {
@@ -80,16 +80,28 @@ export class NoteManager {
     async getNoteId(file: TFile): Promise<string | null> {
         if (!file) return null;
 
-        if (file.extension === 'base') {
-            // Priority 1: Check Central Manifest for existing ID associated with this path
-            // This ensures stability if the file was renamed/moved but manifest updated
-            const existingId = await this.manifestManager.getNoteIdByPath(file.path);
-            if (existingId) {
-                return existingId;
+        // 1. Priority: Check Central Manifest for existing ID associated with this path.
+        // This includes consolidation logic to ensure only one ID exists per path.
+        const canonicalId = await this.manifestManager.getConsolidatedNoteIdForPath(file.path);
+
+        if (canonicalId) {
+            // If we found a canonical ID for this path, we enforce it.
+            if (file.extension === 'md') {
+                const fileCache = this.app.metadataCache.getFileCache(file);
+                const currentFmId = fileCache?.frontmatter?.[this.noteIdKey];
+                
+                // If frontmatter ID doesn't match canonical ID, update it.
+                // This handles cases where file content might have been overwritten or is stale.
+                if (currentFmId !== canonicalId) {
+                    await this.writeNoteIdToFrontmatter(file, canonicalId);
+                }
             }
-            
-            // Priority 2: Generate ID based on path (fallback/new file)
-            // Use generateNoteId to ensure consistent ID generation (path-based, sanitized)
+            return canonicalId;
+        }
+
+        // 2. Fallback: If no canonical ID in manifest, check frontmatter/generation logic.
+        if (file.extension === 'base') {
+            // For .base files, if not in manifest, we generate one (but don't save to manifest yet)
             return generateNoteId(this.plugin.settings, file);
         }
 
@@ -99,17 +111,16 @@ export class NoteManager {
             const fileCache = this.app.metadataCache.getFileCache(file);
             const frontmatter = fileCache?.frontmatter;
 
-            // 1. Check Primary Key
+            // Check Primary Key
             let id = frontmatter?.[this.noteIdKey];
             if (this.isValidId(id)) {
                 noteId = id;
             } else {
-                // 2. Check Legacy Keys
+                // Check Legacy Keys
                 for (const legacyKey of this.legacyNoteIdKeys) {
                     id = frontmatter?.[legacyKey];
                     if (this.isValidId(id)) {
                         // Found valid ID in legacy key. Migrate it silently.
-                        // We await this to ensure consistency, though it might add a slight delay on first access.
                         await this.migrateLegacyKey(file, legacyKey, this.noteIdKey, id).catch(e => 
                             console.error(`VC: Failed to migrate legacy key '${legacyKey}' to '${this.noteIdKey}' for file '${file.path}'`, e)
                         );
@@ -172,21 +183,14 @@ export class NoteManager {
      * @returns The note's version control ID, or null if one couldn't be assigned.
      */
     async getOrCreateNoteId(file: TFile): Promise<string | null> {
-        if (file.extension === 'base') {
-            // Use getNoteId to leverage manifest lookup + generation logic
-            return this.getNoteId(file);
+        // Use getNoteId to leverage manifest lookup + consolidation logic
+        const existingId = await this.getNoteId(file);
+        if (existingId) {
+            return existingId;
         }
 
         if (file.extension === 'md') {
-            const existingId = await this.getNoteId(file);
-            if (existingId) {
-                // The manifest existence will be checked later by the VersionManager during save.
-                // This method's only job is to ensure an ID is present in the frontmatter.
-                return existingId;
-            }
-
             // If no ID, generate one based on settings and write it to the file.
-            // We use the new generateNoteId which respects the noteIdFormat setting.
             let newId = generateNoteId(this.plugin.settings, file);
             
             // Ensure uniqueness
@@ -197,7 +201,6 @@ export class NoteManager {
                 return newId;
             } catch (error) {
                 console.error(`VC: Failed to write new vc-id to frontmatter for "${file.path}".`, error);
-                // If we can't write the ID, we can't proceed with versioning.
                 throw new Error(`Failed to initialize version history for "${file.basename}". Could not write to frontmatter.`);
             }
         }

@@ -1,13 +1,13 @@
 import { injectable, inject } from 'inversify';
-import { TYPES } from '../types/inversify.types';
-import { TimelineDatabase } from './storage/timeline-database';
-import type { DiffManager } from '../services/diff-manager';
-import type { VersionManager } from './version-manager';
-import type { EditHistoryManager } from './edit-history-manager';
-import type { PluginEvents } from './plugin-events';
-import type { TimelineEvent, VersionHistoryEntry } from '../types';
-import { orderBy } from 'lodash-es';
-import { VersionContentRepository } from './storage/version-content-repository';
+import { TYPES } from '@/types/inversify.types';
+import { TimelineDatabase } from '@/core';
+import type { DiffManager } from '@/services';
+import type { VersionManager } from '@/core';
+import type { EditHistoryManager } from '@/core';
+import type { PluginEvents } from '@/core';
+import type { TimelineEvent, VersionHistoryEntry } from '@/types';
+import { orderBy } from 'es-toolkit';
+import { VersionContentRepository } from '@/core';
 
 @injectable()
 export class TimelineManager {

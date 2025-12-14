@@ -1,6 +1,6 @@
 import { injectable } from 'inversify';
 import { wrap, releaseProxy, type Remote } from 'comlink';
-import type { CompressionWorkerApi } from '../types';
+import type { CompressionWorkerApi } from '@/types';
 
 declare const compressionWorkerString: string;
 
@@ -38,13 +38,14 @@ export class CompressionManager {
     /**
      * Compresses content using GZIP via the worker.
      * @param content String or ArrayBuffer to compress.
+     * @param level Compression level (0-9). Default is 9.
      * @returns Promise resolving to compressed ArrayBuffer.
      */
-    public async compress(content: string | ArrayBuffer): Promise<ArrayBuffer> {
+    public async compress(content: string | ArrayBuffer, level = 9): Promise<ArrayBuffer> {
         if (!this.workerProxy) this.initializeWorker();
         if (!this.workerProxy) throw new Error("Compression Worker not available");
 
-        return await this.workerProxy.compress(content);
+        return await this.workerProxy.compress(content, level);
     }
 
     /**
@@ -57,6 +58,19 @@ export class CompressionManager {
         if (!this.workerProxy) throw new Error("Compression Worker not available");
 
         return await this.workerProxy.decompress(content);
+    }
+
+    /**
+     * Creates a ZIP archive from multiple files via the worker.
+     * @param files Map of filename to content (string or ArrayBuffer).
+     * @param level Compression level (0-9). Default is 9.
+     * @returns Promise resolving to ZIP ArrayBuffer.
+     */
+    public async createZip(files: Record<string, string | ArrayBuffer>, level = 9): Promise<ArrayBuffer> {
+        if (!this.workerProxy) this.initializeWorker();
+        if (!this.workerProxy) throw new Error("Compression Worker not available");
+
+        return await this.workerProxy.createZip(files, level);
     }
 
     public terminate(): void {
