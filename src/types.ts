@@ -129,6 +129,7 @@ export interface EditWorkerApi {
     /**
      * Saves an edit.
      * Accepts content as string or ArrayBuffer (which will be compressed).
+     * Returns statistics about the saved edit.
      */
     saveEdit(
         noteId: string,
@@ -136,7 +137,7 @@ export interface EditWorkerApi {
         editId: string,
         content: string | ArrayBuffer,
         manifestUpdate: NoteManifest
-    ): Promise<void>;
+    ): Promise<{ size: number; contentHash: string }>;
 
     /**
      * Retrieves edit content.
@@ -166,6 +167,30 @@ export interface EditWorkerApi {
      * Updates the note path in the manifest for a given note ID.
      */
     updateNotePath(noteId: string, newPath: string): Promise<void>;
+
+    /**
+     * Exports all edit data for a branch as a compressed ZIP buffer.
+     * This is used to persist the IDB state to disk as a .vctrl file.
+     */
+    exportBranchData(noteId: string, branchName: string): Promise<ArrayBuffer>;
+
+    /**
+     * Imports branch data from a compressed ZIP buffer into IDB.
+     * This overwrites any existing data for the branch in IDB.
+     */
+    importBranchData(noteId: string, branchName: string, zipData: ArrayBuffer): Promise<void>;
+
+    /**
+     * Reads the manifest.json from a .vctrl zip buffer without importing the full data.
+     * Used for timestamp comparison.
+     */
+    readManifestFromZip(zipData: ArrayBuffer): Promise<any>;
+
+    /**
+     * Clears all data from the IDB.
+     * Used on plugin unload to ensure next load gets fresh data from disk.
+     */
+    clearAll(): Promise<void>;
 }
 
 // --- Timeline Types ---
