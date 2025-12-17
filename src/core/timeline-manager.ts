@@ -94,6 +94,38 @@ export class TimelineManager {
         return currentTask;
     }
 
+    /**
+     * Public method to generate a single event for a newly added version without
+     * reloading the entire timeline. Useful for instant UI updates.
+     */
+    public async createEventForNewVersion(
+        noteId: string,
+        branchName: string,
+        source: 'version' | 'edit',
+        newVersion: VersionHistoryEntry
+    ): Promise<TimelineEvent | null> {
+        return this.processingQueue.then(async () => {
+            // Find previous version
+            let history: VersionHistoryEntry[] = [];
+            if (source === 'version') {
+                history = await this.versionManager.getVersionHistory(noteId);
+            } else {
+                history = await this.editHistoryManager.getEditHistory(noteId);
+            }
+            
+            // History is usually sorted desc by version/timestamp.
+            // The previous version is the one immediately following the new version in the list.
+            const sortedHistory = orderBy(history, ['timestamp'], ['desc']);
+            const newIndex = sortedHistory.findIndex(v => v.id === newVersion.id);
+            
+            if (newIndex === -1) return null; // Should not happen if history is updated
+            
+            const previousVersion = sortedHistory[newIndex + 1] || null;
+            
+            return await this.generateEvent(noteId, branchName, source, previousVersion, newVersion);
+        });
+    }
+
     private async generateEvent(
         noteId: string, 
         branchName: string, 
