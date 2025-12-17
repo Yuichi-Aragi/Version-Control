@@ -51,23 +51,8 @@ export const updateEditDetails =
         );
 
         try {
-            const manifest = await editHistoryManager.getEditManifest(noteId);
-            if (!manifest) throw new Error('Manifest not found');
-
-            const branch = manifest.branches[manifest.currentBranch];
-            const editData = branch?.versions[editId];
-            if (!editData) throw new Error('Edit not found');
-
-            // For now, just update metadata in manifest
-            if (details.name) editData.name = details.name;
-            else delete editData.name;
-
-            if (details.description) editData.description = details.description;
-            else delete editData.description;
-
-            manifest.lastModified = new Date().toISOString();
-
-            await editHistoryManager.saveEditManifest(noteId, manifest);
+            // Use high-level manager method for atomicity
+            await editHistoryManager.updateEditMetadata(noteId, editId, details.name, details.description);
 
             // 3. Sync with Timeline DB via EventBus
             // This ensures the timeline worker DB is updated so future timeline loads are correct.

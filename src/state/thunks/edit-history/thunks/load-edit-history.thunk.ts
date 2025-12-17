@@ -61,6 +61,10 @@ export const loadEditHistory =
             const activeBranch = noteManifest.currentBranch;
             const availableBranches = Object.keys(noteManifest.branches);
 
+            // NEW: Load cache from disk for the active branch
+            // This populates the IDB with the source of truth from the .vctrl file
+            await editHistoryManager.loadBranchFromDisk(noteId, activeBranch);
+
             // 2. Get Edit Manifest
             let manifest = await editHistoryManager.getEditManifest(noteId);
 

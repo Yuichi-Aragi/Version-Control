@@ -34,32 +34,28 @@ export const deleteEdit =
 
         dispatch(appSlice.actions.setProcessing(true));
         dispatch(appSlice.actions.closePanel());
+        // Ensure any pending diff involving this edit is cleared
+        dispatch(appSlice.actions.clearDiffRequest());
 
         try {
-            const manifest = await editHistoryManager.getEditManifest(noteId);
-            if (!manifest) throw new Error('Manifest not found');
+            // Use high-level manager method that handles manifest update and deletion atomically
+            await editHistoryManager.deleteEditEntry(noteId, editId);
 
-            const branchName = manifest.currentBranch;
-            const branch = manifest.branches[branchName];
-
-            if (branch && branch.versions[editId]) {
-                delete branch.versions[editId];
-                manifest.lastModified = new Date().toISOString();
-
-                // MODIFIED: Removed logic that deletes the branch or note history if empty.
-                // This ensures deleting the last edit only clears the list, preserving the branch structure
-                // for potential Version History or future edits.
-                
-                await editHistoryManager.saveEditManifest(noteId, manifest);
+            // Optimistic update for Timeline
+            if (state.panel?.type === 'timeline' && state.viewMode === 'edits') {
+                dispatch(appSlice.actions.removeTimelineEvent({ versionId: editId }));
             }
 
-            await editHistoryManager.deleteEdit(noteId, branchName, editId);
+            // INSTANT UI UPDATE: Remove from local state immediately
+            // We avoid calling loadEditHistory here to prevent UI lag/flicker from DB round-trip.
+            dispatch(appSlice.actions.removeEditsSuccess({ ids: [editId] }));
 
-            dispatch(loadEditHistory(noteId));
             uiService.showNotice('Edit deleted.');
         } catch (error) {
             console.error('VC: Failed to delete edit', error);
             uiService.showNotice('Failed to delete edit.');
+            // Only reload history if the operation failed, to ensure UI consistency
+            dispatch(loadEditHistory(noteId));
         } finally {
             if (!isPluginUnloading(container)) {
                 dispatch(appSlice.actions.setProcessing(false));
@@ -84,6 +80,7 @@ export const deleteAllEdits = (): AppThunk => async (dispatch, getState, contain
 
     dispatch(appSlice.actions.setProcessing(true));
     dispatch(appSlice.actions.closePanel());
+    dispatch(appSlice.actions.clearDiffRequest());
 
     try {
         const manifest = await editHistoryManager.getEditManifest(noteId);
@@ -103,30 +100,32 @@ export const deleteAllEdits = (): AppThunk => async (dispatch, getState, contain
             return;
         }
 
-        // 1. Delete from IDB
         // We iterate because EditHistoryManager doesn't expose a bulk delete for branch yet,
-        // and we want to be safe.
+        // and we want to be safe with manifest updates.
+        // Using deleteEditEntry ensures manifest is updated correctly for each removal.
         for (const editId of editIds) {
-            await editHistoryManager.deleteEdit(noteId, branchName, editId);
+            await editHistoryManager.deleteEditEntry(noteId, editId);
         }
 
-        // 2. Clear from Manifest
-        branch.versions = {};
-        // We do NOT reset totalVersions to ensure unique IDs if user continues editing, 
-        // or we could reset it. For safety with ID generation based on max version, 
-        // keeping totalVersions or resetting it depends on ID generation strategy.
-        // Current strategy: `calculateNextVersionNumber` uses `Object.values(branch.versions)`.
-        // If we clear versions, next is 1. This is fine for "Delete All".
+        // INSTANT UI UPDATE: Clear local list immediately
+        dispatch(appSlice.actions.editHistoryLoadedSuccess({ 
+            editHistory: [],
+            currentBranch: state.currentBranch,
+            availableBranches: state.availableBranches
+        }));
         
-        manifest.lastModified = new Date().toISOString();
-        await editHistoryManager.saveEditManifest(noteId, manifest);
+        // Clear timeline if open
+        if (state.panel?.type === 'timeline' && state.viewMode === 'edits') {
+            dispatch(appSlice.actions.setTimelineData([]));
+        }
 
-        dispatch(loadEditHistory(noteId));
         uiService.showNotice('All edits in this branch deleted.');
 
     } catch (error) {
         console.error('VC: Failed to delete all edits', error);
         uiService.showNotice('Failed to delete all edits.');
+        // Reload history on error to restore state
+        dispatch(loadEditHistory(noteId));
     } finally {
         if (!isPluginUnloading(container)) {
             dispatch(appSlice.actions.setProcessing(false));

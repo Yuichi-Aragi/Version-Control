@@ -7,20 +7,11 @@
 import { App, TFile } from 'obsidian';
 import type { AppThunk } from '@/state';
 import { appSlice, AppStatus } from '@/state';
-import type { VersionHistoryEntry } from '@/types';
 import { TYPES } from '@/types/inversify.types';
-import { EditHistoryManager, NoteManager, ManifestManager, BackgroundTaskManager } from '@/core';
+import { EditHistoryManager, NoteManager, ManifestManager, BackgroundTaskManager, TimelineManager, PluginEvents } from '@/core';
 import { UIService } from '@/services';
-import { calculateTextStats } from '@/utils/text-stats';
-import { DEFAULT_BRANCH_NAME } from '@/constants';
 import { isPluginUnloading, resolveSettings } from '@/state/utils/settingsUtils';
 import { loadHistoryForNoteId } from '../../core.thunks';
-import {
-    createEditManifest,
-    ensureBranchExists,
-    calculateNextVersionNumber,
-    isDuplicateContent,
-} from '../helpers';
 
 /**
  * Saves a new edit for the current note
@@ -42,6 +33,8 @@ export const saveNewEdit =
         const manifestManager =
             container.get<ManifestManager>(TYPES.ManifestManager);
         const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
+        const timelineManager = container.get<TimelineManager>(TYPES.TimelineManager);
+        const eventBus = container.get<PluginEvents>(TYPES.EventBus);
 
         if (state.status !== AppStatus.READY && !isAuto) {
             // Allow if we are in a state where we can initialize (e.g. valid file but no ID)
@@ -85,162 +78,71 @@ export const saveNewEdit =
             }
 
             // Use adapter read to support both .md and .base files uniformly as text.
-            // This also handles empty files correctly (returns empty string).
             const content = await app.vault.adapter.read(liveFile.path);
 
-            // Get Note Manifest to determine the correct active branch
-            const noteManifest = await manifestManager.loadNoteManifest(noteId);
-            const activeBranch =
-                noteManifest?.currentBranch || DEFAULT_BRANCH_NAME;
+            // Resolve settings for max versions
+            const settings = await resolveSettings(noteId, 'edit', container);
+            const maxVersions = settings.maxVersionsPerNote;
 
-            // Get or Create Edit Manifest
-            const existingManifest =
-                await editHistoryManager.getEditManifest(noteId);
-            let manifest = existingManifest;
-
-            if (!existingManifest) {
-                manifest = createEditManifest(noteId, file.path, activeBranch);
-                // Mark note as having edit history in the central manifest
-                await manifestManager.setHasEditHistory(noteId, true);
-            } else {
-                // Sync branch pointer
-                if (manifest!.currentBranch !== activeBranch) {
-                    manifest!.currentBranch = activeBranch;
-                }
-            }
-
-            const branchName = manifest!.currentBranch;
-            const branch = ensureBranchExists(manifest!, branchName);
-
-            // --- Duplicate Check ---
-            // Find the latest edit in the current branch to compare content
-            const existingVersions = Object.entries(branch.versions);
-            if (existingVersions.length > 0) {
-                // Sort by version number desc
-                existingVersions.sort(
-                    ([, a], [, b]) => b.versionNumber - a.versionNumber
-                );
-                const [lastEditId] = existingVersions[0]!;
-
-                const lastContent = await editHistoryManager.getEditContent(
-                    noteId,
-                    lastEditId,
-                    branchName
-                );
-
-                if (isDuplicateContent(content, lastContent)) {
-                    // Identical content, skip save
-                    if (!isAuto)
-                        uiService.showNotice(
-                            'No changes detected since last edit.'
-                        );
-                    return;
-                }
-            }
-            // -----------------------
-
-            // Calculate next version number strictly incrementally
-            const nextVersionNumber = calculateNextVersionNumber(
-                branch.versions
-            );
-
-            // Edit ID: simple format, ignoring versionIdFormat
-            const editId = `E${nextVersionNumber}_${Date.now()}`;
-            const textStats = calculateTextStats(content);
-            const timestamp = new Date().toISOString();
-            const uncompressedSize = new Blob([content]).size;
-
-            // Update Manifest
-            branch.versions[editId] = {
-                versionNumber: nextVersionNumber,
-                timestamp,
-                size: uncompressedSize, // Legacy/Default size field
-                uncompressedSize: uncompressedSize, // Explicit uncompressed size
-                // compressedSize will be populated by the worker
-                wordCount: textStats.wordCount,
-                wordCountWithMd: textStats.wordCountWithMd,
-                charCount: textStats.charCount,
-                charCountWithMd: textStats.charCountWithMd,
-                lineCount: textStats.lineCount,
-                lineCountWithoutMd: textStats.lineCountWithoutMd,
-            };
-            branch.totalVersions = nextVersionNumber;
-            manifest!.lastModified = timestamp;
-
-            // Save to IDB
-            await editHistoryManager.saveEdit(
+            // Delegate all logic to Manager to ensure serialization and atomicity
+            const result = await editHistoryManager.createEdit(
                 noteId,
-                branchName,
-                editId,
                 content,
-                manifest!
+                file.path,
+                maxVersions
             );
 
-            const newEditEntry: VersionHistoryEntry = {
-                id: editId,
-                noteId,
-                notePath: file.path,
-                branchName,
-                versionNumber: nextVersionNumber,
-                timestamp,
-                size: uncompressedSize,
-                uncompressedSize: uncompressedSize,
-                // Note: compressedSize is not available immediately in the thunk without reloading from worker
-                // UI will fallback to uncompressedSize until reload
-                wordCount: textStats.wordCount,
-                wordCountWithMd: textStats.wordCountWithMd,
-                charCount: textStats.charCount,
-                charCountWithMd: textStats.charCountWithMd,
-                lineCount: textStats.lineCount,
-                lineCountWithoutMd: textStats.lineCountWithoutMd,
-            };
+            if (result) {
+                const { entry: newEditEntry, deletedIds } = result;
 
-            dispatch(appSlice.actions.addEditSuccess({ newEdit: newEditEntry }));
-            if (!isAuto) {
-                uiService.showNotice(`Edit #${nextVersionNumber} saved.`);
-                // If manual save, reset the timer to skip the next immediate auto-save turn
-                backgroundTaskManager.resetTimer('edit');
-            }
+                // Update State - Add New
+                dispatch(appSlice.actions.addEditSuccess({ newEdit: newEditEntry }));
 
-            // --- Enforce History Limit ---
-            try {
-                const settings = await resolveSettings(noteId, 'edit', container);
-                const maxVersions = settings.maxVersionsPerNote;
-
-                // Re-evaluate versions list from the updated branch object
-                const allVersions = Object.values(branch.versions);
-                
-                if (allVersions.length > maxVersions) {
-                    // Sort by versionNumber ascending (oldest first)
-                    const sortedEntries = Object.entries(branch.versions).sort(([, a], [, b]) => {
-                        return (a as any).versionNumber - (b as any).versionNumber;
-                    });
-
-                    const excessCount = sortedEntries.length - maxVersions;
-                    if (excessCount > 0) {
-                        const entriesToDelete = sortedEntries.slice(0, excessCount);
-                        const idsToDelete = entriesToDelete.map(([id]) => id);
-
-                        // Perform deletion
-                        for (const id of idsToDelete) {
-                            delete branch.versions[id];
-                            // Also delete from IDB
-                            await editHistoryManager.deleteEdit(noteId, branchName, id);
-                        }
-
-                        // Save updated manifest
-                        manifest!.lastModified = new Date().toISOString();
-                        await editHistoryManager.saveEditManifest(noteId, manifest!);
-
-                        // Update UI immediately to prevent stale data
-                        dispatch(appSlice.actions.removeEditsSuccess({ ids: idsToDelete }));
+                // Update State - Remove Old (Instant UI Update)
+                if (deletedIds.length > 0) {
+                    dispatch(appSlice.actions.removeEditsSuccess({ ids: deletedIds }));
+                    
+                    // Update Timeline if needed
+                    if (getState().panel?.type === 'timeline' && getState().viewMode === 'edits') {
+                         for (const id of deletedIds) {
+                            dispatch(appSlice.actions.removeTimelineEvent({ versionId: id }));
+                         }
                     }
                 }
-            } catch (limitError) {
-                console.error('VC: Failed to enforce edit history limit', limitError);
-                // Non-critical failure, do not throw
+                
+                // Trigger Event Bus for external subscribers (Instant UI Updates)
+                eventBus.trigger('version-saved', noteId);
+                
+                // Instant Timeline Update for New Event
+                const currentState = getState();
+                if (currentState.panel?.type === 'timeline' && currentState.viewMode === 'edits') {
+                    try {
+                        const newEvent = await timelineManager.createEventForNewVersion(
+                            noteId,
+                            currentState.currentBranch || 'main',
+                            'edit',
+                            newEditEntry
+                        );
+                        if (newEvent) {
+                            dispatch(appSlice.actions.addTimelineEvent(newEvent));
+                        }
+                    } catch (timelineError) {
+                        console.error('VC: Failed to update timeline instantly', timelineError);
+                        // Non-critical, timeline will refresh on next load
+                    }
+                }
+
+                if (!isAuto) {
+                    uiService.showNotice(`Edit #${newEditEntry.versionNumber} saved.`);
+                    // If manual save, reset the timer to skip the next immediate auto-save turn
+                    backgroundTaskManager.resetTimer('edit');
+                }
+            } else {
+                // Duplicate content case
+                if (!isAuto) {
+                    uiService.showNotice('No changes detected since last edit.');
+                }
             }
-            // -----------------------------
 
         } catch (error) {
             console.error('VC: Failed to save edit', error);
