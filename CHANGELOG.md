@@ -1,5 +1,24 @@
 ***
 
+**Version: 1.9.36**
+
+#### ✨ New Features
+
+* **Automatic Data Persistence:** Edit history now supports automatic synchronization across devices.
+    * Previously, data was restricted to `indexedDB`, but it is now stored in `.vctrl` extension files, allowing for seamless syncing.
+    * The process runs automatically in the background without requiring user intervention.
+    * Edit history data is located at `.versiondb` (or your custom location) `/vc-id/branches/*`.
+    
+#### 🔍 Technical Note: Inspecting `.vctrl` Files
+
+If you wish to manually inspect the version control files, you can follow these steps:
+1. Change the file extension from `.vctrl` to `.zip` and extract it.
+2. Inside, you will find a `manifest.json`, `data.json`, and a `blobs` folder.
+3. In the `blobs` folder, change the `.bin` extensions to `.zip` and extract them to reveal extension-less files.
+4. Add the `.md` extension to these files to make them readable.    
+
+***
+
 **Version: 1.9.35**
 
 #### ✨ New Features
