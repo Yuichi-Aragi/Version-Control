@@ -28,6 +28,16 @@ const VersionIdSchema = v.pipe(
 );
 
 /**
+ * Valibot schema for validating branchName inputs.
+ */
+const BranchNameSchema = v.pipe(
+    v.string('branchName must be a string'),
+    v.nonEmpty('branchName cannot be empty'),
+    v.maxLength(255, 'branchName cannot exceed 255 characters'),
+    v.transform((s: string): string => s.trim())
+);
+
+/**
  * A centralized, robust, and defensively programmed service for generating all database-related file and folder paths.
  * Ensures consistency, type safety, error resilience, and backward compatibility.
  * All methods are strictly guarded against invalid inputs and edge cases using valibot validation.
@@ -85,10 +95,6 @@ export class PathService {
         try {
             const dbRoot = this.getDbRoot();
             const sanitizedNoteId = this.sanitizePathComponent(noteId);
-            
-            // Previously, we stripped .base extension here to match legacy behavior.
-            // This is now removed to ensure that if a note ID is generated as '..._base',
-            // the folder reflects that exactly.
             
             const rawPath = `${dbRoot}/${sanitizedNoteId}`;
             const normalized = normalizePath(rawPath);
@@ -179,6 +185,53 @@ export class PathService {
     }
 
     /**
+     * Generates the path to the branches directory for a note.
+     * @param {string} noteId - Unique identifier for the note.
+     * @returns {string} Normalized path to the branches directory.
+     */
+    public getBranchesPath(noteId: string): string {
+        this.validateNoteId(noteId, 'getBranchesPath');
+        try {
+            const noteDbPath = this.getNoteDbPath(noteId);
+            const rawPath = `${noteDbPath}/branches`;
+            return normalizePath(rawPath);
+        } catch (error) {
+            throw new Error(`PathService.getBranchesPath: Failed to generate path for noteId "${noteId}": ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
+
+    /**
+     * Generates the path for a specific branch folder.
+     * @param {string} noteId - Unique identifier for the note.
+     * @param {string} branchName - Name of the branch.
+     * @returns {string} Normalized path to the branch folder.
+     */
+    public getBranchPath(noteId: string, branchName: string): string {
+        this.validateNoteId(noteId, 'getBranchPath');
+        this.validateBranchName(branchName, 'getBranchPath');
+
+        try {
+            const branchesPath = this.getBranchesPath(noteId);
+            const sanitizedBranchName = this.sanitizePathComponent(branchName);
+            const rawPath = `${branchesPath}/${sanitizedBranchName}`;
+            return normalizePath(rawPath);
+        } catch (error) {
+            throw new Error(`PathService.getBranchPath: Failed to generate path for noteId "${noteId}", branch "${branchName}": ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
+
+    /**
+     * Generates a filename for a vctrl file.
+     * @param {string} timestamp - The timestamp string (usually Date.now().toString()).
+     * @returns {string} The filename with extension.
+     */
+    public getVctrlFilename(timestamp: string): string {
+        // Ensure timestamp only contains safe characters
+        const safeTimestamp = timestamp.replace(/[^0-9]/g, '');
+        return `${safeTimestamp}.vctrl`;
+    }
+
+    /**
      * Validates that a noteId is a non-empty, non-whitespace string using valibot.
      * @param {unknown} noteId - The note identifier to validate.
      * @param {string} methodName - Name of the calling method for error context.
@@ -205,6 +258,14 @@ export class PathService {
         if (!result.success) {
             const messages = result.issues.map(issue => issue.message).join('; ');
             throw new Error(`PathService.${methodName}: Invalid versionId - ${messages}`);
+        }
+    }
+
+    private validateBranchName(branchName: unknown, methodName: string): asserts branchName is string {
+        const result = v.safeParse(BranchNameSchema, branchName);
+        if (!result.success) {
+            const messages = result.issues.map(issue => issue.message).join('; ');
+            throw new Error(`PathService.${methodName}: Invalid branchName - ${messages}`);
         }
     }
 

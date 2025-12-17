@@ -14,7 +14,7 @@ const CENTRAL_MANIFEST_QUEUE_KEY = 'system:central-manifest';
  *
  * ARCHITECTURE NOTE:
  * Uses the Public (Queued) / Internal (Unqueued) pattern to prevent deadlocks.
- * Implements aggressive cache invalidation on write failures.
+ * Implements strict state synchronization with the plugin settings.
  * Utilises Immer for all state modifications to ensure immutability.
  */
 @injectable()
@@ -105,14 +105,22 @@ export class CentralManifestRepository {
     // ==================================================================================
 
     private async _loadInternal(forceReload: boolean): Promise<CentralManifest> {
+        // IDEMPOTENCY CHECK:
+        // Even if cache exists, we verify it against the current plugin settings state
+        // to ensure we never serve stale data if settings were updated externally.
         if (this.cache && !forceReload) {
-            return { ...this.cache };
+            // Quick reference check - if settings object hasn't changed, cache is valid
+            if (this.plugin.settings.centralManifest === this.cache) {
+                return { ...this.cache };
+            }
         }
 
         if (this.initializationPromise) {
             await this.initializationPromise;
             if (this.cache && !forceReload) {
-                return { ...this.cache };
+                 if (this.plugin.settings.centralManifest === this.cache) {
+                    return { ...this.cache };
+                }
             }
         }
 
@@ -132,8 +140,8 @@ export class CentralManifestRepository {
 
             if (parseResult.success) {
                 this.cache = parseResult.output;
+                // If the parsed output differs from input (normalization), update settings
                 if (JSON.stringify(originalManifest) !== JSON.stringify(parseResult.output)) {
-                    // Update settings using produce
                     this.plugin.settings = produce(this.plugin.settings, draft => {
                         draft.centralManifest = parseResult.output;
                     });
@@ -142,7 +150,7 @@ export class CentralManifestRepository {
             } else {
                 console.warn("Version Control: Central manifest validation failed. Resetting.", parseResult.issues);
                 this.cache = v.parse(CentralManifestSchema, { version: '1.0.0', notes: {} });
-                // Update settings using produce
+                
                 this.plugin.settings = produce(this.plugin.settings, draft => {
                     draft.centralManifest = this.cache!;
                 });
@@ -152,6 +160,7 @@ export class CentralManifestRepository {
             this.rebuildPathToIdMap();
         } catch (error) {
             console.error('CentralManifestRepository.initializeManifest failed:', error);
+            // Fallback to empty
             this.cache = v.parse(CentralManifestSchema, { version: '1.0.0', notes: {} });
             this.rebuildPathToIdMap();
         }
@@ -164,7 +173,8 @@ export class CentralManifestRepository {
     private async _updateAndSaveManifest(updateFn: (draft: CentralManifest) => void): Promise<void> {
         return this.queueService.enqueue(CENTRAL_MANIFEST_QUEUE_KEY, async () => {
             try {
-                const currentManifest = await this._loadInternal(false);
+                // Always get fresh state
+                const currentManifest = await this._loadInternal(true);
 
                 // 1. Create new manifest state using Immer
                 const newManifest = produce(currentManifest, (draft) => {
@@ -178,9 +188,11 @@ export class CentralManifestRepository {
                 this.plugin.settings = produce(this.plugin.settings, draft => {
                     draft.centralManifest = validatedManifest;
                 });
+                
+                // 4. Persist to disk
                 await this.plugin.saveSettings();
 
-                // 4. Update cache
+                // 5. Update cache
                 this.cache = validatedManifest;
                 this.rebuildPathToIdMap();
             } catch (error) {

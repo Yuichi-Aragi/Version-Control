@@ -7,6 +7,8 @@ import { TYPES } from '@/types/inversify.types';
  * It encapsulates common, potentially risky file operations like recursive deletion and
  * folder creation, providing a centralized and resilient implementation with
  * built-in retry logic and false-positive error mitigation.
+ * 
+ * ENHANCEMENT: Absolute idempotency guarantees for all operations.
  */
 @injectable()
 export class StorageService {
@@ -52,6 +54,8 @@ export class StorageService {
                         if (stat?.type === 'file') {
                             throw new Error(`A file exists at the required folder path "${path}".`);
                         }
+                        // If stat is null here, it means it DOESN'T exist, so the error was weird.
+                        // We throw to retry.
                     }
                     throw error;
                 }
@@ -69,7 +73,7 @@ export class StorageService {
     /**
      * Permanently and recursively deletes a folder using the vault adapter.
      * This bypasses Obsidian's trash and is intended for internal plugin data management.
-     * It's resilient and will not throw if the folder doesn't exist.
+     * It's resilient and will not throw if the folder doesn't exist (Idempotent).
      * @param path The path of the folder to delete.
      */
     public async permanentlyDeleteFolder(path: string): Promise<void> {
@@ -77,7 +81,14 @@ export class StorageService {
             async () => {
                 const exists = await this.vault.adapter.exists(path);
                 if (exists) {
-                    await this.vault.adapter.rmdir(path, true);
+                    try {
+                        await this.vault.adapter.rmdir(path, true);
+                    } catch (error) {
+                        // If it fails because it's already gone (race condition), ignore.
+                        const stillExists = await this.vault.adapter.exists(path);
+                        if (!stillExists) return;
+                        throw error;
+                    }
                 }
             },
             async () => {
@@ -115,7 +126,15 @@ export class StorageService {
                     throw new Error(`Destination path "${newPath}" already exists.`);
                 }
 
-                await this.vault.adapter.rename(oldPath, newPath);
+                try {
+                    await this.vault.adapter.rename(oldPath, newPath);
+                } catch (error) {
+                    // Check for race condition success
+                    const s = await this.vault.adapter.exists(oldPath);
+                    const t = await this.vault.adapter.exists(newPath);
+                    if (!s && t) return; // Success happened despite error
+                    throw error;
+                }
             },
             async () => {
                 // Validation: Source should be gone, Target should exist
