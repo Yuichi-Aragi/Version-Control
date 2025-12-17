@@ -143,6 +143,7 @@ export const appSlice = createSlice({
         },
         setViewMode(state, action: PayloadAction<ViewMode>) {
             state.viewMode = action.payload;
+            state.status = AppStatus.LOADING; // Force loading state to prevent stale data rendering
             
             // STRICT CLEANUP: Prevent bleed over of state from previous mode
             state.panel = null; 
@@ -376,6 +377,17 @@ export const appSlice = createSlice({
         setTimelineData(state, action: PayloadAction<TimelineEvent[]>) {
             if (state.panel?.type === 'timeline') {
                 state.panel.events = action.payload;
+            }
+        },
+        addTimelineEvent(state, action: PayloadAction<TimelineEvent>) {
+            if (state.panel?.type === 'timeline' && state.panel.events) {
+                // Add to start of list (assuming desc sort)
+                state.panel.events.unshift(action.payload);
+            }
+        },
+        removeTimelineEvent(state, action: PayloadAction<{ versionId: string }>) {
+            if (state.panel?.type === 'timeline' && state.panel.events) {
+                state.panel.events = state.panel.events.filter(e => e.toVersionId !== action.payload.versionId);
             }
         },
         setTimelineSettings(state, action: PayloadAction<TimelineSettings>) {
