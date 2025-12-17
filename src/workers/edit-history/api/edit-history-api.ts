@@ -1,71 +1,58 @@
 import { transfer } from 'comlink';
-import { freeze, produce } from 'immer';
-import { isEqual } from 'es-toolkit';
+import { freeze } from 'immer';
 import type { NoteManifest } from '@/types';
-import { CONFIG } from '@/workers/edit-history/config';
-import { ValidationError, StateConsistencyError } from '@/workers/edit-history/errors';
-import { db } from '@/workers/edit-history/database';
-import { KeyedMutex, sleep } from '@/workers/edit-history/utils';
+import { FifoKeyedMutex } from '@/workers/edit-history/utils';
+import { CompressionService } from '@/workers/edit-history/services';
 import {
-    HashService,
-    CompressionService,
-    DiffService,
-    ReconstructionService,
-    ContextService,
-    ManifestService
+    EditStorageService,
+    HistoryManagementService,
+    ImportExportService,
+    IntegrityService
 } from '@/workers/edit-history/services';
 import {
-    validateInput,
-    NoteIdSchema,
-    BranchNameSchema,
-    EditIdSchema,
-    PathSchema,
-    ContentSchema,
-    ManifestSchema
+    validateNoteId,
+    validateOldNoteId,
+    validateNewNoteId,
+    validateBranchName,
+    validateEditId,
+    validatePath,
+    validateContent,
+    validateNoteManifest,
+    validateArrayBuffer
 } from '@/workers/edit-history/validation';
 import type {
-    StoredEdit,
-    StorageType,
     DatabaseStats,
     IntegrityCheckResult
 } from '@/workers/edit-history/types';
 
-const mutex = new KeyedMutex();
+// ============================================================================
+// CONSTANTS
+// ============================================================================
 
-function createEditRecord(params: {
-    noteId: string;
-    branchName: string;
-    editId: string;
-    content: ArrayBuffer;
-    contentHash: string;
-    storageType: StorageType;
-    chainLength: number;
-    uncompressedSize: number;
-    baseEditId?: string;
-    previousEditId?: string;
-}): StoredEdit {
-    const record: StoredEdit = {
-        noteId: params.noteId,
-        branchName: params.branchName,
-        editId: params.editId,
-        content: params.content,
-        contentHash: params.contentHash,
-        storageType: params.storageType,
-        chainLength: params.chainLength,
-        createdAt: Date.now(),
-        size: params.content.byteLength,
-        uncompressedSize: params.uncompressedSize
-    };
+const OPERATION_TIMEOUT_MS = 30000;
 
-    if (params.baseEditId !== undefined) {
-        (record as { baseEditId: string }).baseEditId = params.baseEditId;
-    }
-    if (params.previousEditId !== undefined) {
-        (record as { previousEditId: string }).previousEditId = params.previousEditId;
-    }
+// ============================================================================
+// MUTEX INSTANCE WITH ENHANCED LOCKING
+// ============================================================================
 
-    return freeze(record);
+const mutex = new FifoKeyedMutex(OPERATION_TIMEOUT_MS);
+
+// ============================================================================
+// ATOMIC OPERATION WRAPPER
+// ============================================================================
+
+async function withAtomicLock<T>(
+    noteId: string,
+    operation: () => Promise<T>,
+    branchName?: string
+): Promise<T> {
+    const key = branchName ? `${noteId}:${branchName}` : noteId;
+    return mutex.run(key, operation);
 }
+
+// ============================================================================
+// ENHANCED API IMPLEMENTATION
+// ============================================================================
 
 export const editHistoryApi = {
     async saveEdit(
@@ -74,140 +61,52 @@ export const editHistoryApi = {
         editId: unknown,
         content: unknown,
         manifestUpdate: unknown
-    ): Promise<void> {
-        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
-        const validBranchName = validateInput(BranchNameSchema, branchName, 'branchName');
-        const validEditId = validateInput(EditIdSchema, editId, 'editId');
-        const validContent = validateInput(ContentSchema, content, 'content');
-        const validManifest = validateInput(ManifestSchema, manifestUpdate, 'manifest') as NoteManifest;
+    ): Promise<{ size: number; contentHash: string }> {
+        const validNoteId = validateNoteId(noteId);
+        const validBranchName = validateBranchName(branchName);
+        const validEditId = validateEditId(editId);
+        const validContent = validateContent(content);
+        const validManifest = validateNoteManifest(manifestUpdate);
 
-        return mutex.run(validNoteId, async () => {
+        return withAtomicLock(validNoteId, async () => {
             const contentStr =
                 typeof validContent === 'string'
                     ? validContent
                     : CompressionService.textDecoder.decode(validContent);
 
-            const contentHash = await HashService.computeHash(contentStr);
-            const uncompressedSize = CompressionService.getUncompressedSize(contentStr);
+            let forceSave = false;
 
-            for (let attempt = 0; attempt < CONFIG.MAX_RETRIES; attempt++) {
-                const existsOptimistic = await db.edits
-                    .where('[noteId+branchName+editId]')
-                    .equals([validNoteId, validBranchName, validEditId])
-                    .count();
-
-                if (existsOptimistic > 0) {
-                    return;
-                }
-
-                const previousContext = await ContextService.getPreviousEditContext(validNoteId, validBranchName);
-
-                let compressedContent: ArrayBuffer;
-                let storageType: StorageType;
-                let baseEditId: string | undefined;
-                let previousEditId: string | undefined;
-                let chainLength: number;
-
-                if (!previousContext) {
-                    compressedContent = CompressionService.compressContent(contentStr);
-                    storageType = 'full';
-                    chainLength = 0;
-                } else {
-                    const isChainTooLong = previousContext.chainLength >= CONFIG.MAX_CHAIN_LENGTH;
-
-                    if (isChainTooLong) {
-                        compressedContent = CompressionService.compressContent(contentStr);
-                        storageType = 'full';
-                        chainLength = 0;
-                        previousEditId = previousContext.editId;
-                    } else {
-                        const diffPatch = DiffService.createDiff(previousContext.content, contentStr, validEditId);
-                        const diffSize = DiffService.calculateDiffSize(diffPatch);
-                        const fullSize = uncompressedSize;
-
-                        if (diffSize < fullSize * CONFIG.DIFF_SIZE_THRESHOLD) {
-                            compressedContent = CompressionService.compressContent(diffPatch);
-                            storageType = 'diff';
-                            baseEditId = previousContext.baseEditId;
-                            previousEditId = previousContext.editId;
-                            chainLength = previousContext.chainLength + 1;
-                        } else {
-                            compressedContent = CompressionService.compressContent(contentStr);
-                            storageType = 'full';
-                            chainLength = 0;
-                            previousEditId = previousContext.editId;
-                        }
-                    }
-                }
-
-                const editRecord = createEditRecord({
-                    noteId: validNoteId,
-                    branchName: validBranchName,
-                    editId: validEditId,
-                    content: compressedContent,
-                    contentHash,
-                    storageType,
-                    chainLength,
-                    uncompressedSize,
-                    ...(baseEditId !== undefined && { baseEditId }),
-                    ...(previousEditId !== undefined && { previousEditId })
-                });
-
-                const updatedManifest = ManifestService.updateManifestWithEditInfo(
-                    validManifest,
+            try {
+                const existing = await EditStorageService.getEditContent(
+                    validNoteId,
                     validBranchName,
-                    validEditId,
-                    compressedContent.byteLength,
-                    uncompressedSize,
-                    contentHash
+                    validEditId
                 );
 
-                let committed = false;
-
-                await db.transaction('rw', db.edits, db.manifests, async () => {
-                    const existing = await db.edits
-                        .where('[noteId+branchName+editId]')
-                        .equals([validNoteId, validBranchName, validEditId])
-                        .count();
-
-                    if (existing > 0) {
-                        committed = true;
-                        return;
+                if (existing !== null) {
+                    const existingStr = CompressionService.textDecoder.decode(existing);
+                    if (existingStr === contentStr) {
+                         // Even if content is identical, we need to return the stats of the existing record
+                         // to ensure the caller gets valid data.
+                         // EditStorageService.saveEdit handles idempotency checks.
                     }
-
-                    const currentHead = await db.edits
-                        .where('[noteId+branchName]')
-                        .equals([validNoteId, validBranchName])
-                        .last();
-
-                    const currentHeadId = currentHead?.editId;
-                    const previousContextId = previousContext?.editId;
-
-                    if (currentHeadId !== previousContextId) {
-                        return;
-                    }
-
-                    await db.edits.put({ ...editRecord } as StoredEdit);
-                    await db.manifests.put({
-                        noteId: validNoteId,
-                        manifest: updatedManifest,
-                        updatedAt: Date.now()
-                    });
-
-                    committed = true;
-                });
-
-                if (committed) {
-                    return;
                 }
-
-                if (attempt < CONFIG.MAX_RETRIES - 1) {
-                    await sleep(CONFIG.RETRY_BASE_DELAY_MS * Math.pow(2, attempt));
-                }
+            } catch (error) {
+                // If checking existing content fails (e.g. IntegrityError due to corruption),
+                // we should force save to repair the state.
+                console.warn(`[EditHistoryApi] Failed to check existing edit ${validEditId}, forcing overwrite.`, error);
+                forceSave = true;
             }
 
-            throw new StateConsistencyError('Failed to save edit after maximum retries due to concurrent modifications');
-        });
+            return await EditStorageService.saveEdit(
+                validNoteId,
+                validBranchName,
+                validEditId,
+                contentStr,
+                validManifest,
+                { force: forceSave }
+            );
+        }, validBranchName);
     },
 
     async getEditContent(
@@ -215,380 +114,277 @@ export const editHistoryApi = {
         branchName: unknown,
         editId: unknown
     ): Promise<ArrayBuffer | null> {
-        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
-        const validBranchName = validateInput(BranchNameSchema, branchName, 'branchName');
-        const validEditId = validateInput(EditIdSchema, editId, 'editId');
+        const validNoteId = validateNoteId(noteId);
+        const validBranchName = validateBranchName(branchName);
+        const validEditId = validateEditId(editId);
 
-        return mutex.run(validNoteId, async () => {
-            const edits = await db.edits
-                .where('[noteId+branchName]')
-                .equals([validNoteId, validBranchName])
-                .toArray();
-
-            const editMap = new Map(edits.map((e) => [e.editId, e]));
-
-            if (!editMap.has(validEditId)) {
-                return null;
-            }
-
-            const result = await ReconstructionService.reconstructFromMap(validEditId, editMap, true);
-
-            const buffer = CompressionService.textEncoder.encode(result.content).buffer as ArrayBuffer;
-            return transfer(buffer, [buffer]);
-        });
+        return withAtomicLock(validNoteId, async () => {
+            const buffer = await EditStorageService.getEditContent(
+                validNoteId,
+                validBranchName,
+                validEditId
+            );
+            
+            if (buffer === null) return null;
+            
+            const copy = buffer.slice(0);
+            return transfer(copy, [copy]);
+        }, validBranchName);
     },
 
     async getEditManifest(noteId: unknown): Promise<NoteManifest | null> {
-        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
+        const validNoteId = validateNoteId(noteId);
 
-        return mutex.run(validNoteId, async () => {
-            const record = await db.manifests.get(validNoteId);
-            return record ? freeze(record.manifest) : null;
+        return withAtomicLock(validNoteId, async () => {
+            const manifest = await HistoryManagementService.getEditManifest(validNoteId);
+            return manifest !== null ? freeze(manifest, true) : null;
         });
     },
 
     async saveEditManifest(noteId: unknown, manifest: unknown): Promise<void> {
-        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
-        const validManifest = validateInput(ManifestSchema, manifest, 'manifest') as NoteManifest;
+        const validNoteId = validateNoteId(noteId);
+        const validManifest = validateNoteManifest(manifest);
 
-        return mutex.run(validNoteId, async () => {
-            await db.manifests.put({
-                noteId: validNoteId,
-                manifest: validManifest,
-                updatedAt: Date.now()
-            });
+        return withAtomicLock(validNoteId, async () => {
+            const existing = await HistoryManagementService.getEditManifest(validNoteId);
+            if (existing && JSON.stringify(existing) === JSON.stringify(validManifest)) {
+                return;
+            }
+
+            await HistoryManagementService.saveEditManifest(validNoteId, validManifest);
         });
     },
 
-    async deleteEdit(noteId: unknown, branchName: unknown, editId: unknown): Promise<void> {
-        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
-        const validBranchName = validateInput(BranchNameSchema, branchName, 'branchName');
-        const validEditId = validateInput(EditIdSchema, editId, 'editId');
+    async deleteEdit(
+        noteId: unknown,
+        branchName: unknown,
+        editId: unknown
+    ): Promise<void> {
+        const validNoteId = validateNoteId(noteId);
+        const validBranchName = validateBranchName(branchName);
+        const validEditId = validateEditId(editId);
 
-        return mutex.run(validNoteId, async () => {
-            await db.transaction('rw', db.edits, async () => {
-                const branchEdits = await db.edits
-                    .where('[noteId+branchName]')
-                    .equals([validNoteId, validBranchName])
-                    .toArray();
+        return withAtomicLock(validNoteId, async () => {
+            const content = await EditStorageService.getEditContent(
+                validNoteId,
+                validBranchName,
+                validEditId
+            );
 
-                const editMap = new Map(branchEdits.map((e) => [e.editId, e]));
-                const targetEdit = editMap.get(validEditId);
+            if (content === null) return;
 
-                if (!targetEdit) {
-                    return;
-                }
-
-                const children = branchEdits.filter((e) => e.previousEditId === validEditId);
-                const updates: StoredEdit[] = [];
-
-                for (const child of children) {
-                    const result = await ReconstructionService.reconstructFromMap(child.editId, editMap, false);
-                    const childContentHash = await HashService.computeHash(result.content);
-                    const compressedContent = CompressionService.compressContent(result.content);
-                    const childUncompressedSize = CompressionService.getUncompressedSize(result.content);
-
-                    const updatedChild = produce(child, (draft) => {
-                        draft.storageType = 'full';
-                        draft.content = compressedContent;
-                        draft.contentHash = childContentHash;
-                        draft.baseEditId = draft.editId;
-                        draft.chainLength = 0;
-                        draft.size = compressedContent.byteLength;
-                        draft.uncompressedSize = childUncompressedSize;
-
-                        if (targetEdit.previousEditId) {
-                            draft.previousEditId = targetEdit.previousEditId;
-                        } else {
-                            delete draft.previousEditId;
-                        }
-                    });
-
-                    updates.push(updatedChild);
-
-                    const queue = [child.editId];
-                    const visited = new Set([child.editId]);
-
-                    while (queue.length > 0) {
-                        const currentId = queue.shift()!;
-                        const descendants = branchEdits.filter((e) => e.previousEditId === currentId);
-
-                        for (const descendant of descendants) {
-                            if (!visited.has(descendant.editId)) {
-                                visited.add(descendant.editId);
-                                queue.push(descendant.editId);
-
-                                const parentUpdate = updates.find((u) => u.editId === descendant.previousEditId);
-                                const parent = parentUpdate ?? editMap.get(descendant.previousEditId!);
-                                const newChainLength = parent ? parent.chainLength + 1 : 1;
-
-                                const updatedDescendant = produce(descendant, (draft) => {
-                                    draft.baseEditId = child.editId;
-                                    draft.chainLength = newChainLength;
-                                });
-
-                                const existingIdx = updates.findIndex((u) => u.editId === updatedDescendant.editId);
-                                if (existingIdx >= 0) {
-                                    updates[existingIdx] = updatedDescendant;
-                                } else {
-                                    updates.push(updatedDescendant);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (updates.length > 0) {
-                    await db.edits.bulkPut(updates.map((u) => ({ ...u })));
-                }
-
-                if (targetEdit.id !== undefined) {
-                    await db.edits.delete(targetEdit.id);
-                }
-            });
-        });
+            await EditStorageService.deleteEdit(validNoteId, validBranchName, validEditId);
+        }, validBranchName);
     },
 
     async deleteNoteHistory(noteId: unknown): Promise<void> {
-        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
+        const validNoteId = validateNoteId(noteId);
 
-        return mutex.run(validNoteId, async () => {
-            await db.transaction('rw', db.edits, db.manifests, async () => {
-                await db.edits.where('noteId').equals(validNoteId).delete();
-                await db.manifests.delete(validNoteId);
-            });
+        return withAtomicLock(validNoteId, async () => {
+            const manifest = await HistoryManagementService.getEditManifest(validNoteId);
+            if (manifest === null) return;
+
+            await HistoryManagementService.deleteNoteHistory(validNoteId);
         });
     },
 
     async deleteBranch(noteId: unknown, branchName: unknown): Promise<void> {
-        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
-        const validBranchName = validateInput(BranchNameSchema, branchName, 'branchName');
+        const validNoteId = validateNoteId(noteId);
+        const validBranchName = validateBranchName(branchName);
 
-        return mutex.run(validNoteId, async () => {
-            await db.transaction('rw', db.edits, db.manifests, async () => {
-                // Delete all edits for this branch
-                await db.edits
-                    .where('[noteId+branchName]')
-                    .equals([validNoteId, validBranchName])
-                    .delete();
+        return withAtomicLock(validNoteId, async () => {
+            const manifest = await HistoryManagementService.getEditManifest(validNoteId);
+            if (manifest === null || !manifest.branches[validBranchName]) return;
 
-                // Update manifest to remove branch
-                const record = await db.manifests.get(validNoteId);
-                if (record) {
-                    const updatedManifest = produce(record.manifest, (draft) => {
-                        delete draft.branches[validBranchName];
-                        // If current branch was the deleted one, switch to another if available
-                        // This logic is primarily handled by the main thread manager, but we ensure consistency here
-                        if (draft.currentBranch === validBranchName) {
-                            const remainingBranches = Object.keys(draft.branches);
-                            if (remainingBranches.length > 0) {
-                                draft.currentBranch = remainingBranches[0]!;
-                            }
-                        }
-                        draft.lastModified = new Date().toISOString();
-                    });
+            await HistoryManagementService.deleteBranch(validNoteId, validBranchName);
+        }, validBranchName);
+    },
 
-                    await db.manifests.put({
-                        noteId: validNoteId,
-                        manifest: updatedManifest,
-                        updatedAt: Date.now()
-                    });
+    async renameEdit(
+        noteId: unknown,
+        oldEditId: unknown,
+        newEditId: unknown
+    ): Promise<void> {
+        const validNoteId = validateNoteId(noteId);
+        const validOldEditId = validateEditId(oldEditId, 'oldEditId');
+        const validNewEditId = validateEditId(newEditId, 'newEditId');
+
+        if (validOldEditId === validNewEditId) return;
+
+        return withAtomicLock(validNoteId, async () => {
+            const manifest = await HistoryManagementService.getEditManifest(validNoteId);
+            if (manifest === null) return;
+
+            let targetBranch: string | null = null;
+            for (const [branchName, branch] of Object.entries(manifest.branches)) {
+                if (branch.versions[validOldEditId]) {
+                    targetBranch = branchName;
+                    break;
                 }
-            });
+            }
+
+            if (!targetBranch) return;
+
+            await EditStorageService.renameEdit(validNoteId, validOldEditId, validNewEditId);
         });
     },
 
-    async renameEdit(noteId: unknown, oldEditId: unknown, newEditId: unknown): Promise<void> {
-        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
-        const validOldEditId = validateInput(EditIdSchema, oldEditId, 'oldEditId');
-        const validNewEditId = validateInput(EditIdSchema, newEditId, 'newEditId');
+    async renameNote(
+        oldNoteId: unknown,
+        newNoteId: unknown,
+        newPath: unknown
+    ): Promise<void> {
+        const validOldNoteId = validateOldNoteId(oldNoteId);
+        const validNewNoteId = validateNewNoteId(newNoteId);
+        const validNewPath = validatePath(newPath, 'newPath');
 
-        if (validOldEditId === validNewEditId) {
-            return;
-        }
+        if (validOldNoteId === validNewNoteId) return;
 
-        return mutex.run(validNoteId, async () => {
-            await db.transaction('rw', db.edits, async () => {
-                const oldExists = await db.edits
-                    .where({ noteId: validNoteId, editId: validOldEditId })
-                    .count();
+        return mutex.runMultiple(
+            [validOldNoteId, validNewNoteId],
+            async () => {
+                const oldManifest = await HistoryManagementService.getEditManifest(validOldNoteId);
+                if (oldManifest === null) return;
 
-                if (oldExists === 0) {
-                    return;
-                }
-
-                const newExists = await db.edits
-                    .where({ noteId: validNoteId, editId: validNewEditId })
-                    .count();
-
-                if (newExists > 0) {
-                    throw new ValidationError(`Edit ${validNewEditId} already exists`, 'newEditId');
-                }
-
-                const records = await db.edits
-                    .where('noteId')
-                    .equals(validNoteId)
-                    .filter((e) => e.editId === validOldEditId)
-                    .toArray();
-
-                for (const record of records) {
-                    if (record.id !== undefined) {
-                        await db.edits.update(record.id, { editId: validNewEditId });
-                    }
-                }
-
-                const dependentRecords = await db.edits
-                    .where('noteId')
-                    .equals(validNoteId)
-                    .filter((e) => e.baseEditId === validOldEditId || e.previousEditId === validOldEditId)
-                    .toArray();
-
-                for (const record of dependentRecords) {
-                    if (record.id !== undefined) {
-                        const updates: Partial<StoredEdit> = {};
-                        if (record.baseEditId === validOldEditId) {
-                            updates.baseEditId = validNewEditId;
-                        }
-                        if (record.previousEditId === validOldEditId) {
-                            updates.previousEditId = validNewEditId;
-                        }
-                        if (Object.keys(updates).length > 0) {
-                            await db.edits.update(record.id, updates);
-                        }
-                    }
-                }
-            });
-        });
-    },
-
-    async renameNote(oldNoteId: unknown, newNoteId: unknown, newPath: unknown): Promise<void> {
-        const validOldNoteId = validateInput(NoteIdSchema, oldNoteId, 'oldNoteId');
-        const validNewNoteId = validateInput(NoteIdSchema, newNoteId, 'newNoteId');
-        const validNewPath = validateInput(PathSchema, newPath, 'newPath');
-
-        if (validOldNoteId === validNewNoteId) {
-            return;
-        }
-
-        return mutex.run(validOldNoteId, async () => {
-            await db.transaction('rw', db.edits, db.manifests, async () => {
-                await db.edits.where('noteId').equals(validOldNoteId).modify({ noteId: validNewNoteId });
-
-                const oldManifestRecord = await db.manifests.get(validOldNoteId);
-                if (oldManifestRecord) {
-                    const updatedManifest = ManifestService.updateManifestNoteId(
-                        oldManifestRecord.manifest,
-                        validNewNoteId,
-                        validNewPath
-                    );
-
-                    await db.manifests.put({
-                        noteId: validNewNoteId,
-                        manifest: updatedManifest,
-                        updatedAt: Date.now()
-                    });
-
-                    await db.manifests.delete(validOldNoteId);
-                }
-            });
-        });
+                await HistoryManagementService.renameNote(
+                    validOldNoteId,
+                    validNewNoteId,
+                    validNewPath
+                );
+            }
+        );
     },
 
     async updateNotePath(noteId: unknown, newPath: unknown): Promise<void> {
-        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
-        const validNewPath = validateInput(PathSchema, newPath, 'newPath');
+        const validNoteId = validateNoteId(noteId);
+        const validNewPath = validatePath(newPath, 'newPath');
 
-        return mutex.run(validNoteId, async () => {
-            await db.transaction('rw', db.manifests, async () => {
-                const record = await db.manifests.get(validNoteId);
-                if (record) {
-                    const updatedManifest = ManifestService.updateManifestPath(record.manifest, validNewPath);
+        return withAtomicLock(validNoteId, async () => {
+            const manifest = await HistoryManagementService.getEditManifest(validNoteId);
+            if (manifest === null || manifest.notePath === validNewPath) return;
 
-                    await db.manifests.put({
-                        noteId: validNoteId,
-                        manifest: updatedManifest,
-                        updatedAt: Date.now()
-                    });
-                }
-            });
+            await HistoryManagementService.updateNotePath(validNoteId, validNewPath);
         });
     },
 
     async getDatabaseStats(): Promise<DatabaseStats> {
-        const editCount = await db.edits.count();
-        const manifestCount = await db.manifests.count();
+        const { editCount, manifestCount } = await HistoryManagementService.getDatabaseCounts();
 
         return freeze({
             editCount,
             manifestCount,
-            activeKeys: mutex.activeKeys
-        });
+            activeKeys: mutex.activeKeys,
+            queueLength: mutex.queueLength
+        }, true);
     },
 
     async verifyEditIntegrity(
         noteId: unknown,
         branchName: unknown,
-        editId: unknown
+        editId: unknown,
+        fix: unknown = false
     ): Promise<IntegrityCheckResult> {
-        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
-        const validBranchName = validateInput(BranchNameSchema, branchName, 'branchName');
-        const validEditId = validateInput(EditIdSchema, editId, 'editId');
+        const validNoteId = validateNoteId(noteId);
+        const validBranchName = validateBranchName(branchName);
+        const validEditId = validateEditId(editId);
+        const validFix = typeof fix === 'boolean' ? fix : false;
 
-        return mutex.run(validNoteId, async () => {
-            const edits = await db.edits
-                .where('[noteId+branchName]')
-                .equals([validNoteId, validBranchName])
-                .toArray();
-
-            const editMap = new Map(edits.map((e) => [e.editId, e]));
-            const targetEdit = editMap.get(validEditId);
-
-            if (!targetEdit) {
-                throw new ValidationError(`Edit ${validEditId} not found`, 'editId');
-            }
-
-            const result = await ReconstructionService.reconstructFromMap(validEditId, editMap, false);
-
-            const actualHash = result.hash;
-            const expectedHash = targetEdit.contentHash || '';
-            const valid = expectedHash === '' || isEqual(actualHash, expectedHash);
-
-            return freeze({ valid, expectedHash, actualHash });
-        });
+        return withAtomicLock(validNoteId, async () => {
+            const result = await IntegrityService.verifyEditIntegrity(
+                validNoteId,
+                validBranchName,
+                validEditId,
+                { fix: validFix }
+            );
+            return freeze(result, true);
+        }, validBranchName);
     },
 
     async verifyBranchIntegrity(
         noteId: unknown,
-        branchName: unknown
+        branchName: unknown,
+        fix: unknown = false
     ): Promise<readonly IntegrityCheckResult[]> {
-        const validNoteId = validateInput(NoteIdSchema, noteId, 'noteId');
-        const validBranchName = validateInput(BranchNameSchema, branchName, 'branchName');
+        const validNoteId = validateNoteId(noteId);
+        const validBranchName = validateBranchName(branchName);
+        const validFix = typeof fix === 'boolean' ? fix : false;
 
-        return mutex.run(validNoteId, async () => {
-            const edits = await db.edits
-                .where('[noteId+branchName]')
-                .equals([validNoteId, validBranchName])
-                .toArray();
+        return withAtomicLock(validNoteId, async () => {
+            const results = await IntegrityService.verifyBranchIntegrity(
+                validNoteId,
+                validBranchName,
+                { fix: validFix }
+            );
+            return freeze(results, true);
+        }, validBranchName);
+    },
 
-            const editMap = new Map(edits.map((e) => [e.editId, e]));
-            const results: IntegrityCheckResult[] = [];
+    async exportBranchData(
+        noteId: unknown,
+        branchName: unknown
+    ): Promise<ArrayBuffer> {
+        const validNoteId = validateNoteId(noteId);
+        const validBranchName = validateBranchName(branchName);
 
-            for (const edit of edits) {
-                try {
-                    const result = await ReconstructionService.reconstructFromMap(edit.editId, editMap, false);
-                    const actualHash = result.hash;
-                    const expectedHash = edit.contentHash || '';
-                    const valid = expectedHash === '' || actualHash === expectedHash;
+        return withAtomicLock(validNoteId, async () => {
+            const buffer = await ImportExportService.exportBranchData(
+                validNoteId,
+                validBranchName
+            );
+            
+            const copy = buffer.slice(0);
+            return transfer(copy, [copy]);
+        }, validBranchName);
+    },
 
-                    results.push(freeze({ valid, expectedHash, actualHash }));
-                } catch {
-                    results.push(freeze({ valid: false, expectedHash: edit.contentHash || '', actualHash: '' }));
-                }
-            }
+    async importBranchData(
+        noteId: unknown,
+        branchName: unknown,
+        zipData: unknown
+    ): Promise<void> {
+        const validNoteId = validateNoteId(noteId);
+        const validBranchName = validateBranchName(branchName);
+        const validZipData = validateArrayBuffer(zipData, 'zipData');
 
-            return freeze(results);
+        return withAtomicLock(validNoteId, async () => {
+            await ImportExportService.importBranchData(
+                validNoteId,
+                validBranchName,
+                validZipData
+            );
+        }, validBranchName);
+    },
+
+    async readManifestFromZip(zipData: unknown): Promise<any> {
+        const validZipData = validateArrayBuffer(zipData, 'zipData');
+        return ImportExportService.readManifestFromZip(validZipData);
+    },
+
+    async clearAll(): Promise<void> {
+        await mutex.run('*', async () => {
+            await HistoryManagementService.clearAll();
         });
+    },
+
+    async healthCheck(): Promise<{ healthy: boolean; errors: string[] }> {
+        try {
+            const stats = await this.getDatabaseStats();
+            const errors: string[] = [];
+
+            if (stats.editCount < 0) errors.push('Invalid edit count');
+            if (stats.manifestCount < 0) errors.push('Invalid manifest count');
+
+            return {
+                healthy: errors.length === 0,
+                errors
+            };
+        } catch (error) {
+            return {
+                healthy: false,
+                errors: [error instanceof Error ? error.message : 'Unknown error']
+            };
+        }
     }
-};
+} as const;
 
 export type EditHistoryApi = typeof editHistoryApi;
