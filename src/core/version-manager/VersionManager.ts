@@ -13,6 +13,7 @@ import type VersionControlPlugin from '@/main';
 import type { SaveVersionOptions, SaveVersionResult, UpdateVersionDetails, BranchState } from '@/core/version-manager/types';
 import { SaveOperation, RestoreOperation, DeleteOperation, UpdateOperation } from '@/core/version-manager/operations';
 import { VersionValidator } from '@/core/version-manager/validation';
+import { QueueService } from '@/services';
 
 /**
  * Manages the core business logic for versioning operations like saving,
@@ -32,19 +33,22 @@ export class VersionManager {
     @inject(TYPES.ManifestManager) private readonly manifestManager: ManifestManager,
     @inject(TYPES.NoteManager) private readonly noteManager: NoteManager,
     @inject(TYPES.VersionContentRepo) private readonly versionContentRepo: VersionContentRepository,
-    @inject(TYPES.EventBus) private readonly eventBus: PluginEvents
+    @inject(TYPES.EventBus) private readonly eventBus: PluginEvents,
+    @inject(TYPES.QueueService) private readonly queueService: QueueService
   ) {
     this.saveOperation = new SaveOperation(
       this.app,
       this.manifestManager,
       this.noteManager,
       this.versionContentRepo,
-      this.eventBus
+      this.eventBus,
+      this.queueService
     );
 
     this.restoreOperation = new RestoreOperation(
       this.app,
-      this.versionContentRepo
+      this.versionContentRepo,
+      this.queueService
     );
 
     this.deleteOperation = new DeleteOperation(
@@ -52,13 +56,15 @@ export class VersionManager {
       this.manifestManager,
       this.versionContentRepo,
       this.eventBus,
-      this.noteIdKey
+      this.noteIdKey,
+      this.queueService
     );
 
     this.updateOperation = new UpdateOperation(
       this.manifestManager,
       this.versionContentRepo,
-      this.getEffectiveSettings.bind(this)
+      this.getEffectiveSettings.bind(this),
+      this.queueService
     );
   }
 
@@ -320,21 +326,13 @@ export class VersionManager {
     if (contentToRestore !== null) {
         const file = this.app.vault.getAbstractFileByPath(noteManifest.notePath);
         if (file instanceof TFile) {
-            // We use vault.modify to ensure the file on disk is updated with the new branch content.
-            // This is safer for data consistency than editor.setValue, especially when we need
-            // to post-process the frontmatter to ensure ID preservation.
             await this.app.vault.modify(file, contentToRestore);
             
             if (file.extension === 'md') {
-                // Ensure ID is preserved in frontmatter
                 await this.noteManager.writeNoteIdToFrontmatter(file, noteId);
             }
 
-            // If we have an active view, we can try to restore cursor position
-            // Note: vault.modify triggers a reload, so we might need to wait or check if view is still valid.
             if (targetView && newBranchState && targetView.getMode() === 'source') {
-                // Attempt to restore scroll/cursor. This might be race-condition prone if the view reloads async,
-                // but it's a best-effort enhancement.
                 try {
                     targetView.editor.setCursor(newBranchState.cursor);
                     targetView.editor.scrollTo(newBranchState.scroll.left, newBranchState.scroll.top);
