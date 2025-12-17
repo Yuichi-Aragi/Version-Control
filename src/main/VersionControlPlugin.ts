@@ -4,7 +4,7 @@ import type { Debouncer } from 'obsidian';
 import type { Container } from 'inversify';
 import type { AppStore, AppState } from '@/state';
 import { AppStatus, thunks } from '@/state';
-import type { CleanupManager, BackgroundTaskManager, CentralManifestRepository, NoteManifestRepository } from '@/core';
+import type { CleanupManager, BackgroundTaskManager, CentralManifestRepository, NoteManifestRepository, EditHistoryManager } from '@/core';
 import type { QueueService } from '@/services';
 import type { VersionControlSettings } from '@/types';
 import { TYPES } from '@/types/inversify.types';
@@ -148,11 +148,15 @@ export default class VersionControlPlugin extends Plugin {
                 const centralRepo = this.container.get<CentralManifestRepository>(TYPES.CentralManifestRepo);
                 const noteRepo = this.container.get<NoteManifestRepository>(TYPES.NoteManifestRepo);
                 const queueService = this.container.get<QueueService>(TYPES.QueueService);
+                const editHistoryManager = this.container.get<EditHistoryManager>(TYPES.EditHistoryManager);
 
                 // Invalidate caches and clear all pending task queues to prevent orphaned operations.
                 if (centralRepo) centralRepo.invalidateCache();
                 if (noteRepo) noteRepo.clearCache();
                 if (queueService) queueService.clearAll();
+                
+                // Explicitly terminate EditHistoryManager to clear IDB cache and stop worker
+                if (editHistoryManager) await editHistoryManager.terminate();
 
                 // Unbind all services from the DI container. This is a crucial step to allow
                 // the garbage collector to reclaim memory and prevent issues on plugin reload.
