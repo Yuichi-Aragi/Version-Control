@@ -138,16 +138,16 @@ The plugin is designed to be intuitive and fit seamlessly with your Obsidian the
     <td align="center"><strong>Card View (Dark)</strong></td>
   </tr>
   <tr>
-    <td><img src="assets/20251111_001800.jpg" alt="Card View in Light Mode"></td>
-    <td><img src="assets/20251111_001358.jpg" alt="Card View in Dark Mode"></td>
+    <td><img src="https://github.com/Yuichi-Aragi/Version-Control/blob/241b206566ab43253b7e45b0ad7d31cc52c399af/assets/20251111_001800.jpg" alt="Card View in Light Mode"></td>
+    <td><img src="https://github.com/Yuichi-Aragi/Version-Control/blob/241b206566ab43253b7e45b0ad7d31cc52c399af/assets/20251111_001358.jpg" alt="Card View in Dark Mode"></td>
   </tr>
   <tr>
     <td align="center"><strong>List View (Light)</strong></td>
     <td align="center"><strong>List View (Dark)</strong></td>
   </tr>
   <tr>
-    <td><img src="assets/20251111_001725.jpg" alt="List View in Light Mode"></td>
-    <td><img src="assets/20251111_001603.jpg" alt="List View in Dark Mode"></td>
+    <td><img src="https://github.com/Yuichi-Aragi/Version-Control/blob/241b206566ab43253b7e45b0ad7d31cc52c399af/assets/20251111_001725.jpg" alt="List View in Light Mode"></td>
+    <td><img src="https://github.com/Yuichi-Aragi/Version-Control/blob/241b206566ab43253b7e45b0ad7d31cc52c399af/assets/20251111_001603.jpg" alt="List View in Dark Mode"></td>
   </tr>
 </table>
 
