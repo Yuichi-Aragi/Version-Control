@@ -107,10 +107,22 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
         };
     }, []);
 
+    // Strict reset when status changes to LOADING to prevent stale data
+    useEffect(() => {
+        if (status === AppStatus.LOADING) {
+            setProcessedHistory([]);
+            onCountChange(0, 0);
+        }
+    }, [status, onCountChange]);
+
     useEffect(() => {
         if (status !== AppStatus.READY) {
-            setProcessedHistory([]);
-            onCountChange(0, activeList.length);
+            // Handled by the strict reset effect above for LOADING, 
+            // but we ensure clean state for other non-ready statuses here too.
+            if (status !== AppStatus.LOADING) {
+                setProcessedHistory([]);
+                onCountChange(0, activeList.length);
+            }
             return;
         }
 
@@ -286,3 +298,4 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
         </div>
     );
 };
+
