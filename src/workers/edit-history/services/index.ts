@@ -4,3 +4,7 @@ export * from './diff-service';
 export * from './reconstruction-service';
 export * from './context-service';
 export * from './manifest-service';
+export * from './edit-storage-service';
+export * from './history-management-service';
+export * from './import-export-service';
+export * from './integrity-service';
