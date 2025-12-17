@@ -186,7 +186,7 @@ This plugin offers two complementary approaches:
 ### ⏱️ **Edit History** (Automatic Snapshots)
 - **When**: Based on your settings (file save, intervals, change thresholds)
 - **Purpose**: Safety net and session recovery
-- **Storage**: IndexedDB (browser database)
+- **Storage**: `.versiondb` folder (in your vault)
 - **Format**: Compressed diffs (space-efficient)
 - **Best for**: "Oops" moments and seeing how you evolved
 
