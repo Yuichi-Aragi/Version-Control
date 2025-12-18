@@ -1,5 +1,4 @@
 import { transfer } from 'comlink';
-import { produce } from 'immer';
 import type { VersionHistoryEntry, NoteManifest } from '@/types';
 import type { WorkerClient } from '../infrastructure/worker-client';
 import type { PersistenceService } from '../persistence/persistence-service';
