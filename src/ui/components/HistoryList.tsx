@@ -3,15 +3,23 @@ import { orderBy } from 'es-toolkit';
 import clsx from 'clsx';
 import { type FC, useEffect, useRef, useState, useTransition, memo } from 'react';
 import { Virtuoso } from 'react-virtuoso';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAppSelector } from '@/ui/hooks';
 import { AppStatus } from '@/state';
-import type { VersionHistoryEntry as VersionHistoryEntryType } from '@/types';
+import type { VersionHistoryEntry as VersionHistoryEntryType, ViewMode } from '@/types';
 import { formatFileSize } from '@/ui/utils/dom';
 import { HistoryEntry } from '@/ui/components';
 import { Icon } from '@/ui/components';
 
 const SkeletonEntry: FC<{ isListView: boolean }> = memo(({ isListView }) => (
-    <div className={clsx('v-history-entry', 'is-skeleton', { 'is-list-view': isListView })} aria-hidden>
+    <motion.div 
+        className={clsx('v-history-entry', 'is-skeleton', { 'is-list-view': isListView })} 
+        aria-hidden
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.2 }}
+    >
         {isListView ? (
             <>
                 <div className="v-entry-header">
@@ -33,16 +41,24 @@ const SkeletonEntry: FC<{ isListView: boolean }> = memo(({ isListView }) => (
                 <div className="v-version-content v-skeleton-item" />
             </>
         )}
-    </div>
+    </motion.div>
 ));
 SkeletonEntry.displayName = 'SkeletonEntry';
 
 const EmptyState: FC<{ icon: string; title: string; subtitle?: string }> = memo(({ icon, title, subtitle }) => (
-    <div className="v-empty-state" role="status" aria-live="polite">
+    <motion.div 
+        className="v-empty-state" 
+        role="status" 
+        aria-live="polite"
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        transition={{ duration: 0.2 }}
+    >
         <div className="v-empty-state-icon"><Icon name={icon} /></div>
         <p className="v-empty-state-title">{title}</p>
         {subtitle && <p className="v-empty-state-subtitle v-meta-label">{subtitle}</p>}
-    </div>
+    </motion.div>
 ));
 EmptyState.displayName = 'EmptyState';
 
@@ -92,6 +108,10 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
     }));
 
     const [processedHistory, setProcessedHistory] = useState<VersionHistoryEntryType[]>([]);
+    // Track the viewMode for which the current processedHistory is valid
+    const [processedMode, setProcessedMode] = useState<ViewMode>(viewMode);
+    // Track initial load to prevent flash of empty state before first processing
+    const [isFirstLoad, setIsFirstLoad] = useState(true);
     const [isPending, startTransition] = useTransition();
 
     // Determine active list based on mode
@@ -112,19 +132,20 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
         if (status === AppStatus.LOADING) {
             setProcessedHistory([]);
             onCountChange(0, 0);
+            setIsFirstLoad(true);
         }
     }, [status, onCountChange]);
 
     useEffect(() => {
         if (status !== AppStatus.READY) {
-            // Handled by the strict reset effect above for LOADING, 
-            // but we ensure clean state for other non-ready statuses here too.
             if (status !== AppStatus.LOADING) {
                 setProcessedHistory([]);
                 onCountChange(0, activeList.length);
             }
             return;
         }
+
+        let isCancelled = false;
 
         startTransition(() => {
             try {
@@ -143,15 +164,12 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
                         const name = String(v.name ?? '');
                         const description = String(v.description ?? '');
                         
-                        // Prepare searchable fields based on settings
                         const size = formatFileSize(typeof v.size === 'number' ? v.size : 0);
                         
-                        // Timestamp search based on setting
                         const timestampStr = settings.useRelativeTimestamps 
                             ? (() => { try { return (moment as any)(v.timestamp).fromNow(true); } catch { return ''; } })()
                             : safeFormatTimestamp(v.timestamp, 'LLLL');
 
-                        // Stats based on settings
                         const wordCount = settings.enableWordCount 
                             ? String(settings.includeMdSyntaxInWordCount ? v.wordCountWithMd : v.wordCount) 
                             : '';
@@ -162,11 +180,9 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
                             ? String(settings.includeMdSyntaxInLineCount ? v.lineCount : v.lineCountWithoutMd)
                             : '';
 
-                        // Helper for case-insensitive check
                         const check = (val: string) => isSearchCaseSensitive ? val : val.toLowerCase();
                         const q = query;
 
-                        // Scoring Logic
                         if (check(versionId) === q) score += 100;
                         else if (check(versionId).includes(q)) score += 80;
 
@@ -185,16 +201,11 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
                         return { version: v, score };
                     });
 
-                    // Filter out non-matches and sort by score
                     const filteredScored = scored.filter(item => item.score > 0);
-                    
-                    // Sort by score descending, then by user selected sort order
                     const sortedByScore = orderBy(filteredScored, ['score'], ['desc']);
-                    
                     result = sortedByScore.map(item => item.version);
 
                 } else {
-                    // Standard sorting when no search
                     const iteratee = (v: VersionHistoryEntryType): string | number => {
                         const prop = sortOrder?.property ?? 'versionNumber';
                         switch (prop) {
@@ -221,81 +232,127 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
                     result = orderBy(src, [iteratee], [dir]);
                 }
 
-                if (isMountedRef.current) {
+                if (isMountedRef.current && !isCancelled) {
                     setProcessedHistory(result);
+                    setProcessedMode(viewMode);
+                    setIsFirstLoad(false);
                     onCountChange(result.length, src.length);
                 }
             } catch (err) {
                 console.error('HistoryList: failed to process history:', err);
-                if (isMountedRef.current) {
+                if (isMountedRef.current && !isCancelled) {
                     setProcessedHistory([]);
+                    setProcessedMode(viewMode);
+                    setIsFirstLoad(false);
                     onCountChange(0, activeList.length);
                 }
             }
         });
-    }, [status, activeList, searchQuery, isSearchCaseSensitive, sortOrder, startTransition, onCountChange, settings]);
 
+        return () => {
+            isCancelled = true;
+        };
+    }, [status, activeList, searchQuery, isSearchCaseSensitive, sortOrder, startTransition, onCountChange, settings, viewMode]);
 
-    if (status === AppStatus.LOADING) {
-        return (
-            <div className="v-history-list-container">
-                <div className={clsx('v-history-list', { 'is-list-view': isListView })}>
+    const isDataStale = viewMode !== processedMode;
+    const total = Array.isArray(activeList) ? activeList.length : 0;
+
+    // Unique key to force Virtuoso remount on layout changes
+    const listKey = `list-${viewMode}-${isListView ? 'list' : 'card'}`;
+
+    const renderContent = () => {
+        if (status === AppStatus.LOADING || isDataStale || (isFirstLoad && total > 0)) {
+            return (
+                <motion.div 
+                    key="loading"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className={clsx('v-history-list', { 'is-list-view': isListView })}
+                >
                     {Array.from({ length: 8 }).map((_, i) => (
                         <div key={i} className={isListView ? 'v-history-item-list-wrapper' : 'v-history-item-card-wrapper'}>
                             <SkeletonEntry isListView={isListView} />
                         </div>
                     ))}
-                </div>
-            </div>
-        );
-    }
+                </motion.div>
+            );
+        }
 
-    if (status !== AppStatus.READY) return null;
+        if (status !== AppStatus.READY) return null;
 
-    const renderContent = () => {
-        const total = Array.isArray(activeList) ? activeList.length : 0;
         if (total === 0) {
             const noun = viewMode === 'versions' ? 'versions' : 'edits';
             const action = viewMode === 'versions' ? 'track history' : 'track edits';
-            return <EmptyState icon="inbox" title={`No ${noun} saved yet.`} subtitle={`Click the '+' button to start ${action} for this note.`} />;
+            return (
+                <EmptyState 
+                    key="empty" 
+                    icon="inbox" 
+                    title={`No ${noun} saved yet.`} 
+                    subtitle={`Click the '+' button to start ${action} for this note.`} 
+                />
+            );
         }
+        
         if ((Array.isArray(processedHistory) ? processedHistory.length : 0) === 0 && String(searchQuery ?? '').trim()) {
-            return <EmptyState icon="search-x" title="No matching items found." subtitle="Try a different search query or change sort options." />;
+            return (
+                <EmptyState 
+                    key="no-results" 
+                    icon="search-x" 
+                    title="No matching items found." 
+                    subtitle="Try a different search query or change sort options." 
+                />
+            );
         }
 
         return (
-            <Virtuoso
-                key={isListView ? 'list' : 'card'}
+            <motion.div 
+                key={listKey}
                 className="v-virtuoso-container"
-                data={processedHistory ?? []}
-                itemContent={(_index, version) => {
-                    if (!version) return null;
-                    return (
-                        <div className={isListView ? 'v-history-item-list-wrapper' : 'v-history-item-card-wrapper'} data-version-id={String(version.id)}>
-                            <HistoryEntry 
-                                version={version} 
-                                searchQuery={searchQuery}
-                                isSearchCaseSensitive={isSearchCaseSensitive}
-                                viewMode={viewMode}
-                            />
-                        </div>
-                    );
-                }}
-                components={{
-                    ScrollSeekPlaceholder: ({ height }: { height: number }) => (
-                        <div style={{ height }} aria-hidden />
-                    ),
-                }}
-            />
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                style={{ height: '100%', width: '100%' }}
+            >
+                <Virtuoso
+                    style={{ height: '100%' }}
+                    className="v-virtuoso-container"
+                    data={processedHistory ?? []}
+                    itemContent={(_index, version) => {
+                        if (!version) return null;
+                        return (
+                            <div className={isListView ? 'v-history-item-list-wrapper' : 'v-history-item-card-wrapper'} data-version-id={String(version.id)}>
+                                <HistoryEntry 
+                                    version={version} 
+                                    searchQuery={searchQuery}
+                                    isSearchCaseSensitive={isSearchCaseSensitive}
+                                    viewMode={viewMode}
+                                />
+                            </div>
+                        );
+                    }}
+                    components={{
+                        ScrollSeekPlaceholder: ({ height }: { height: number }) => (
+                            <div style={{ height }} aria-hidden />
+                        ),
+                    }}
+                />
+            </motion.div>
         );
     };
 
     return (
         <div className={clsx('v-history-list-container', { 'is-panel-active': panel !== null })}>
-            <div className={clsx('v-history-list', { 'is-list-view': isListView, 'is-searching-bg': isPending })}>
-                {renderContent()}
+            <div 
+                className={clsx('v-history-list', { 'is-list-view': isListView, 'is-searching-bg': isPending && !isDataStale })}
+                style={{ height: '100%', position: 'relative' }}
+            >
+                <AnimatePresence mode="wait">
+                    {renderContent()}
+                </AnimatePresence>
             </div>
         </div>
     );
 };
-

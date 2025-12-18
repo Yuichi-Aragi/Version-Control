@@ -131,6 +131,11 @@ export const ActionBar: FC = () => {
         dispatch(thunks.openDashboard());
     }, [dispatch, status, isBusy]);
 
+    const handleToggleViewMode = useCallback(() => {
+        if (status !== AppStatus.READY || isBusy) return;
+        dispatch(thunks.toggleViewMode());
+    }, [dispatch, status, isBusy]);
+
     useEffect(() => {
         if (isSearchActive) {
             if (document.activeElement !== searchInputRef.current) {
@@ -160,6 +165,7 @@ export const ActionBar: FC = () => {
     const diffIndicatorAriaLabel = isDiffGenerating ? 'Diff is being generated...' : 'Diff is ready. Click to view.';
 
     const hasHistory = viewMode === 'versions' ? history.length > 0 : editHistory.length > 0;
+    const switchViewLabel = viewMode === 'versions' ? 'Switch to Edit History' : 'Switch to Version History';
 
     return (
         <div className={clsx('v-actions-container', { 'is-searching': isSearchActive })}>
@@ -177,6 +183,11 @@ export const ActionBar: FC = () => {
                         </DropdownMenu.Trigger>
                         <DropdownMenu.Portal>
                             <DropdownMenu.Content className="v-actionbar-dropdown-content" sideOffset={5} collisionPadding={10}>
+                                <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleToggleViewMode}>
+                                    <span>{switchViewLabel}</span>
+                                    <Icon name={viewMode === 'versions' ? 'file-edit' : 'history'} />
+                                </DropdownMenu.Item>
+                                <div className="v-diff-separator" />
                                 <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenBranchDrawer}>
                                     <span>Branches</span>
                                     <Icon name="git-branch" />

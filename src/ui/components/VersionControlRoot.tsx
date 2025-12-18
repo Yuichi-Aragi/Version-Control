@@ -57,7 +57,10 @@ export const VersionControlRoot: FC = () => {
         return () => {};
     }, [status]);
 
-    const isOverlayActive = panel !== null && panel.type !== 'settings' && !(panel.type === 'diff' && panel.renderMode === 'window');
+    // Determine if an overlay is active to disable background interactions.
+    // Note: Settings panel is treated as an overlay here to prevent click-through issues
+    // to the ActionBar underneath it.
+    const isOverlayActive = panel !== null && !(panel.type === 'diff' && panel.renderMode === 'window');
     
     const rootClassName = clsx(
         'version-control-content',
@@ -93,7 +96,6 @@ export const VersionControlRoot: FC = () => {
                                     onCountChange={handleCountChange}
                                 />
                             </div>
-                            <SettingsPanel />
                             <button
                                 className="v-fab-save-button"
                                 aria-label={saveLabel}
@@ -104,6 +106,13 @@ export const VersionControlRoot: FC = () => {
                                 <Icon name="plus" />
                             </button>
                         </div>
+                        {/* 
+                            MOVED: SettingsPanel is now a direct child of the content wrapper, 
+                            placing it later in the DOM than the header. This ensures its z-index (40) 
+                            correctly stacks above the header (10), preventing click-through issues 
+                            regardless of the stacking context of .v-main.
+                        */}
+                        <SettingsPanel />
                     </>
                 );
             default:
