@@ -3,7 +3,6 @@ import { db } from '@/workers/edit-history/database';
 import { ManifestService } from '@/workers/edit-history/services/manifest-service';
 import { StateConsistencyError, ValidationError } from '@/workers/edit-history/errors';
 import type { StoredEdit } from '@/workers/edit-history/types';
-import type { NoteManifest } from '@/types';
 
 export class ImportExportService {
     private static readonly MAX_ZIP_SIZE = 100 * 1024 * 1024;
