@@ -1,5 +1,18 @@
 ***
 
+**Version: 1.9.37**
+
+#### ✨ New Features
+
+* **Side-by-Side Diff View:** Added support for a side-by-side diff layout.
+    * All existing diff modes—Smart, Character, Word, and Line—now support both unified and side-by-side views.
+
+#### 🎨 Improvements & UX
+
+* **UI/UX Polish:** Implemented significant enhancements to the timeline and settings panel for a better user experience.
+
+***
+
 **Version: 1.9.36**
 
 #### ✨ New Features
