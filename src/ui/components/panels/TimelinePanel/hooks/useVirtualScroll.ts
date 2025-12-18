@@ -7,14 +7,16 @@ export const useVirtualScroll = (activeMatch: TimelineMatch | null): UseVirtualS
 
     useEffect(() => {
         if (activeMatch && virtuosoRef.current) {
+            // Use instant scrolling ('auto') for match navigation to avoid lag
+            // waiting for smooth scroll animations to complete
             const scrollTimer = setTimeout(() => {
                 virtuosoRef.current?.scrollToIndex({
                     index: activeMatch.eventIndex,
                     align: 'start',
-                    behavior: 'smooth',
+                    behavior: 'auto', 
                     offset: -20
                 });
-            }, 50);
+            }, 0); // Immediate execution on next tick
 
             return () => clearTimeout(scrollTimer);
         }
@@ -25,7 +27,7 @@ export const useVirtualScroll = (activeMatch: TimelineMatch | null): UseVirtualS
         virtuosoRef.current?.scrollToIndex({
             index,
             align: 'start',
-            behavior: 'smooth'
+            behavior: 'auto'
         });
     };
 
