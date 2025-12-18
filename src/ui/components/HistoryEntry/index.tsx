@@ -1,5 +1,6 @@
 import clsx from 'clsx';
 import { type FC, useRef, memo, useMemo } from 'react';
+import { motion } from 'framer-motion';
 import { useAppSelector } from '@/ui/hooks';
 import { useTime } from '@/ui/contexts';
 import { HighlightedText } from '@/ui/components/shared/HighlightedText';
@@ -83,8 +84,13 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
         [enableCompression, version]
     );
 
+    // Hover animation props (applied only when not in list view or naming)
+    const hoverProps = (!settings.isListView && !isNamingThisVersion) 
+        ? { whileHover: { y: -2 }, whileTap: { y: -1 } } 
+        : {};
+
     return (
-        <div
+        <motion.div
             ref={entryRef}
             className={clsx('v-history-entry', {
                 'is-list-view': settings?.isListView,
@@ -100,6 +106,10 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
             onBlur={isNamingThisVersion ? handleContainerBlur : undefined}
             aria-selected={version.id === highlightedVersionId}
             data-version-id={String(version.id)}
+            
+            // Removed Motion entry animations (initial, animate, exit)
+            // Relies on CSS animation in historylist.css for reliable virtual list rendering
+            {...hoverProps}
         >
             <EntryHeader
                 version={version}
@@ -167,7 +177,7 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
                     )}
                 </div>
             )}
-        </div>
+        </motion.div>
     );
 });
 
