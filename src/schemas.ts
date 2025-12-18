@@ -35,6 +35,7 @@ export const TimelineSettingsSchema = v.object({
     showDescription: v.optional(v.boolean(), false),
     showName: v.optional(v.boolean(), true),
     showVersionNumber: v.optional(v.boolean(), true),
+    showPreview: v.optional(v.boolean(), true),
     expandByDefault: v.optional(v.boolean(), false),
 });
 
