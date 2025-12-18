@@ -34,6 +34,10 @@ export const TimelineFilters: FC<TimelineFiltersProps> = ({ settings }) => {
                         <span>Show Description</span>
                         {settings.showDescription && <Icon name="check" />}
                     </DropdownMenu.Item>
+                    <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={(e) => { e.preventDefault(); toggle('showPreview'); }}>
+                        <span>Show Preview</span>
+                        {settings.showPreview && <Icon name="check" />}
+                    </DropdownMenu.Item>
                     <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={(e) => { e.preventDefault(); toggle('expandByDefault'); }}>
                         <span>Expand Cards by Default</span>
                         {settings.expandByDefault && <Icon name="check" />}
