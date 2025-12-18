@@ -1,5 +1,6 @@
 import { type FC, useMemo, useCallback, useEffect } from 'react';
 import { Virtuoso } from 'react-virtuoso';
+import { motion } from 'framer-motion';
 import { useAppSelector } from '@/ui/hooks';
 import { usePanelClose, useBackdropClick, usePanelSearch } from '@/ui/hooks';
 import type { TimelinePanelProps } from '@/ui/components/panels/TimelinePanel/types';
@@ -52,8 +53,14 @@ export const TimelinePanel: FC<TimelinePanelProps> = ({ panelState }) => {
     }, [search.isSearchActive, handleGoToMatch]);
 
     return (
-        <div className="v-panel-container is-active is-drawer-like" onClick={handleBackdropClick}>
-            <div className="v-inline-panel v-timeline-panel is-drawer">
+        <div className="v-panel-container is-active is-timeline-container" onClick={handleBackdropClick}>
+            <motion.div 
+                className="v-inline-panel v-timeline-panel"
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.98 }}
+                transition={{ duration: 0.2 }}
+            >
                 <TimelineHeader
                     viewMode={viewMode}
                     settings={settings}
@@ -85,7 +92,12 @@ export const TimelinePanel: FC<TimelinePanelProps> = ({ panelState }) => {
                                 className="v-virtuoso-container"
                                 data={sortedEvents}
                                 itemContent={(index, event) => (
-                                    <div className="v-timeline-item-wrapper">
+                                    <motion.div 
+                                        className="v-timeline-item-wrapper"
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ duration: 0.15, ease: "easeOut" }}
+                                    >
                                         <TimelineEvent
                                             key={`${event.timestamp}-${index}`}
                                             event={event}
@@ -106,16 +118,14 @@ export const TimelinePanel: FC<TimelinePanelProps> = ({ panelState }) => {
                                             }
                                             viewMode={viewMode}
                                         />
-                                    </div>
+                                    </motion.div>
                                 )}
                                 increaseViewportBy={300}
                             />
                         </div>
                     )}
                 </div>
-            </div>
+            </motion.div>
         </div>
     );
 };
-
-export type { TimelinePanelProps };
