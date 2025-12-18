@@ -1,7 +1,6 @@
 import { App } from 'obsidian';
 import { transfer } from 'comlink';
 import type { PathService } from '@/core';
-import type { NoteManifest } from '@/types';
 import { DebouncedDiskWriter } from '../infrastructure/disk-writer';
 import { EditHistoryError } from '../infrastructure/error';
 import { withRetry } from '../infrastructure/retry';
