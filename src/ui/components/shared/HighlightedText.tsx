@@ -12,6 +12,7 @@ interface HighlightedTextProps {
      */
     activeMatchIndex?: number;
     className?: string;
+    ariaLabel?: string;
 }
 
 export const HighlightedText = memo(({ 
@@ -19,7 +20,8 @@ export const HighlightedText = memo(({
     query, 
     caseSensitive = false, 
     activeMatchIndex = -1,
-    className 
+    className,
+    ariaLabel
 }: HighlightedTextProps) => {
     if (!query || !query.trim() || !text) {
         return <>{text}</>;
@@ -36,7 +38,7 @@ export const HighlightedText = memo(({
         }
 
         return (
-            <>
+            <span aria-label={ariaLabel}>
                 {parts.map((part, i) => {
                     // parts length is always matches.length + 1 (interleaved)
                     // The matches are at odd indices in the split array if we used capturing group,
@@ -57,7 +59,7 @@ export const HighlightedText = memo(({
                     }
                     return <Fragment key={i}>{part}</Fragment>;
                 })}
-            </>
+            </span>
         );
     } catch (e) {
         console.warn('HighlightedText regex error:', e);

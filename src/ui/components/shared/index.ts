@@ -9,7 +9,7 @@
  * ## Components
  *
  * - **HighlightedText**: Text component with search term highlighting
- * - **VirtualizedDiff**: Virtualized diff view for large diffs
+ * - **VirtualizedDiff**: Virtualized diff view for large diffs (Unified & Split)
  * - **VirtualizedPlaintext**: Virtualized text view for large content
  *
  * ## Usage
@@ -25,7 +25,7 @@
  * <HighlightedText text={content} highlight={searchQuery} />
  *
  * // Virtualized diff for performance
- * <VirtualizedDiff changes={changes} height={400} />
+ * <VirtualizedDiff changes={changes} diffType="smart" viewLayout="split" />
  * ```
  */
 
@@ -34,14 +34,12 @@
 // ============================================================================
 
 export { HighlightedText } from './HighlightedText';
-export { VirtualizedDiff } from './VirtualizedDiff';
+export { VirtualizedDiff, StaticDiff } from './diff';
 export { VirtualizedPlaintext } from './VirtualizedPlaintext';
 
 // ============================================================================
 // TYPE DEFINITIONS
 // ============================================================================
-
-import type { Change } from '@/types';
 
 /**
  * Props for HighlightedText component.
@@ -57,18 +55,15 @@ export interface HighlightedTextProps {
  * Props for virtualized components.
  */
 export interface VirtualizedProps {
-    height: number;
-    width?: number | string;
-    overscanCount?: number;
+    height?: number | string | undefined;
+    width?: number | string | undefined;
+    overscanCount?: number | undefined;
 }
 
 /**
  * Props for VirtualizedDiff component.
  */
-export interface VirtualizedDiffProps extends VirtualizedProps {
-    changes: Change[];
-    showLineNumbers?: boolean;
-}
+export type { VirtualizedDiffProps } from './diff';
 
 /**
  * Props for VirtualizedPlaintext component.
