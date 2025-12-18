@@ -1,379 +1,512 @@
-import { type FC, useEffect, useRef, useState, useLayoutEffect, useCallback } from 'react';
+import { 
+  type FC, 
+  useEffect, 
+  useRef, 
+  useState, 
+  useLayoutEffect, 
+  useCallback,
+  useMemo
+} from 'react';
 import { createPortal } from 'react-dom';
 import clsx from 'clsx';
+import { produce } from 'immer';
+import { clamp, throttle } from 'es-toolkit';
+import * as v from 'valibot';
 import { useAppDispatch } from '@/ui/hooks';
 import { appSlice } from '@/state';
 import { DiffPanel } from './DiffPanel';
 import type { DiffPanel as DiffPanelState } from '@/state';
 import { Icon } from '@/ui/components';
 
+// ==================== VALIDATION SCHEMAS ====================
+const RectSchema = v.object({
+  x: v.number(),
+  y: v.number(),
+  width: v.number(),
+  height: v.number()
+});
+
+const ResizeDirectionSchema = v.object({
+  x: v.pipe(
+    v.number(),
+    v.integer(),
+    v.minValue(-1),
+    v.maxValue(1)
+  ),
+  y: v.pipe(
+    v.number(),
+    v.integer(),
+    v.minValue(-1),
+    v.maxValue(1)
+  )
+});
+
+type Rect = v.InferOutput<typeof RectSchema>;
+type ResizeDirection = v.InferOutput<typeof ResizeDirectionSchema>;
+
+// ==================== CONSTANTS & CONFIG ====================
+const MIN_WINDOW_WIDTH = 300;
+const MIN_WINDOW_HEIGHT = 200;
+const MAX_WINDOW_WIDTH_MULTIPLIER = 0.95;
+const MAX_WINDOW_HEIGHT_MULTIPLIER = 0.90;
+const SMALL_SCREEN_BREAKPOINT = 768;
+const DEFAULT_DESKTOP_WIDTH = 800;
+const DEFAULT_DESKTOP_HEIGHT = 600;
+const DRAG_THROTTLE_INTERVAL_MS = 16; // ~60fps
+const RESIZE_THROTTLE_INTERVAL_MS = 16;
+const Z_INDEX_WINDOW = 9999;
+const Z_INDEX_GHOST = 10000;
+
+// ==================== UTILITY FUNCTIONS ====================
+const validateRect = (rect: unknown): Rect => {
+  try {
+    return v.parse(RectSchema, rect);
+  } catch {
+    return { x: 0, y: 0, width: MIN_WINDOW_WIDTH, height: MIN_WINDOW_HEIGHT };
+  }
+};
+
+const validateResizeDirection = (dir: unknown): ResizeDirection => {
+  try {
+    return v.parse(ResizeDirectionSchema, dir);
+  } catch {
+    return { x: 1, y: 1 };
+  }
+};
+
+const getViewportDimensions = (): { width: number; height: number } => ({
+  width: window.innerWidth,
+  height: window.innerHeight
+});
+
+const calculateMinDimensions = (viewportWidth: number, viewportHeight: number): { width: number; height: number } => ({
+  width: Math.min(MIN_WINDOW_WIDTH, viewportWidth * 0.8),
+  height: Math.min(MIN_WINDOW_HEIGHT, viewportHeight * 0.8)
+});
+
+const calculateMaxDimensions = (viewportWidth: number, viewportHeight: number): { width: number; height: number } => ({
+  width: viewportWidth * MAX_WINDOW_WIDTH_MULTIPLIER,
+  height: viewportHeight * MAX_WINDOW_HEIGHT_MULTIPLIER
+});
+
+const clampRectToViewport = (rect: Rect): Rect => {
+  const viewport = getViewportDimensions();
+  const minDims = calculateMinDimensions(viewport.width, viewport.height);
+  const maxDims = calculateMaxDimensions(viewport.width, viewport.height);
+  
+  return produce(rect, (draft) => {
+    // Clamp dimensions first
+    draft.width = clamp(draft.width, minDims.width, maxDims.width);
+    draft.height = clamp(draft.height, minDims.height, maxDims.height);
+    
+    // Clamp position ensuring window stays within viewport
+    const maxX = viewport.width - draft.width;
+    const maxY = viewport.height - draft.height;
+    
+    draft.x = clamp(draft.x, 0, maxX);
+    draft.y = clamp(draft.y, 0, maxY);
+  });
+};
+
+const calculateInitialRect = (): Rect => {
+  const viewport = getViewportDimensions();
+  const isSmallScreen = viewport.width < SMALL_SCREEN_BREAKPOINT;
+  
+  const targetWidth = isSmallScreen 
+    ? viewport.width * 0.95 
+    : Math.min(DEFAULT_DESKTOP_WIDTH, viewport.width * 0.9);
+    
+  const targetHeight = isSmallScreen 
+    ? viewport.height * 0.85 
+    : Math.min(DEFAULT_DESKTOP_HEIGHT, viewport.height * 0.85);
+  
+  const width = clamp(targetWidth, MIN_WINDOW_WIDTH, viewport.width * MAX_WINDOW_WIDTH_MULTIPLIER);
+  const height = clamp(targetHeight, MIN_WINDOW_HEIGHT, viewport.height * MAX_WINDOW_HEIGHT_MULTIPLIER);
+  
+  const x = Math.max(0, (viewport.width - width) / 2);
+  const y = Math.max(0, (viewport.height - height) / 2);
+  
+  return validateRect({ x, y, width, height });
+};
+
+const getResizeDirection = (
+  clickX: number,
+  clickY: number,
+  windowWidth: number,
+  windowHeight: number
+): ResizeDirection => {
+  const xThresh1 = windowWidth / 3;
+  const xThresh2 = (windowWidth * 2) / 3;
+  const yThresh1 = windowHeight / 3;
+  const yThresh2 = (windowHeight * 2) / 3;
+  
+  let dirX: -1 | 0 | 1 = 0;
+  if (clickX < xThresh1) dirX = -1;
+  else if (clickX > xThresh2) dirX = 1;
+  
+  let dirY: -1 | 0 | 1 = 0;
+  if (clickY < yThresh1) dirY = -1;
+  else if (clickY > yThresh2) dirY = 1;
+  
+  // Default to bottom-right if clicked dead center
+  if (dirX === 0 && dirY === 0) {
+    dirX = 1;
+    dirY = 1;
+  }
+  
+  return validateResizeDirection({ x: dirX, y: dirY });
+};
+
+// ==================== CUSTOM HOOKS ====================
+const useViewportClamp = (rect: Rect, setRect: (rect: Rect) => void) => {
+  useEffect(() => {
+    const handleResize = () => {
+      setRect(clampRectToViewport(rect));
+    };
+    
+    const throttledResize = throttle(handleResize, 100);
+    window.addEventListener('resize', throttledResize);
+    
+    return () => {
+      window.removeEventListener('resize', throttledResize);
+      throttledResize.cancel();
+    };
+  }, [rect, setRect]);
+};
+
+const usePointerCapture = (
+  elementRef: React.RefObject<HTMLElement | null>,
+  onPointerDown: (e: React.PointerEvent) => void,
+  onPointerMove: (e: React.PointerEvent) => void,
+  onPointerUp: (e: React.PointerEvent) => void
+) => {
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    elementRef.current?.setPointerCapture(e.pointerId);
+    onPointerDown(e);
+  }, [elementRef, onPointerDown]);
+
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    elementRef.current?.releasePointerCapture(e.pointerId);
+    onPointerUp(e);
+  }, [elementRef, onPointerUp]);
+
+  return {
+    onPointerDown: handlePointerDown,
+    onPointerMove,
+    onPointerUp: handlePointerUp
+  };
+};
+
+// ==================== MAIN COMPONENT ====================
 interface DiffWindowProps {
-    panelState: DiffPanelState;
-}
-
-interface Rect {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-}
-
-interface ResizeDirection {
-    x: -1 | 0 | 1; // -1: Left, 0: Center, 1: Right
-    y: -1 | 0 | 1; // -1: Top, 0: Center, 1: Bottom
+  panelState: DiffPanelState;
 }
 
 export const DiffWindow: FC<DiffWindowProps> = ({ panelState }) => {
-    const dispatch = useAppDispatch();
-    const windowRef = useRef<HTMLDivElement>(null);
-    const headerRef = useRef<HTMLDivElement>(null);
+  const dispatch = useAppDispatch();
+  const windowRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const animationFrameRef = useRef<number | null>(null);
 
-    // Initial state
-    const [rect, setRect] = useState<Rect>({
-        x: 0,
-        y: 0,
-        width: 600,
-        height: 500
-    });
+  // State managed with validation
+  const [rect, setRect] = useState<Rect>(() => calculateInitialRect());
+  const [isResizeMode, setIsResizeMode] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
+  const [ghostRect, setGhostRect] = useState<Rect | null>(null);
 
-    const [isResizeMode, setIsResizeMode] = useState(false);
-    const [isDragging, setIsDragging] = useState(false);
-    const [isResizing, setIsResizing] = useState(false);
+  // Refs for state that shouldn't trigger re-renders
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const initialRectRef = useRef<Rect | null>(null);
+  const resizeDirRef = useRef<ResizeDirection>({ x: 1, y: 1 });
+
+  // Apply viewport clamping on mount and when rect changes
+  useViewportClamp(rect, setRect);
+
+  // Initial positioning - only once on mount
+  useLayoutEffect(() => {
+    setRect(calculateInitialRect());
+  }, []);
+
+  // Cleanup animation frame on unmount
+  useEffect(() => {
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, []);
+
+  // ==================== EVENT HANDLERS ====================
+  const handleClose = useCallback(() => {
+    dispatch(appSlice.actions.closePanel());
+  }, [dispatch]);
+
+  const handleToggleResizeMode = useCallback(() => {
+    setIsResizeMode(prev => !prev);
+    // Reset interacting states when toggling off
+    if (isResizeMode) {
+      setIsDragging(false);
+      setIsResizing(false);
+      setGhostRect(null);
+    }
+  }, [isResizeMode]);
+
+  // --- Move Logic (Header Drag) ---
+  const handleHeaderPointerDown = useCallback((e: React.PointerEvent) => {
+    if (isResizeMode) return;
+    if ((e.target as HTMLElement).closest('button')) return;
+
+    e.preventDefault();
+    e.stopPropagation();
     
-    // For ghost outline during resize
-    const [ghostRect, setGhostRect] = useState<Rect | null>(null);
+    setIsDragging(true);
+    dragStartRef.current = { x: e.clientX, y: e.clientY };
+    initialRectRef.current = { ...rect };
+  }, [isResizeMode, rect]);
 
-    // Refs for drag/resize calculations
-    const dragStartRef = useRef<{ x: number; y: number } | null>(null);
-    const initialRectRef = useRef<Rect | null>(null);
-    const resizeDirRef = useRef<ResizeDirection>({ x: 1, y: 1 });
-
-    // Helper to clamp rect to viewport boundaries
-    const clampToViewport = useCallback((r: Rect) => {
-        const vw = window.innerWidth;
-        const vh = window.innerHeight;
+  const throttledHeaderMove = useMemo(() => 
+    throttle((e: React.PointerEvent) => {
+      if (!isDragging || !dragStartRef.current || !initialRectRef.current) return;
+      
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+      
+      animationFrameRef.current = requestAnimationFrame(() => {
+        const viewport = getViewportDimensions();
+        const dx = e.clientX - dragStartRef.current!.x;
+        const dy = e.clientY - dragStartRef.current!.y;
         
-        // 1. Clamp dimensions to viewport
-        const width = Math.min(r.width, vw);
-        const height = Math.min(r.height, vh);
-
-        // 2. Clamp position
-        let x = r.x;
-        let y = r.y;
-
-        // If right edge is off screen, shift left
-        if (x + width > vw) x = vw - width;
-        // If bottom edge is off screen, shift up
-        if (y + height > vh) y = vh - height;
+        const newX = clamp(
+          initialRectRef.current!.x + dx,
+          0,
+          viewport.width - initialRectRef.current!.width
+        );
         
-        // If left/top is off screen (e.g. after shift), clamp to 0
-        x = Math.max(0, x);
-        y = Math.max(0, y);
-
-        return { x, y, width, height };
-    }, []);
-
-    // Handle Viewport Resize (Orientation change, Window resize)
-    useEffect(() => {
-        const handleViewportResize = () => {
-            setRect(prev => clampToViewport(prev));
-        };
+        const newY = clamp(
+          initialRectRef.current!.y + dy,
+          0,
+          viewport.height - initialRectRef.current!.height
+        );
         
-        window.addEventListener('resize', handleViewportResize);
-        return () => window.removeEventListener('resize', handleViewportResize);
-    }, [clampToViewport]);
+        setRect(prev => validateRect({ ...prev, x: newX, y: newY }));
+      });
+    }, DRAG_THROTTLE_INTERVAL_MS),
+    [isDragging]
+  );
 
-    // Initial Positioning
-    useLayoutEffect(() => {
-        const vw = window.innerWidth;
-        const vh = window.innerHeight;
-        
-        // Responsive defaults
-        const isSmallScreen = vw < 768; // Mobile/Tablet breakpoint
-        
-        // On small screens, take up most of the view. On desktop, use a sensible default.
-        let targetW = isSmallScreen ? vw * 0.95 : 800;
-        let targetH = isSmallScreen ? vh * 0.85 : 600;
+  const handleHeaderPointerUp = useCallback(() => {
+    if (!isDragging) return;
+    setIsDragging(false);
+    dragStartRef.current = null;
+    initialRectRef.current = null;
+  }, [isDragging]);
 
-        const width = Math.min(targetW, vw);
-        const height = Math.min(targetH, vh);
-        
-        const x = (vw - width) / 2;
-        const y = (vh - height) / 2;
+  // --- Resize Logic ---
+  const handleModalPointerDown = useCallback((e: React.PointerEvent) => {
+    if (!isResizeMode) return;
+    
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const clickX = e.clientX - rect.x;
+    const clickY = e.clientY - rect.y;
+    
+    const direction = getResizeDirection(clickX, clickY, rect.width, rect.height);
+    resizeDirRef.current = direction;
+    
+    setIsResizing(true);
+    dragStartRef.current = { x: e.clientX, y: e.clientY };
+    initialRectRef.current = { ...rect };
+    setGhostRect({ ...rect });
+  }, [isResizeMode, rect]);
 
-        setRect({ x, y, width, height });
-    }, []);
-
-    const handleClose = useCallback(() => {
-        dispatch(appSlice.actions.closePanel());
-    }, [dispatch]);
-
-    const handleToggleResizeMode = useCallback(() => {
-        setIsResizeMode(prev => !prev);
-        // Reset interacting states if toggling off
-        setIsDragging(false);
-        setIsResizing(false);
-        setGhostRect(null);
-    }, []);
-
-    // --- Move Logic (Header Drag) using Pointer Events ---
-    const handleHeaderPointerDown = (e: React.PointerEvent) => {
-        if (isResizeMode) return; // Disable move in resize mode
-        if ((e.target as HTMLElement).closest('button')) return; // Ignore button clicks
-
-        e.preventDefault();
-        e.stopPropagation();
-        
-        const target = e.currentTarget as HTMLElement;
-        target.setPointerCapture(e.pointerId);
-
-        setIsDragging(true);
-        dragStartRef.current = { x: e.clientX, y: e.clientY };
-        initialRectRef.current = { ...rect };
-    };
-
-    const handleHeaderPointerMove = (e: React.PointerEvent) => {
-        if (!isDragging || !dragStartRef.current || !initialRectRef.current) return;
-        e.preventDefault();
-
-        const dx = e.clientX - dragStartRef.current.x;
-        const dy = e.clientY - dragStartRef.current.y;
-
-        const newX = initialRectRef.current.x + dx;
-        const newY = initialRectRef.current.y + dy;
-
-        // Boundary checks: Ensure window stays strictly within viewport
-        const maxX = window.innerWidth - initialRectRef.current.width;
-        const maxY = window.innerHeight - initialRectRef.current.height;
-
-        setRect(prev => ({
-            ...prev,
-            x: Math.max(0, Math.min(newX, maxX)),
-            y: Math.max(0, Math.min(newY, maxY))
-        }));
-    };
-
-    const handleHeaderPointerUp = (e: React.PointerEvent) => {
-        if (!isDragging) return;
-        setIsDragging(false);
-        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    };
-
-    // --- Resize Logic (Modal Drag) using Pointer Events ---
-    const handleModalPointerDown = (e: React.PointerEvent) => {
-        if (!isResizeMode) return;
-        
-        e.preventDefault();
-        e.stopPropagation(); // Prevent interaction with content
-        
-        const target = e.currentTarget as HTMLElement;
-        target.setPointerCapture(e.pointerId);
-
-        // Determine resize direction based on click position relative to window
-        const clickX = e.clientX - rect.x;
-        const clickY = e.clientY - rect.y;
-        const { width, height } = rect;
-
-        // Define zones (3x3 grid)
-        const xThresh1 = width / 3;
-        const xThresh2 = (width * 2) / 3;
-        const yThresh1 = height / 3;
-        const yThresh2 = (height * 2) / 3;
-
-        let dirX: -1 | 0 | 1 = 0;
-        if (clickX < xThresh1) dirX = -1;
-        else if (clickX > xThresh2) dirX = 1;
-
-        let dirY: -1 | 0 | 1 = 0;
-        if (clickY < yThresh1) dirY = -1;
-        else if (clickY > yThresh2) dirY = 1;
-
-        // Default to bottom-right if clicked dead center
-        if (dirX === 0 && dirY === 0) {
-            dirX = 1;
-            dirY = 1;
-        }
-
-        resizeDirRef.current = { x: dirX, y: dirY };
-        setIsResizing(true);
-        dragStartRef.current = { x: e.clientX, y: e.clientY };
-        initialRectRef.current = { ...rect };
-        setGhostRect({ ...rect });
-    };
-
-    const handleModalPointerMove = (e: React.PointerEvent) => {
-        if (!isResizing || !dragStartRef.current || !initialRectRef.current) return;
-        e.preventDefault();
-
-        const dx = e.clientX - dragStartRef.current.x;
-        const dy = e.clientY - dragStartRef.current.y;
+  const throttledModalMove = useMemo(() => 
+    throttle((e: React.PointerEvent) => {
+      if (!isResizing || !dragStartRef.current || !initialRectRef.current) return;
+      
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+      
+      animationFrameRef.current = requestAnimationFrame(() => {
+        const viewport = getViewportDimensions();
+        const dx = e.clientX - dragStartRef.current!.x;
+        const dy = e.clientY - dragStartRef.current!.y;
         const dir = resizeDirRef.current;
-        const initial = initialRectRef.current;
-
-        // Calculate potential new dimensions and position
-        let newWidth = initial.width;
-        let newHeight = initial.height;
+        const initial = initialRectRef.current!;
+        
         let newX = initial.x;
         let newY = initial.y;
-
-        // Horizontal resizing
-        if (dir.x === 1) { // Right edge
-            newWidth = initial.width + dx;
-        } else if (dir.x === -1) { // Left edge
-            newWidth = initial.width - dx;
-            newX = initial.x + dx;
-        }
-
-        // Vertical resizing
-        if (dir.y === 1) { // Bottom edge
-            newHeight = initial.height + dy;
-        } else if (dir.y === -1) { // Top edge
-            newHeight = initial.height - dy;
-            newY = initial.y + dy;
-        }
-
-        // Apply Constraints
-        const vw = window.innerWidth;
-        const vh = window.innerHeight;
-        const minWidth = Math.min(300, vw);
-        const minHeight = Math.min(200, vh);
-
-        // 1. Min Size Constraints
-        if (newWidth < minWidth) {
-            // If resizing left, we need to adjust X back
-            if (dir.x === -1) {
-                newX = initial.x + initial.width - minWidth;
-            }
-            newWidth = minWidth;
-        }
-        if (newHeight < minHeight) {
-            // If resizing top, we need to adjust Y back
-            if (dir.y === -1) {
-                newY = initial.y + initial.height - minHeight;
-            }
-            newHeight = minHeight;
-        }
-
-        // 2. Viewport Boundary Constraints
-        // Left boundary
-        if (newX < 0) {
-            if (dir.x === -1) {
-                // If dragging left edge off screen, cap width
-                newWidth += newX; // newX is negative, so this reduces width
-            }
-            newX = 0;
-        }
-        // Top boundary
-        if (newY < 0) {
-            if (dir.y === -1) {
-                newHeight += newY;
-            }
-            newY = 0;
-        }
-        // Right boundary
-        if (newX + newWidth > vw) {
-            if (dir.x === 1) {
-                newWidth = vw - newX;
-            } else {
-                // If moving right (via left resize?) shouldn't happen with logic above
-                // but strictly:
-                newX = vw - newWidth;
-            }
-        }
-        // Bottom boundary
-        if (newY + newHeight > vh) {
-            if (dir.y === 1) {
-                newHeight = vh - newY;
-            } else {
-                newY = vh - newHeight;
-            }
-        }
-
-        setGhostRect({
-            x: newX,
-            y: newY,
-            width: newWidth,
-            height: newHeight
-        });
-    };
-
-    const handleModalPointerUp = (e: React.PointerEvent) => {
-        if (!isResizing) return;
-        setIsResizing(false);
-        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+        let newWidth = initial.width;
+        let newHeight = initial.height;
         
-        if (ghostRect) {
-            setRect(ghostRect);
-            setGhostRect(null);
+        // Horizontal resizing
+        if (dir.x === 1) {
+          newWidth = clamp(initial.width + dx, MIN_WINDOW_WIDTH, viewport.width - initial.x);
+        } else if (dir.x === -1) {
+          const maxWidthChange = initial.x; // Can't move left beyond viewport
+          const clampedDx = clamp(dx, -maxWidthChange, initial.width - MIN_WINDOW_WIDTH);
+          newWidth = initial.width - clampedDx;
+          newX = initial.x + clampedDx;
         }
-    };
+        
+        // Vertical resizing
+        if (dir.y === 1) {
+          newHeight = clamp(initial.height + dy, MIN_WINDOW_HEIGHT, viewport.height - initial.y);
+        } else if (dir.y === -1) {
+          const maxHeightChange = initial.y;
+          const clampedDy = clamp(dy, -maxHeightChange, initial.height - MIN_WINDOW_HEIGHT);
+          newHeight = initial.height - clampedDy;
+          newY = initial.y + clampedDy;
+        }
+        
+        // Boundary constraints
+        if (newX < 0) {
+          newWidth += newX; // Reduce width by overflow amount
+          newX = 0;
+        }
+        
+        if (newY < 0) {
+          newHeight += newY;
+          newY = 0;
+        }
+        
+        if (newX + newWidth > viewport.width) {
+          newWidth = viewport.width - newX;
+        }
+        
+        if (newY + newHeight > viewport.height) {
+          newHeight = viewport.height - newY;
+        }
+        
+        // Final dimension clamping
+        newWidth = clamp(newWidth, MIN_WINDOW_WIDTH, viewport.width);
+        newHeight = clamp(newHeight, MIN_WINDOW_HEIGHT, viewport.height);
+        
+        const newRect = validateRect({
+          x: newX,
+          y: newY,
+          width: newWidth,
+          height: newHeight
+        });
+        
+        setGhostRect(newRect);
+      });
+    }, RESIZE_THROTTLE_INTERVAL_MS),
+    [isResizing]
+  );
 
-    return createPortal(
-        <>
-            <div 
-                ref={windowRef}
-                className={clsx('v-diff-window', { 'is-resize-mode': isResizeMode, 'is-dragging': isDragging })}
-                style={{
-                    transform: `translate(${rect.x}px, ${rect.y}px)`,
-                    width: rect.width,
-                    height: rect.height,
-                    zIndex: 9999
-                }}
-                onPointerDown={handleModalPointerDown}
-                onPointerMove={handleModalPointerMove}
-                onPointerUp={handleModalPointerUp}
+  const handleModalPointerUp = useCallback(() => {
+    if (!isResizing) return;
+    
+    setIsResizing(false);
+    dragStartRef.current = null;
+    initialRectRef.current = null;
+    
+    if (ghostRect) {
+      setRect(ghostRect);
+      setGhostRect(null);
+    }
+  }, [isResizing, ghostRect]);
+
+  // Setup pointer capture for both drag and resize
+  const headerPointerEvents = usePointerCapture(
+    headerRef,
+    handleHeaderPointerDown,
+    throttledHeaderMove,
+    handleHeaderPointerUp
+  );
+
+  const modalPointerEvents = usePointerCapture(
+    windowRef,
+    handleModalPointerDown,
+    throttledModalMove,
+    handleModalPointerUp
+  );
+
+  // ==================== RENDER ====================
+  return createPortal(
+    <>
+      <div 
+        ref={windowRef}
+        className={clsx('v-diff-window', { 
+          'is-resize-mode': isResizeMode, 
+          'is-dragging': isDragging,
+          'is-resizing': isResizing
+        })}
+        style={{
+          transform: `translate(${rect.x}px, ${rect.y}px)`,
+          width: rect.width,
+          height: rect.height,
+          zIndex: Z_INDEX_WINDOW
+        }}
+        {...modalPointerEvents}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Diff View Window"
+      >
+        <div 
+          ref={headerRef} 
+          className="v-diff-window-header"
+          {...headerPointerEvents}
+          aria-label="Window header, drag to move"
+        >
+          <div className="v-diff-window-title">Diff View</div>
+          <div className="v-diff-window-controls">
+            <button 
+              className={clsx("clickable-icon", { "is-active": isResizeMode })}
+              onClick={handleToggleResizeMode}
+              title={isResizeMode ? "Finish resizing" : "Resize window"}
+              onPointerDown={(e) => e.stopPropagation()}
+              aria-label={isResizeMode ? "Exit resize mode" : "Enter resize mode"}
+              aria-pressed={isResizeMode}
+              type="button"
             >
-                <div 
-                    ref={headerRef} 
-                    className="v-diff-window-header"
-                    onPointerDown={handleHeaderPointerDown}
-                    onPointerMove={handleHeaderPointerMove}
-                    onPointerUp={handleHeaderPointerUp}
-                >
-                    <div className="v-diff-window-title">Diff View</div>
-                    <div className="v-diff-window-controls">
-                        <button 
-                            className={clsx("clickable-icon", { "is-active": isResizeMode })}
-                            onClick={handleToggleResizeMode}
-                            title={isResizeMode ? "Finish resizing" : "Resize window"}
-                            onPointerDown={(e) => e.stopPropagation()} // Prevent drag start
-                        >
-                            <Icon name={isResizeMode ? "check" : "move-diagonal"} />
-                        </button>
-                        <button 
-                            className="clickable-icon"
-                            onClick={handleClose}
-                            title="Close window"
-                            onPointerDown={(e) => e.stopPropagation()} // Prevent drag start
-                        >
-                            <Icon name="x" />
-                        </button>
-                    </div>
-                </div>
-                
-                <div className="v-diff-window-gap" />
-                
-                <div className="v-diff-window-content">
-                    <DiffPanel panelState={panelState} />
-                </div>
+              <Icon name={isResizeMode ? "check" : "move-diagonal"} />
+            </button>
+            <button 
+              className="clickable-icon"
+              onClick={handleClose}
+              title="Close window"
+              onPointerDown={(e) => e.stopPropagation()}
+              aria-label="Close window"
+              type="button"
+            >
+              <Icon name="x" />
+            </button>
+          </div>
+        </div>
+        
+        <div className="v-diff-window-gap" />
+        
+        <div className="v-diff-window-content">
+          <DiffPanel panelState={panelState} />
+        </div>
 
-                {/* Overlay to block content interaction during resize mode */}
-                {isResizeMode && <div className="v-resize-overlay" />}
-            </div>
+        {isResizeMode && (
+          <div 
+            className="v-resize-overlay" 
+            role="region"
+            aria-label="Resize overlay - click and drag edges to resize"
+          />
+        )}
+      </div>
 
-            {/* Ghost outline for resizing */}
-            {ghostRect && (
-                <div 
-                    className="v-diff-window-ghost"
-                    style={{
-                        transform: `translate(${ghostRect.x}px, ${ghostRect.y}px)`,
-                        width: ghostRect.width,
-                        height: ghostRect.height,
-                        zIndex: 10000
-                    }}
-                />
-            )}
-        </>,
-        document.body
-    );
+      {ghostRect && (
+        <div 
+          className="v-diff-window-ghost"
+          style={{
+            transform: `translate(${ghostRect.x}px, ${ghostRect.y}px)`,
+            width: ghostRect.width,
+            height: ghostRect.height,
+            zIndex: Z_INDEX_GHOST
+          }}
+          aria-hidden="true"
+        />
+      )}
+    </>,
+    document.body
+  );
 };

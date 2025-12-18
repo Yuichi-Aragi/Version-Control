@@ -1,4 +1,3 @@
-
 import type { FC, ReactNode } from 'react';
 import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -10,7 +9,8 @@ import { thunks } from '@/state';
 import type { DiffPanel as DiffPanelState } from '@/state';
 import type { Change, DiffType } from '@/types';
 import { Icon } from '@/ui/components';
-import { VirtualizedDiff, processLineChanges, type DiffLineData } from '@/ui/components/shared/VirtualizedDiff';
+import { VirtualizedDiff } from '@/ui/components/shared';
+import { processLineChanges, processSideBySideChanges, type DiffLineData } from '@/ui/components/shared/diff';
 import { escapeRegExp } from '@/ui/utils/strings';
 import { usePanelClose } from '@/ui/hooks';
 import { usePanelSearch } from '@/ui/hooks';
@@ -19,24 +19,58 @@ interface DiffPanelProps {
     panelState: DiffPanelState;
 }
 
-const getDiffOptions = () => [
-    { type: 'smart' as DiffType, label: 'Smart Diff' },
-    { type: 'lines' as DiffType, label: 'Line Diff' },
-    { type: 'words' as DiffType, label: 'Word Diff' },
-    { type: 'chars' as DiffType, label: 'Character Diff' },
-];
+type ViewLayout = 'split' | 'unified';
 
-const DiffDropdown: FC<{ currentType: DiffType; onSelect: (type: DiffType) => void; children: ReactNode }> = ({ currentType, onSelect, children }) => (
+const DiffOptionsDropdown: FC<{ 
+    currentType: DiffType; 
+    currentLayout: ViewLayout;
+    onSelectType: (type: DiffType) => void; 
+    onSelectLayout: (layout: ViewLayout) => void;
+    children: ReactNode 
+}> = ({ currentType, currentLayout, onSelectType, onSelectLayout, children }) => (
     <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>{children}</DropdownMenu.Trigger>
         <DropdownMenu.Portal>
             <DropdownMenu.Content className="v-diff-dropdown-content" sideOffset={5} collisionPadding={10}>
-                {getDiffOptions().map(({ type, label }) => (
-                    <DropdownMenu.Item key={type} className="v-diff-dropdown-item" onSelect={() => onSelect(type)}>
-                        {label}
-                        {currentType === type && <Icon name="check" />}
-                    </DropdownMenu.Item>
-                ))}
+                
+                <DropdownMenu.Item className="v-diff-dropdown-item" onSelect={() => onSelectLayout('unified')}>
+                    <span>Unified View</span>
+                    {currentLayout === 'unified' && <Icon name="check" />}
+                </DropdownMenu.Item>
+                <DropdownMenu.Item className="v-diff-dropdown-item" onSelect={() => onSelectLayout('split')}>
+                    <span>Side-by-Side View</span>
+                    {currentLayout === 'split' && <Icon name="check" />}
+                </DropdownMenu.Item>
+
+                <DropdownMenu.Separator className="v-diff-separator" />
+
+                <DropdownMenu.Sub>
+                    <DropdownMenu.SubTrigger className="v-diff-dropdown-sub-trigger">
+                        <span>Diff Mode</span>
+                        <Icon name="chevron-right" />
+                    </DropdownMenu.SubTrigger>
+                    <DropdownMenu.Portal>
+                        <DropdownMenu.SubContent className="v-diff-dropdown-sub-content" sideOffset={2} alignOffset={-5}>
+                            <DropdownMenu.Item className="v-diff-dropdown-item" onSelect={() => onSelectType('smart')}>
+                                <span>Smart Diff</span>
+                                {currentType === 'smart' && <Icon name="check" />}
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item className="v-diff-dropdown-item" onSelect={() => onSelectType('lines')}>
+                                <span>Line Diff</span>
+                                {currentType === 'lines' && <Icon name="check" />}
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item className="v-diff-dropdown-item" onSelect={() => onSelectType('words')}>
+                                <span>Word Diff</span>
+                                {currentType === 'words' && <Icon name="check" />}
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item className="v-diff-dropdown-item" onSelect={() => onSelectType('chars')}>
+                                <span>Character Diff</span>
+                                {currentType === 'chars' && <Icon name="check" />}
+                            </DropdownMenu.Item>
+                        </DropdownMenu.SubContent>
+                    </DropdownMenu.Portal>
+                </DropdownMenu.Sub>
+
             </DropdownMenu.Content>
         </DropdownMenu.Portal>
     </DropdownMenu.Root>
@@ -60,16 +94,14 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
     const virtuosoRangeRef = useRef<ListRange | null>(null);
     const headerRef = useRef<HTMLDivElement>(null);
     const highlightTimeoutRef = useRef<number | null>(null);
-    const unifiedViewContainerRef = useRef<HTMLPreElement>(null);
     const containerScrollerRef = useRef<HTMLDivElement>(null);
     const isInitialLoadRef = useRef(true);
-    const scrollAnchorRef = useRef<{ type: 'line' | 'change'; index: number } | null>(null);
 
     const [isMetaCollapsed, setIsMetaCollapsed] = useState(true);
-    const [lines, setLines] = useState<DiffLineData[]>([]);
-    const [unifiedMatches, setUnifiedMatches] = useState<Element[]>([]);
-
-    const isLineBasedDiff = diffType === 'lines' || diffType === 'smart';
+    const [viewLayout, setViewLayout] = useState<ViewLayout>('unified');
+    
+    // We compute lines locally for search and navigation logic
+    const [lines, setLines] = useState<readonly DiffLineData[]>([]);
 
     useEffect(() => {
         if (diffChanges) {
@@ -80,9 +112,27 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
         }
     }, [diffChanges, diffType]);
 
+    // Compute split rows locally if needed for scrolling logic
+    const splitRows = useMemo(() => {
+        if (viewLayout === 'split') {
+            return processSideBySideChanges(lines);
+        }
+        return [];
+    }, [lines, viewLayout]);
+
+    // Helper to get the correct scroll index based on layout
+    const getScrollIndex = useCallback((linearIndex: number) => {
+        if (viewLayout === 'unified') return linearIndex;
+        
+        // In split view, find the row that contains the line with the given linear index
+        return splitRows.findIndex(row => 
+            (row.left && row.left.index === linearIndex) || 
+            (row.right && row.right.index === linearIndex)
+        );
+    }, [viewLayout, splitRows]);
+
     useEffect(() => {
         isInitialLoadRef.current = true;
-        scrollAnchorRef.current = null;
     }, [version1.id, version2.id]);
 
     const handleLineClick = useCallback((clickedLineData: DiffLineData) => {
@@ -90,6 +140,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
         if (clickedLineData.newLineNum !== undefined) {
             targetLineNum = clickedLineData.newLineNum;
         } else if (clickedLineData.type === 'remove') {
+            // Find preceding line in linear list
             const clickedLineIndex = lines.findIndex(l => l.key === clickedLineData.key);
             if (clickedLineIndex !== -1) {
                 for (let i = clickedLineIndex - 1; i >= 0; i--) {
@@ -109,7 +160,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
     const search = usePanelSearch();
 
     const lineMatches = useMemo(() => {
-        if (!isLineBasedDiff || !search.searchQuery || !diffChanges) return [];
+        if (!search.searchQuery || !diffChanges) return [];
         const regex = new RegExp(escapeRegExp(search.searchQuery), search.isCaseSensitive ? 'g' : 'gi');
         const allMatches: { lineIndex: number; matchIndexInLine: number }[] = [];
         lines.forEach((line, lineIndex) => {
@@ -120,66 +171,50 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
             });
         });
         return allMatches;
-    }, [search.searchQuery, search.isCaseSensitive, diffChanges, isLineBasedDiff, lines]);
+    }, [search.searchQuery, search.isCaseSensitive, diffChanges, lines]);
 
-    useEffect(() => {
-        if (!isLineBasedDiff && search.searchQuery && unifiedViewContainerRef.current) {
-            const marks = Array.from(unifiedViewContainerRef.current.querySelectorAll('mark'));
-            setUnifiedMatches(marks);
-        } else {
-            setUnifiedMatches([]);
-        }
-    }, [search.searchQuery, search.isCaseSensitive, isLineBasedDiff, diffChanges]);
+    const totalMatches = lineMatches.length;
 
-    const totalMatches = isLineBasedDiff ? lineMatches.length : unifiedMatches.length;
-
-    // Override goToMatch to use local totalMatches
-    const handleGoToMatch = (direction: 'next' | 'prev') => {
+    // Local navigation logic to handle matches calculated in this component
+    const goToMatch = useCallback((direction: 'next' | 'prev') => {
         if (totalMatches === 0) return;
         search.setActiveMatchIndex(current => {
-            if (direction === 'next') return (current + 1) % totalMatches;
-            return (current - 1 + totalMatches) % totalMatches;
+            if (direction === 'next') {
+                return (current + 1) % totalMatches;
+            } else {
+                return (current - 1 + totalMatches) % totalMatches;
+            }
         });
-    };
+    }, [totalMatches, search.setActiveMatchIndex]);
 
     // Scroll to match
     useEffect(() => {
         if (search.activeMatchIndex === -1) return;
-
-        if (isLineBasedDiff) {
-            const match = lineMatches[search.activeMatchIndex];
-            if (match && virtuosoRef.current) {
+        const match = lineMatches[search.activeMatchIndex];
+        if (match && virtuosoRef.current) {
+            const targetIndex = getScrollIndex(match.lineIndex);
+            
+            if (targetIndex !== -1) {
                 virtuosoRef.current.scrollToIndex({
-                    index: match.lineIndex,
+                    index: targetIndex,
                     align: 'center',
                     behavior: 'smooth',
                 });
             }
-        } else {
-            const matchElement = unifiedMatches[search.activeMatchIndex];
-            if (matchElement) {
-                unifiedMatches.forEach((el, index) => {
-                    el.classList.toggle('is-active-match', index === search.activeMatchIndex);
-                });
-                matchElement.scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'center',
-                });
-            }
         }
-    }, [search.activeMatchIndex, isLineBasedDiff, lineMatches, unifiedMatches]);
+    }, [search.activeMatchIndex, lineMatches, getScrollIndex]);
 
     // Diff Navigation (Next/Prev Change)
     const [activeChange, setActiveChange] = useState(-1);
     const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
 
     const changedLineIndices = useMemo(() => {
-        if (!isLineBasedDiff || !diffChanges) return [];
+        if (!diffChanges) return [];
         return lines.reduce((acc, line, index) => {
             if (line.type === 'add' || line.type === 'remove') acc.push(index);
             return acc;
         }, [] as number[]);
-    }, [diffChanges, isLineBasedDiff, lines]);
+    }, [diffChanges, lines]);
 
     useEffect(() => {
         setActiveChange(-1);
@@ -199,12 +234,15 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
         const targetLineIndex = changedLineIndices[nextActiveChange];
         if (targetLineIndex === undefined) return;
 
+        const scrollIndex = getScrollIndex(targetLineIndex);
+        if (scrollIndex === -1) return;
+
         const headerHeight = headerRef.current?.offsetHeight ?? 60;
         const lineHeight = 20;
         const offset = -(headerHeight + (3 * lineHeight));
 
         virtuosoRef.current.scrollToIndex({
-            index: targetLineIndex,
+            index: scrollIndex,
             align: 'start',
             behavior: 'smooth',
             offset: offset,
@@ -212,14 +250,13 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
 
         setHighlightedIndex(targetLineIndex);
         highlightTimeoutRef.current = window.setTimeout(() => setHighlightedIndex(null), 1500);
-    }, [changedLineIndices, activeChange]);
+    }, [changedLineIndices, activeChange, getScrollIndex]);
 
     const panelClose = usePanelClose();
     const handleClose = useCallback((e: React.MouseEvent) => { e.stopPropagation(); panelClose(); }, [panelClose]);
 
     const handleDiffTypeChange = useCallback((newType: DiffType) => {
         if (newType === diffType) return;
-        // Anchor logic ... (omitted for brevity, same as original)
         isInitialLoadRef.current = false;
         dispatch(thunks.recomputeDiff(newType));
     }, [dispatch, diffType]);
@@ -236,7 +273,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                         <div className="v-diff-panel-title" onClick={() => setIsMetaCollapsed(v => !v)}>
                             <Icon name={isMetaCollapsed ? 'chevron-right' : 'chevron-down'} />
                             <h3>Comparing</h3>
-                            {isLineBasedDiff && changedLineIndices.length > 0 && (
+                            {changedLineIndices.length > 0 && (
                                 <div className="v-diff-nav-actions">
                                     <button className="clickable-icon" onClick={(e) => { e.stopPropagation(); scrollToChange('prev'); }}><Icon name="chevron-up" /></button>
                                     <button className="clickable-icon" onClick={(e) => { e.stopPropagation(); scrollToChange('next'); }}><Icon name="chevron-down" /></button>
@@ -245,9 +282,18 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                         </div>
                         <div className="v-panel-header-actions">
                             <button className="clickable-icon" onClick={search.handleToggleSearch}><Icon name="search" /></button>
-                            <DiffDropdown currentType={diffType} onSelect={handleDiffTypeChange}>
-                                <button className="clickable-icon v-diff-dropdown-trigger" onClick={e => e.stopPropagation()}><Icon name="git-commit-horizontal" /></button>
-                            </DiffDropdown>
+                            
+                            <DiffOptionsDropdown 
+                                currentType={diffType} 
+                                currentLayout={viewLayout}
+                                onSelectType={handleDiffTypeChange}
+                                onSelectLayout={setViewLayout}
+                            >
+                                <button className="clickable-icon v-diff-dropdown-trigger" onClick={e => e.stopPropagation()}>
+                                    <Icon name="git-commit-horizontal" />
+                                </button>
+                            </DiffOptionsDropdown>
+
                             {!isWindowMode && <button className="clickable-icon v-panel-close" onClick={handleClose}><Icon name="x" /></button>}
                         </div>
                     </div>
@@ -261,14 +307,17 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                                 value={search.localSearchQuery}
                                 onChange={search.handleSearchInputChange}
                                 onKeyDown={(e) => {
-                                    if (e.key === 'Enter') { e.preventDefault(); handleGoToMatch(e.shiftKey ? 'prev' : 'next'); }
+                                    if (e.key === 'Enter') { 
+                                        e.preventDefault(); 
+                                        goToMatch(e.shiftKey ? 'prev' : 'next'); 
+                                    }
                                     if (e.key === 'Escape') search.handleToggleSearch();
                                 }}
                             />
                             <div className="v-search-input-buttons">
                                 {search.searchQuery && totalMatches > 0 && <span className="v-search-match-count">{search.activeMatchIndex + 1} / {totalMatches}</span>}
-                                <button className="clickable-icon" disabled={totalMatches === 0} onClick={() => handleGoToMatch('prev')}><Icon name="chevron-up" /></button>
-                                <button className="clickable-icon" disabled={totalMatches === 0} onClick={() => handleGoToMatch('next')}><Icon name="chevron-down" /></button>
+                                <button className="clickable-icon" disabled={totalMatches === 0} onClick={() => goToMatch('prev')}><Icon name="chevron-up" /></button>
+                                <button className="clickable-icon" disabled={totalMatches === 0} onClick={() => goToMatch('next')}><Icon name="chevron-down" /></button>
                                 <button className={clsx('clickable-icon', { 'is-active': search.isCaseSensitive })} onClick={search.toggleCaseSensitivity}><Icon name="case-sensitive" /></button>
                                 <button className={clsx('clickable-icon', { 'is-hidden': !search.localSearchQuery })} onClick={search.handleClearSearch}><Icon name="x" /></button>
                             </div>
@@ -289,15 +338,14 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                             <div className="v-diff-content-wrapper" ref={containerScrollerRef}>
                                 {isReDiffing && <div className="v-diff-progress-overlay"><p>Calculating...</p></div>}
                                 <VirtualizedDiff
-                                    changes={(diffChanges ? transformDiffChanges(diffChanges) : []) as any}
+                                    lines={lines}
                                     diffType={diffType}
+                                    viewLayout={viewLayout}
                                     virtuosoHandleRef={virtuosoRef}
-                                    unifiedViewContainerRef={unifiedViewContainerRef}
                                     highlightedIndex={highlightedIndex}
                                     searchQuery={search.searchQuery}
                                     isCaseSensitive={search.isCaseSensitive}
-                                    activeMatchInfo={isLineBasedDiff ? (lineMatches[search.activeMatchIndex] ?? null) : null}
-                                    activeUnifiedMatchIndex={!isLineBasedDiff ? search.activeMatchIndex : -1}
+                                    activeMatchInfo={lineMatches[search.activeMatchIndex] ?? null}
                                     onLineClick={handleLineClick}
                                     onRangeChanged={(range) => { virtuosoRangeRef.current = range; }}
                                 />

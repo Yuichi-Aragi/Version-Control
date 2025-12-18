@@ -43,39 +43,13 @@ export const DashboardPanel: React.FC = () => {
         return Object.entries(counts).map(([date, count]) => ({ date, count }));
     }, [history, editHistory, viewMode]);
 
-    // Calculate start date (last 1 year)
+    // Calculate start date (current month + previous 2 months = 3 months total)
     const startDate = useMemo(() => {
         // Cast moment to any to bypass TS call signature error
-        return (moment as any)().subtract(1, 'year').startOf('day').toDate();
+        return (moment as any)().subtract(2, 'months').startOf('month').toDate();
     }, []);
     
     const endDate = useMemo(() => (moment as any)().endOf('day').toDate(), []);
-
-    // Handle scrolling to end on load, resize, and visibility changes
-    useEffect(() => {
-        const el = contentRef.current;
-        if (!el) return;
-
-        const scrollToEnd = () => {
-            el.scrollLeft = el.scrollWidth;
-        };
-
-        // Initial scroll
-        scrollToEnd();
-
-        // Watch for resize events (sidebar toggle, window resize)
-        // This ensures the heatmap scrolls back to the latest data when the view becomes visible again
-        // after being hidden (which often resets scroll position to 0).
-        const observer = new ResizeObserver(() => {
-            scrollToEnd();
-        });
-
-        observer.observe(el);
-
-        return () => {
-            observer.disconnect();
-        };
-    }, [data, viewMode]);
 
     // Close on click outside logic
     useEffect(() => {
@@ -142,11 +116,10 @@ export const DashboardPanel: React.FC = () => {
                             ))}
                         </div>
 
-                        {/* Scrollable Heatmap Area */}
-                        <div className="v-dashboard-heatmap-wrapper" ref={contentRef}>
+                        {/* Heatmap Area - No scrolling needed for 3 months */}
+                        <div className="v-dashboard-heatmap-wrapper" ref={contentRef} style={{ overflowX: 'hidden' }}>
                              <HeatMap
                                 value={data}
-                                width={1000}
                                 startDate={startDate}
                                 endDate={endDate}
                                 monthLabels={['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']}
