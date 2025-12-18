@@ -13,6 +13,7 @@ import {
 } from '@/ui/components/settings/utils';
 import * as v from 'valibot';
 import { AutoRegisterSettings } from './setting-controls/AutoRegisterSettings';
+import type { ViewMode } from '@/types';
 
 // --- Database Path Setting ---
 
@@ -224,39 +225,62 @@ IdFormatSettings.displayName = 'IdFormatSettings';
 
 interface GlobalSettingsProps {
     showTitle?: boolean;
-    includeDefaults?: boolean;
+    showPluginSettings?: boolean;
+    showDefaults?: boolean;
+    activeViewMode?: ViewMode;
+    headerAction?: React.ReactNode;
 }
 
-export const GlobalSettings: React.FC<GlobalSettingsProps> = memo(({ showTitle = true, includeDefaults = true }) => {
+export const GlobalSettings: React.FC<GlobalSettingsProps> = memo(({ 
+    showTitle = true, 
+    showPluginSettings = true, 
+    showDefaults = true,
+    activeViewMode,
+    headerAction
+}) => {
     return (
         <div className="v-settings-section" role="region" aria-labelledby="global-settings-title">
-            {showTitle && <h2 id="global-settings-title">Global Plugin Settings</h2>}
-            <DatabasePathSetting />
-            <FrontmatterKeySetting />
-            <CompressionSetting />
-            <IdFormatSettings />
+            {showTitle && (
+                <div className="v-settings-section-header-row">
+                    <h2 id="global-settings-title">Global Plugin Settings</h2>
+                    {headerAction}
+                </div>
+            )}
             
-            {includeDefaults && (
+            {showPluginSettings && (
                 <>
-                    <div style={{marginTop: '20px', borderTop: '1px solid var(--background-modifier-border)', paddingTop: '10px'}}>
-                        <h3 id="global-version-defaults-title">
-                            Global Version History Defaults
-                        </h3>
-                        <p className="setting-item-description">
-                            These settings apply to all notes using Version History unless overridden.
-                        </p>
-                        <AutoRegisterSettings settingKey="versionHistorySettings" />
-                    </div>
+                    <DatabasePathSetting />
+                    <FrontmatterKeySetting />
+                    <CompressionSetting />
+                    <IdFormatSettings />
+                </>
+            )}
+            
+            {showDefaults && (
+                <>
+                    {(!activeViewMode || activeViewMode === 'versions') && (
+                        <div style={{marginTop: '20px', borderTop: showPluginSettings ? '1px solid var(--background-modifier-border)' : 'none', paddingTop: '10px'}}>
+                            <h3 id="global-version-defaults-title">
+                                Global Version History Defaults
+                            </h3>
+                            <p className="setting-item-description">
+                                These settings apply to all notes using Version History unless overridden.
+                            </p>
+                            <AutoRegisterSettings settingKey="versionHistorySettings" />
+                        </div>
+                    )}
 
-                    <div style={{marginTop: '20px', borderTop: '1px solid var(--background-modifier-border)', paddingTop: '10px'}}>
-                        <h3 id="global-edit-defaults-title">
-                            Global Edit History Defaults
-                        </h3>
-                        <p className="setting-item-description">
-                            These settings apply to all notes using Edit History unless overridden.
-                        </p>
-                        <AutoRegisterSettings settingKey="editHistorySettings" />
-                    </div>
+                    {(!activeViewMode || activeViewMode === 'edits') && (
+                        <div style={{marginTop: '20px', borderTop: (showPluginSettings || !activeViewMode) ? '1px solid var(--background-modifier-border)' : 'none', paddingTop: '10px'}}>
+                            <h3 id="global-edit-defaults-title">
+                                Global Edit History Defaults
+                            </h3>
+                            <p className="setting-item-description">
+                                These settings apply to all notes using Edit History unless overridden.
+                            </p>
+                            <AutoRegisterSettings settingKey="editHistorySettings" />
+                        </div>
+                    )}
                 </>
             )}
         </div>

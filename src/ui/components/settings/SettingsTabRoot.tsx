@@ -1,16 +1,18 @@
 import { type FC, useState, useCallback } from 'react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { useAppDispatch, useAppSelector } from '@/ui/hooks';
 import { appSlice } from '@/state';
 import { GlobalSettings } from './GlobalSettings';
 import { NoteSettingsControls } from './setting-controls/NoteSettingsControls';
 import { AutoRegisterSettings } from './setting-controls/AutoRegisterSettings';
-import { SettingsTabBar, type SettingsTabId } from './SettingsTabBar';
+import { Icon } from '@/ui/components';
+
+type SettingsTabId = 'general' | 'versions' | 'edits';
 
 export const SettingsTabRoot: FC = () => {
     const dispatch = useAppDispatch();
     const [activeTab, setActiveTab] = useState<SettingsTabId>('general');
     
-    // Read global settings to populate effectiveSettings when switching tabs
     const versionDefaults = useAppSelector(state => state.settings.versionHistorySettings);
     const editDefaults = useAppSelector(state => state.settings.editHistorySettings);
 
@@ -19,22 +21,51 @@ export const SettingsTabRoot: FC = () => {
         
         if (tabId === 'versions') {
             dispatch(appSlice.actions.setViewMode('versions'));
-            // Manually force effective settings to global version defaults for editing
             dispatch(appSlice.actions.updateEffectiveSettings({ ...versionDefaults, isGlobal: true }));
         } else if (tabId === 'edits') {
             dispatch(appSlice.actions.setViewMode('edits'));
-            // Manually force effective settings to global edit defaults for editing
             dispatch(appSlice.actions.updateEffectiveSettings({ ...editDefaults, isGlobal: true }));
         }
     }, [dispatch, versionDefaults, editDefaults]);
 
+    const getTabLabel = (id: SettingsTabId) => {
+        switch (id) {
+            case 'general': return 'General';
+            case 'versions': return 'Version History';
+            case 'edits': return 'Edit History';
+        }
+    };
+
     return (
         <div className="v-settings-tab-content">
-            <SettingsTabBar activeTab={activeTab} onTabChange={handleTabChange} />
+            <div className="v-settings-tab-header">
+                <DropdownMenu.Root>
+                    <DropdownMenu.Trigger asChild>
+                        <button className="v-settings-nav-button">
+                            <span>{getTabLabel(activeTab)}</span>
+                            <Icon name="chevron-down" />
+                        </button>
+                    </DropdownMenu.Trigger>
+
+                    <DropdownMenu.Portal>
+                        <DropdownMenu.Content className="v-dropdown-content" align="start" sideOffset={5}>
+                            <DropdownMenu.Item className="v-dropdown-item" onClick={() => handleTabChange('general')}>
+                                General
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item className="v-dropdown-item" onClick={() => handleTabChange('versions')}>
+                                Version History
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item className="v-dropdown-item" onClick={() => handleTabChange('edits')}>
+                                Edit History
+                            </DropdownMenu.Item>
+                        </DropdownMenu.Content>
+                    </DropdownMenu.Portal>
+                </DropdownMenu.Root>
+            </div>
 
             {activeTab === 'general' && (
                 <div role="tabpanel" id="tab-panel-general">
-                    <GlobalSettings showTitle={false} includeDefaults={false} />
+                    <GlobalSettings showTitle={false} showDefaults={false} />
                 </div>
             )}
 
