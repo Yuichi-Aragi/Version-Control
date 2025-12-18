@@ -1,7 +1,7 @@
 import { moment } from 'obsidian';
 import type { TimelineEvent } from '@/state';
 import type { TimelineMatch } from '@/ui/components/panels/TimelinePanel/types';
-import { processLineChanges } from '@/ui/components/shared/VirtualizedDiff';
+import { processLineChanges } from '@/ui/components/shared/diff';
 import { escapeRegExp } from '@/ui/utils/strings';
 
 export const findMatches = (
@@ -39,7 +39,7 @@ export const findMatches = (
         }
 
         const lines = processLineChanges(event.diffData, 'smart');
-        lines.forEach((line, lineIndex) => {
+        lines.forEach((line: any, lineIndex: number) => {
             if (line.type === 'collapsed') return;
 
             regex.lastIndex = 0;
