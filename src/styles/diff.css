@@ -112,6 +112,15 @@
     tab-size: 4;
 }
 
+/* Hide scrollbars specifically for the diff panel content */
+body .version-control-view.version-control-view .v-diff-content-wrapper div[data-virtuoso-scroller="true"]::-webkit-scrollbar {
+    display: none;
+}
+body .version-control-view.version-control-view .v-diff-content-wrapper div[data-virtuoso-scroller="true"] {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
 /* Progress Overlay */
 .v-diff-progress-overlay {
     position: absolute;
@@ -173,7 +182,7 @@
 .diff-line-gutter {
     display: flex;
     flex-shrink: 0;
-    min-width: 4rem; 
+    min-width: 3.5rem; 
     user-select: none;
     padding: 0 var(--size-4-2);
     background-color: var(--background-secondary);
@@ -221,9 +230,9 @@
 }
 
 
-/* --- Change Types --- */
+/* --- Change Types & Modes --- */
 
-/* Added Lines */
+/* Default backgrounds (Smart, Lines) */
 .diff-add {
     background-color: rgba(var(--color-green-rgb), 0.12);
     border-left-color: var(--color-green);
@@ -236,7 +245,6 @@
     color: var(--color-green);
 }
 
-/* Removed Lines */
 .diff-remove {
     background-color: rgba(var(--color-red-rgb), 0.12);
     border-left-color: var(--color-red);
@@ -247,6 +255,22 @@
 }
 .diff-remove .diff-line-marker {
     color: var(--color-red);
+}
+
+/* Word/Char Mode Overrides: No line background */
+.diff-mode-words .diff-add,
+.diff-mode-chars .diff-add,
+.diff-mode-words .diff-remove,
+.diff-mode-chars .diff-remove {
+    background-color: transparent;
+    border-left-color: transparent;
+}
+.diff-mode-words .diff-add .diff-line-gutter,
+.diff-mode-chars .diff-add .diff-line-gutter,
+.diff-mode-words .diff-remove .diff-line-gutter,
+.diff-mode-chars .diff-remove .diff-line-gutter {
+    background-color: var(--background-secondary);
+    color: var(--text-muted);
 }
 
 /* Context Lines */
@@ -277,7 +301,7 @@
     opacity: 0.5;
 }
 
-/* Word-level highlights for Smart Diff */
+/* Word-level highlights */
 .diff-word-add {
     background-color: rgba(var(--color-green-rgb), 0.3);
     border-radius: 2px;
@@ -288,35 +312,58 @@
     text-decoration: line-through;
 }
 
-
-/* --- Word/Char/JSON Diff Styles (Unified View) --- */
-.v-unified-diff-view {
-    padding: var(--size-4-4);
-    white-space: pre-wrap;
-    word-break: break-all;
-    user-select: text;
-    font-family: var(--font-monospace);
-    font-size: var(--font-ui-smaller);
-    color: var(--text-normal);
+/* Char-level highlights */
+.diff-char-add {
+    background-color: rgba(var(--color-green-rgb), 0.4);
+    border-radius: 1px;
 }
-
-.v-unified-diff-view .diff-add {
-    background-color: rgba(var(--color-green-rgb), 0.2);
-    color: var(--text-normal);
-    border-bottom: 2px solid rgba(var(--color-green-rgb), 0.4);
-    text-decoration: none;
-    border-left: none;
-    padding: 1px 2px;
-    border-radius: var(--radius-s);
-}
-
-.v-unified-diff-view .diff-remove {
-    background-color: rgba(var(--color-red-rgb), 0.15);
-    color: var(--text-muted);
+.diff-char-remove {
+    background-color: rgba(var(--color-red-rgb), 0.4);
+    border-radius: 1px;
     text-decoration: line-through;
-    border-left: none;
-    padding: 1px 2px;
-    border-radius: var(--radius-s);
+}
+
+
+/* --- Split View (Side-by-Side) --- */
+/* Enable horizontal scrolling for the container */
+.v-virtuoso-container.v-diff-split-view {
+    overflow-x: auto !important; /* Force override virtuoso defaults if needed */
+}
+
+/* Ensure the scroller inner div allows width expansion */
+.v-virtuoso-container.v-diff-split-view > div[data-virtuoso-scroller="true"] > div[data-virtuoso-item-list="true"] {
+    min-width: 100%;
+    width: fit-content;
+}
+
+.diff-split-row {
+    display: flex;
+    width: 100%;
+    border-bottom: 1px solid transparent;
+}
+
+.diff-split-cell {
+    flex: 1;
+    /* Ensure cells don't shrink below a readable width, forcing scroll */
+    min-width: 350px; 
+    border-right: 1px solid var(--background-modifier-border);
+    display: flex;
+    flex-direction: column;
+}
+.diff-split-cell:last-child {
+    border-right: none;
+}
+
+.diff-split-cell .diff-line {
+    border-left-width: 0; /* Remove left border in split view to save space */
+}
+
+/* Empty cell placeholder */
+.diff-empty-cell {
+    background-color: transparent;
+    background-image: none;
+    height: 100%;
+    width: 100%;
 }
 
 /* --- Search Highlighting --- */
@@ -334,17 +381,20 @@ mark.is-active-match {
     width: calc(var(--icon-size) + var(--size-4-2));
 }
 
-.v-diff-dropdown-content {
-    min-width: 160px;
+.v-diff-dropdown-content,
+.v-diff-dropdown-sub-content {
+    min-width: 180px;
     background-color: var(--background-secondary);
     border-radius: var(--radius-m);
     padding: var(--size-4-1);
     box-shadow: var(--shadow-l);
     border: 1px solid var(--background-modifier-border);
     z-index: 10002;
+    animation: v-fade-in 0.1s ease-out;
 }
 
-.v-diff-dropdown-item {
+.v-diff-dropdown-item,
+.v-diff-dropdown-sub-trigger {
     font-size: var(--font-ui-small);
     padding: var(--size-4-2) var(--size-4-3);
     border-radius: var(--radius-s);
@@ -354,19 +404,30 @@ mark.is-active-match {
     cursor: pointer;
     outline: none;
     color: var(--text-normal);
+    user-select: none;
 }
 
 .v-diff-dropdown-item:hover,
-.v-diff-dropdown-item[data-highlighted] {
+.v-diff-dropdown-item[data-highlighted],
+.v-diff-dropdown-sub-trigger:hover,
+.v-diff-dropdown-sub-trigger[data-highlighted] {
     background-color: var(--interactive-accent);
     color: var(--text-on-accent);
 }
-.v-diff-dropdown-item[data-highlighted] .lucide {
+.v-diff-dropdown-item[data-highlighted] .lucide,
+.v-diff-dropdown-sub-trigger[data-highlighted] .lucide {
     color: var(--text-on-accent);
 }
 
-.v-diff-dropdown-item .lucide {
+.v-diff-dropdown-item .lucide,
+.v-diff-dropdown-sub-trigger .lucide {
     width: 14px;
     height: 14px;
     color: var(--text-muted);
+}
+
+.v-diff-separator {
+    height: 1px;
+    background-color: var(--background-modifier-border);
+    margin: var(--size-4-1) 0;
 }

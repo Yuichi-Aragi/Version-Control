@@ -68,26 +68,30 @@
     /* Hardware acceleration hint */
     transform: translateZ(0);
     will-change: transform, box-shadow, background-color, opacity;
-    transition: box-shadow 180ms ease-out, border-color 180ms ease-out, transform 180ms ease-out, background-color 180ms ease-out;
+    /* Removed transform from transition to let framer-motion handle it exclusively */
+    transition: box-shadow 180ms ease-out, border-color 180ms ease-out, background-color 180ms ease-out;
+    
+    /* Entry animation - CSS based for reliability in Virtual Lists */
+    animation: v-entry-appear 0.2s ease-out forwards;
 }
 
-/* Animation for items entering the list */
-.v-history-entry:not(.is-skeleton) {
-    animation: v-item-enter 0.4s cubic-bezier(0.215, 0.61, 0.355, 1) forwards;
+@keyframes v-entry-appear {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 /* Card view hover/active effects (lightweight shadows) */
 @media (hover: hover) and (pointer: fine) {
     .v-history-entry:not(.is-list-view):hover {
         border-color: var(--interactive-accent);
-        transform: translateY(-2px);
+        /* Transform handled by framer-motion whileHover */
         box-shadow: 0 6px 14px rgba(0,0,0,0.06);
         z-index: 10;
     }
 }
 .v-history-entry:not(.is-list-view):active {
     border-color: var(--interactive-accent);
-    transform: translateY(-1px);
+    /* Transform handled by framer-motion whileTap */
     box-shadow: 0 4px 10px rgba(0,0,0,0.06);
     z-index: 10;
 }
@@ -217,6 +221,14 @@
     color: var(--text-error);
 }
 
+/* Dark mode override to ensure transparent background */
+.theme-dark .v-action-btn {
+    background-color: transparent;
+}
+.theme-dark .v-action-btn:hover {
+    background-color: transparent;
+}
+
 /* List View Mode */
 .v-history-entry.is-list-view {
     flex-direction: column;
@@ -251,10 +263,7 @@
 .v-history-entry.is-naming {
     border-color: var(--interactive-accent);
     box-shadow: 0 0 0 1px var(--interactive-accent);
-    transform: translateY(0);
-}
-.v-history-entry.is-naming:hover {
-    transform: translateY(0);
+    /* Transform handled by framer-motion */
 }
 
 .version-control-view .v-history-entry.is-naming input.v-version-name-input {
@@ -338,6 +347,7 @@
 .v-history-list .v-history-entry.is-skeleton {
     position: static;
     transform: none;
+    animation: none; /* No entry animation for skeletons */
 }
 
 .v-history-entry.is-skeleton {
@@ -345,11 +355,7 @@
     background-color: var(--background-secondary);
     border-color: transparent;
     box-shadow: none;
-    transform: none;
-    animation: v-fade-in 0.28s ease-out forwards;
-}
-.v-history-entry.is-skeleton:hover {
-    transform: none;
+    /* Animation handled by framer-motion */
 }
 
 /* Card View Skeleton Layout */
@@ -367,32 +373,12 @@
 .v-history-entry.is-skeleton.is-list-view .v-version-timestamp { width: 80px; height: 16px; flex-shrink: 0; }
 .v-history-entry.is-skeleton.is-list-view .v-version-content { width: 80%; height: 16px; margin-top: var(--size-4-1); }
 
-/* Keyframes for item entrance */
-@keyframes v-item-enter {
-    from {
-        opacity: 0;
-        transform: translateY(15px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-/* small fade-in for skeletons */
-@keyframes v-fade-in {
-    from { opacity: 0; transform: translateY(6px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
 /* Respect user motion preferences */
 @media (prefers-reduced-motion: reduce) {
     .v-history-entry,
     .v-action-btn {
         transition: none !important;
         will-change: auto !important;
-    }
-    .v-history-entry:not(.is-skeleton) {
-        animation: none;
+        animation: none !important;
     }
 }

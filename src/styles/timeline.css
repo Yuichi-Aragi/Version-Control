@@ -1,19 +1,44 @@
 /* src/styles/timeline.css */
 
 /* Timeline Panel Layout */
-/* Increased specificity to override default drawer background from panels.css */
 .v-inline-panel.v-timeline-panel {
     display: flex;
     flex-direction: column;
     height: 100%;
-    /* CHANGED: Use primary background to match the main view/history list container */
+    /* Match history list background */
     background-color: var(--background-primary);
+}
+
+.theme-dark .v-inline-panel.v-timeline-panel {
+    background-color: var(--background-secondary);
+}
+
+/* FULL SCREEN OVERRIDE */
+.v-panel-container.is-timeline-container {
+    padding: 0;
+    /* Ensure this matches the view background exactly */
+    background-color: var(--background-primary);
+    backdrop-filter: none;
+}
+
+.theme-dark .v-panel-container.is-timeline-container {
+    background-color: var(--background-secondary);
+}
+
+.v-panel-container.is-timeline-container .v-timeline-panel {
+    border-radius: 0;
+    box-shadow: none;
+    height: 100%;
+    width: 100%;
+    max-height: none;
+    animation: none;
 }
 
 .v-timeline-content {
     flex-grow: 1;
-    overflow-y: hidden; /* Virtuoso handles scrolling */
-    padding: var(--size-4-2); /* Reduced padding */
+    overflow-y: hidden;
+    /* PADDING UPDATE: Top padding only. Side padding removed to match HistoryList. */
+    padding: var(--size-4-2) 0 0 0;
     display: flex;
     flex-direction: column;
 }
@@ -29,34 +54,42 @@
     gap: var(--size-4-2);
 }
 
-/* Timeline List Container for Virtuoso */
 .v-timeline-list-container {
     height: 100%;
     width: 100%;
 }
 
-/* Wrapper for virtualized items to provide gap */
 .v-timeline-item-wrapper {
     padding-bottom: var(--size-4-2);
+    transform: translate3d(0, 0, 0);
+    will-change: transform, opacity;
+    /* PADDING UPDATE: Removed side padding. Cards will align with HistoryList items. */
+    padding-left: 0;
+    padding-right: 0;
 }
 
 /* Timeline Card */
 .v-timeline-card {
-    /* CHANGED: Use secondary background to match History Entry cards */
     background-color: var(--background-secondary);
     border: 1px solid var(--background-modifier-border);
     border-radius: var(--radius-m);
+    padding: var(--size-4-2);
     overflow: hidden;
-    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+    transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
     cursor: pointer;
     display: flex;
     flex-direction: column;
     transform: translateZ(0); 
+    gap: var(--size-4-2);
+    /* MARGIN UPDATE: Removed side margins to match history list (edge-to-edge) */
+    margin-left: 0;
+    margin-right: 0;
 }
 
 .v-timeline-card:hover {
     border-color: var(--interactive-accent);
-    box-shadow: var(--shadow-s);
+    box-shadow: 0 6px 14px rgba(0,0,0,0.06);
+    z-index: 10;
 }
 
 .v-timeline-card.is-expanded {
@@ -66,8 +99,7 @@
 
 /* --- Card Header Layout --- */
 .v-timeline-card-header {
-    padding: var(--size-4-3);
-    position: relative; /* Anchor for absolute icon */
+    position: relative; 
     min-height: auto;
     display: block; 
 }
@@ -79,23 +111,17 @@
     gap: var(--size-4-2);
 }
 
-/* Header Row: Flex container for LeftGroup, Spacer, Timestamp */
 .v-timeline-header-row {
     display: flex;
     align-items: baseline;
     width: 100%;
-    /* Safe zone for absolute icon */
-    padding-right: var(--size-4-8); 
 }
 
-/* Left Group: Contains Version Badge and Name */
 .v-timeline-header-left {
     display: flex;
     align-items: center;
     gap: var(--size-4-2);
     flex-wrap: wrap;
-    
-    /* Animation Properties */
     max-width: 300px; 
     opacity: 1;
     transition: max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
@@ -112,7 +138,6 @@
     margin-right: 0;
 }
 
-/* Spacer: Pushes timestamp to right */
 .v-timeline-spacer {
     flex-grow: 1;
     transition: flex-grow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -123,7 +148,6 @@
     flex-grow: 0;
 }
 
-/* --- Header Elements --- */
 .v-timeline-version-badge {
     background-color: var(--interactive-accent);
     color: var(--text-on-accent);
@@ -148,45 +172,82 @@
     color: var(--text-muted);
     white-space: nowrap;
     flex-shrink: 0;
-    transition: font-size 0.3s ease, color 0.3s ease, transform 0.3s ease;
+    transition: font-size 0.3s ease, color 0.3s ease;
     transform-origin: left center;
 }
 
-/* Timestamp Focus Mode */
 .v-timeline-time.is-focused {
     font-size: var(--font-ui-medium);
     font-weight: var(--font-bold);
     color: var(--text-normal);
 }
 
-/* Description Container */
 .v-timeline-description {
     font-size: var(--font-ui-smaller);
     color: var(--text-muted);
-    line-height: 1.5;
+    line-height: 1.4;
     white-space: pre-wrap;
     word-break: break-word;
-    
-    /* Light mode: slightly darker than card to distinguish it */
-    background-color: rgba(0, 0, 0, 0.03);
-    
-    padding: var(--size-4-2);
-    
-    /* Left side styling */
-    border-left: 2px solid var(--interactive-accent);
-    
-    /* Rounded corners on all sides */
-    border-radius: var(--radius-s);
-    
-    /* Spacing from elements above */
+    width: 100%;
     margin-top: var(--size-4-1);
+    padding-top: var(--size-4-2);
+    border-top: 1px solid var(--background-modifier-border);
 }
 
-.theme-dark .v-timeline-description {
-    /* Dark mode: slightly lighter than card to create a subtle highlight/shadow effect
-       Using 4% white opacity is much subtler than modifier-hover (usually ~10-15%) */
-    background-color: rgba(255, 255, 255, 0.04);
+/* Diff Preview Footer */
+.v-timeline-diff-preview {
+    position: relative;
+    font-family: var(--font-monospace);
+    font-size: var(--font-ui-smaller);
+    /* COLOR UPDATE: Use muted text for the content to reduce glare */
+    color: var(--text-muted);
+    border-top: 1px solid var(--background-modifier-border);
+    padding-top: var(--size-4-2);
+    margin-top: var(--size-4-1);
+    overflow: hidden;
+    max-height: calc(1.5em * 3 + var(--size-4-2)); 
 }
+
+.v-timeline-diff-preview::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 2em;
+    background: linear-gradient(to bottom, transparent, var(--background-secondary));
+    pointer-events: none;
+}
+
+.v-timeline-preview-line {
+    white-space: pre;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.5;
+    height: 1.5em;
+    display: flex;
+    align-items: center;
+}
+
+.v-timeline-preview-marker {
+    display: inline-block;
+    width: 1.5em;
+    text-align: center;
+    opacity: 0.8;
+    flex-shrink: 0;
+    user-select: none;
+    font-weight: bold;
+}
+
+.v-timeline-preview-text {
+    white-space: pre;
+    /* Ensure text color is muted */
+    color: var(--text-muted);
+}
+
+/* COLOR UPDATE: Only color the markers, not the text */
+.v-preview-add .v-timeline-preview-marker { color: var(--text-success); }
+.v-preview-remove .v-timeline-preview-marker { color: var(--text-error); }
 
 .v-timeline-stats-row {
     display: flex;
@@ -200,41 +261,16 @@
     font-family: var(--font-monospace);
 }
 
-.v-stat-add {
-    color: var(--color-green);
-}
+.v-stat-add { color: var(--color-green); }
+.v-stat-del { color: var(--color-red); }
 
-.v-stat-del {
-    color: var(--color-red);
-}
-
-/* Absolute positioned expand icon */
-.v-timeline-expand-icon {
-    color: var(--text-muted);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 20px; 
-    width: 20px;
-    
-    position: absolute;
-    top: var(--size-4-3);
-    right: var(--size-4-3);
-    
-    transition: transform 0.2s ease;
-}
-
-/* --- Expansion Animation (Accordion) --- */
+/* --- Expansion Animation --- */
 .v-timeline-card-diff-container {
-    display: grid;
-    grid-template-rows: 0fr;
-    transition: grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    will-change: grid-template-rows;
+    overflow: hidden;
     border-top: 1px solid transparent;
 }
 
 .v-timeline-card.is-expanded .v-timeline-card-diff-container {
-    grid-template-rows: 1fr;
     border-top-color: var(--background-modifier-border);
 }
 
@@ -243,44 +279,110 @@
     min-height: 0;
 }
 
-/* Diff Content in Card */
 .v-timeline-diff-content {
-    /* CHANGED: Use primary background for content well */
     background-color: var(--background-primary);
     height: 400px; 
     display: flex;
     flex-direction: column;
     cursor: default; 
+    border-radius: var(--radius-s);
+    margin-top: var(--size-4-2);
 }
 
-/* Override virtualized container inside the card */
 .v-timeline-diff-content .v-virtuoso-container {
     height: 100%;
 }
 
+/* --- Header Layout --- */
+.v-timeline-header-container {
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--background-modifier-border);
+    flex-shrink: 0;
+}
+
+.v-timeline-toolbar {
+    position: relative;
+    height: var(--input-height);
+    padding: var(--size-4-2);
+    display: flex;
+    align-items: center;
+}
+
+.v-timeline-toolbar-content {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: opacity 0.2s ease-in-out;
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.v-timeline-toolbar.is-searching .v-timeline-toolbar-content {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.v-timeline-toolbar .v-search-bar-container {
+    opacity: 0;
+    pointer-events: none;
+    z-index: 2;
+    position: absolute;
+    width: calc(100% - var(--size-4-2) * 2);
+    top: 50%;
+    left: var(--size-4-2);
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-2);
+    transition: opacity 0.2s ease-in-out;
+}
+
+.v-timeline-toolbar.is-searching .v-search-bar-container {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.v-timeline-header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-2);
+}
+
+.v-timeline-header-title-row {
+    padding: 0 var(--size-4-3) var(--size-4-3) var(--size-4-3);
+}
+
+.v-timeline-header-title-row h3 {
+    margin: 0;
+    font-size: var(--font-ui-medium);
+    font-weight: var(--font-semibold);
+}
+
 /* --- Scrollbar Hiding Protocol --- */
-.v-panel-container.is-drawer-like .v-timeline-panel.is-drawer .v-timeline-list-container .v-virtuoso-container::-webkit-scrollbar {
+.v-panel-container.is-timeline-container .v-timeline-panel .v-timeline-list-container .v-virtuoso-container::-webkit-scrollbar {
     display: none;
     width: 0;
     height: 0;
     background: transparent;
 }
 
-.v-panel-container.is-drawer-like .v-timeline-panel.is-drawer .v-timeline-list-container .v-virtuoso-container {
+.v-panel-container.is-timeline-container .v-timeline-panel .v-timeline-list-container .v-virtuoso-container {
     scrollbar-width: none;
     -ms-overflow-style: none;
 }
 
-.v-panel-container.is-drawer-like .v-timeline-panel.is-drawer .v-timeline-card .v-timeline-diff-content .v-virtuoso-container::-webkit-scrollbar,
-.v-panel-container.is-drawer-like .v-timeline-panel.is-drawer .v-timeline-card .v-timeline-diff-content .v-diff-content-wrapper::-webkit-scrollbar {
+.v-panel-container.is-timeline-container .v-timeline-panel .v-timeline-card .v-timeline-diff-content .v-virtuoso-container::-webkit-scrollbar,
+.v-panel-container.is-timeline-container .v-timeline-panel .v-timeline-card .v-timeline-diff-content .v-diff-content-wrapper::-webkit-scrollbar {
     display: none;
     width: 0;
     height: 0;
     background: transparent;
 }
 
-.v-panel-container.is-drawer-like .v-timeline-panel.is-drawer .v-timeline-card .v-timeline-diff-content .v-virtuoso-container,
-.v-panel-container.is-drawer-like .v-timeline-panel.is-drawer .v-timeline-card .v-timeline-diff-content .v-diff-content-wrapper {
+.v-panel-container.is-timeline-container .v-timeline-panel .v-timeline-card .v-timeline-diff-content .v-virtuoso-container,
+.v-panel-container.is-timeline-container .v-timeline-panel .v-timeline-card .v-timeline-diff-content .v-diff-content-wrapper {
     scrollbar-width: none;
     -ms-overflow-style: none;
 }
