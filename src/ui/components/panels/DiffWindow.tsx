@@ -176,17 +176,22 @@ const useViewportClamp = (rect: Rect, setRect: (rect: Rect) => void) => {
 
 const usePointerCapture = (
   elementRef: React.RefObject<HTMLElement | null>,
-  onPointerDown: (e: React.PointerEvent) => void,
+  onPointerDown: (e: React.PointerEvent) => boolean,
   onPointerMove: (e: React.PointerEvent) => void,
   onPointerUp: (e: React.PointerEvent) => void
 ) => {
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
-    elementRef.current?.setPointerCapture(e.pointerId);
-    onPointerDown(e);
+    // Only capture if the handler returns true.
+    // This allows default behavior (bubbling, clicks) when not dragging/resizing.
+    if (onPointerDown(e)) {
+      elementRef.current?.setPointerCapture(e.pointerId);
+    }
   }, [elementRef, onPointerDown]);
 
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
-    elementRef.current?.releasePointerCapture(e.pointerId);
+    if (elementRef.current?.hasPointerCapture(e.pointerId)) {
+      elementRef.current?.releasePointerCapture(e.pointerId);
+    }
     onPointerUp(e);
   }, [elementRef, onPointerUp]);
 
@@ -253,9 +258,9 @@ export const DiffWindow: FC<DiffWindowProps> = ({ panelState }) => {
   }, [isResizeMode]);
 
   // --- Move Logic (Header Drag) ---
-  const handleHeaderPointerDown = useCallback((e: React.PointerEvent) => {
-    if (isResizeMode) return;
-    if ((e.target as HTMLElement).closest('button')) return;
+  const handleHeaderPointerDown = useCallback((e: React.PointerEvent): boolean => {
+    if (isResizeMode) return false;
+    if ((e.target as HTMLElement).closest('button')) return false;
 
     e.preventDefault();
     e.stopPropagation();
@@ -263,6 +268,8 @@ export const DiffWindow: FC<DiffWindowProps> = ({ panelState }) => {
     setIsDragging(true);
     dragStartRef.current = { x: e.clientX, y: e.clientY };
     initialRectRef.current = { ...rect };
+    
+    return true; // Capture pointer
   }, [isResizeMode, rect]);
 
   const throttledHeaderMove = useMemo(() => 
@@ -304,8 +311,8 @@ export const DiffWindow: FC<DiffWindowProps> = ({ panelState }) => {
   }, [isDragging]);
 
   // --- Resize Logic ---
-  const handleModalPointerDown = useCallback((e: React.PointerEvent) => {
-    if (!isResizeMode) return;
+  const handleModalPointerDown = useCallback((e: React.PointerEvent): boolean => {
+    if (!isResizeMode) return false;
     
     e.preventDefault();
     e.stopPropagation();
@@ -320,6 +327,8 @@ export const DiffWindow: FC<DiffWindowProps> = ({ panelState }) => {
     dragStartRef.current = { x: e.clientX, y: e.clientY };
     initialRectRef.current = { ...rect };
     setGhostRect({ ...rect });
+
+    return true; // Capture pointer
   }, [isResizeMode, rect]);
 
   const throttledModalMove = useMemo(() => 
