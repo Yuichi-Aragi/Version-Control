@@ -1,27 +1,20 @@
 import { App } from 'obsidian';
-import { injectable, inject } from 'inversify';
 import PQueue from 'p-queue';
-import { TYPES } from '@/types/inversify.types';
 import type { NoteManifest, VersionHistoryEntry } from '@/types';
 import type { PathService } from '@/core';
-import { WorkerClient } from './infrastructure/worker-client';
+import type VersionControlPlugin from '@/main';
+import { EditWorkerManager } from './infrastructure/worker-client';
 import { PersistenceService } from './persistence/persistence-service';
-import { AtomicOperationCoordinator } from './infrastructure/coordinator';
-import { LockManager } from './infrastructure/lock-manager';
 import { CreateOperation } from './operations/create-operation';
 import { ReadOperation } from './operations/read-operation';
 import { UpdateOperation } from './operations/update-operation';
 import { DeleteOperation } from './operations/delete-operation';
 import { OperationPriority, type EditHistoryStats } from './types';
+import type { QueueService } from '@/services';
 
-const MAX_CONCURRENT_OPERATIONS = 4;
-
-@injectable()
 export class EditHistoryManager {
-  private readonly workerClient: WorkerClient;
-  private readonly persistence: PersistenceService;
-  private readonly coordinator: AtomicOperationCoordinator;
-  private readonly lockManager: LockManager;
+  private readonly workerClient: EditWorkerManager;
+  public readonly persistence: PersistenceService;
   private readonly operationQueue: PQueue;
 
   private readonly createOp: CreateOperation;
@@ -30,42 +23,41 @@ export class EditHistoryManager {
   private readonly deleteOp: DeleteOperation;
 
   constructor(
-    @inject(TYPES.App) app: App,
-    @inject(TYPES.PathService) pathService: PathService
+    app: App,
+    private readonly plugin: VersionControlPlugin,
+    pathService: PathService,
+    private readonly queueService: QueueService
   ) {
-    this.workerClient = new WorkerClient();
-    this.persistence = new PersistenceService(app, pathService, this.workerClient);
-    this.coordinator = new AtomicOperationCoordinator();
-    this.lockManager = new LockManager();
-    this.operationQueue = new PQueue({ concurrency: MAX_CONCURRENT_OPERATIONS });
+    this.workerClient = new EditWorkerManager();
+    this.persistence = new PersistenceService(app, pathService, this.workerClient, this.plugin);
+    // Queue for throttling general operations, distinct from the strict serialization queue
+    this.operationQueue = new PQueue({ concurrency: 4 });
 
     // Initialize Operations
-    this.readOp = new ReadOperation(this.workerClient);
+    this.readOp = new ReadOperation(this.workerClient, this.queueService);
     
     this.deleteOp = new DeleteOperation(
       app,
+      this.plugin,
       pathService,
       this.workerClient,
       this.persistence,
-      this.coordinator,
-      this.lockManager,
-      this.readOp
+      this.queueService
     );
 
     this.createOp = new CreateOperation(
+      this.plugin,
       this.workerClient,
       this.persistence,
-      this.coordinator,
-      this.lockManager,
-      this.readOp,
+      this.queueService,
       this.deleteOp
     );
 
     this.updateOp = new UpdateOperation(
+      this.plugin,
       this.workerClient,
       this.persistence,
-      this.lockManager,
-      this.readOp
+      this.queueService
     );
   }
 
@@ -76,7 +68,6 @@ export class EditHistoryManager {
   public async terminate(): Promise<void> {
     this.persistence.shutdown();
     this.operationQueue.clear();
-    this.coordinator.abortAtomicOperation('*', '*');
     this.workerClient.terminate();
   }
 
@@ -103,13 +94,14 @@ export class EditHistoryManager {
 
   public async createEdit(
     noteId: string,
+    branchName: string,
     content: string,
     filePath: string,
     maxVersions: number
   ): Promise<{ entry: VersionHistoryEntry; deletedIds: string[] } | null> {
     // High priority to ensure UI responsiveness during saves
     return this.operationQueue.add(
-      () => this.createOp.createEdit(noteId, content, filePath, maxVersions),
+      () => this.createOp.createEdit(noteId, branchName, content, filePath, maxVersions),
       { priority: OperationPriority.HIGH }
     );
   }
@@ -119,10 +111,11 @@ export class EditHistoryManager {
     branchName: string,
     editId: string,
     content: string,
-    manifest: NoteManifest
+    manifest: NoteManifest,
+    forcePersistence = false
   ): Promise<{ size: number; contentHash: string }> {
     return this.operationQueue.add(
-      () => this.createOp.saveEdit(noteId, branchName, editId, content, manifest),
+      () => this.createOp.saveEdit(noteId, branchName, editId, content, manifest, forcePersistence),
       { priority: OperationPriority.HIGH }
     );
   }
@@ -146,18 +139,15 @@ export class EditHistoryManager {
   }
 
   public async getEditHistory(noteId: string): Promise<VersionHistoryEntry[]> {
-    // Ensure we don't read while a critical mutation is happening on this note
-    // Note: LockManager is re-entrant if we are inside the lock, but here we are outside.
-    // We rely on the Worker's mutex for absolute consistency, but queueing here helps ordering.
     return this.operationQueue.add(
       () => this.readOp.getEditHistory(noteId),
-      { priority: OperationPriority.NORMAL } // Bumped from LOW to ensure UI refresh isn't starved
+      { priority: OperationPriority.NORMAL }
     );
   }
 
-  public async saveEditManifest(noteId: string, manifest: NoteManifest): Promise<void> {
+  public async saveEditManifest(noteId: string, manifest: NoteManifest, forcePersistence = false): Promise<void> {
     return this.operationQueue.add(
-      () => this.updateOp.saveEditManifest(noteId, manifest),
+      () => this.updateOp.saveEditManifest(noteId, manifest, forcePersistence),
       { priority: OperationPriority.HIGH }
     );
   }
@@ -233,7 +223,7 @@ export class EditHistoryManager {
   public async loadBranchFromDisk(noteId: string, branchName: string): Promise<void> {
     return this.operationQueue.add(
       () => this.persistence.loadBranchFromDisk(noteId, branchName),
-      { priority: OperationPriority.HIGH } // Bumped priority as this blocks initial load
+      { priority: OperationPriority.HIGH }
     );
   }
 }
