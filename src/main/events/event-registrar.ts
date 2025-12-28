@@ -27,8 +27,8 @@ export class EventRegistrar {
                 if (this.plugin.isUnloading) return;
                 try {
                     const state = this.store.getState();
-                    if (state.status === AppStatus.READY && state.noteId === noteId && state.file) {
-                        this.store.dispatch(thunks.loadHistory(state.file));
+                    if (state.app.status === AppStatus.READY && state.app.noteId === noteId && state.app.file) {
+                        this.store.dispatch(thunks.loadHistory(state.app.file));
                     }
                 } catch (error) {
                     console.error("Version Control: Error in version deleted handler", error);
