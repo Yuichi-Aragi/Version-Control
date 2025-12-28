@@ -1,5 +1,3 @@
-import { injectable, inject } from 'inversify';
-import { TYPES } from '@/types/inversify.types';
 import { TimelineDatabase } from '@/core';
 import type { DiffManager } from '@/services';
 import type { VersionManager } from '@/core';
@@ -9,17 +7,16 @@ import type { TimelineEvent, VersionHistoryEntry } from '@/types';
 import { orderBy } from 'es-toolkit';
 import { VersionContentRepository } from '@/core';
 
-@injectable()
 export class TimelineManager {
     private processingQueue: Promise<void> = Promise.resolve();
 
     constructor(
-        @inject(TYPES.TimelineDatabase) private db: TimelineDatabase,
-        @inject(TYPES.DiffManager) private diffManager: DiffManager,
-        @inject(TYPES.VersionManager) private versionManager: VersionManager,
-        @inject(TYPES.EditHistoryManager) private editHistoryManager: EditHistoryManager,
-        @inject(TYPES.VersionContentRepo) private contentRepo: VersionContentRepository,
-        @inject(TYPES.EventBus) private eventBus: PluginEvents
+        private db: TimelineDatabase,
+        private diffManager: DiffManager,
+        private versionManager: VersionManager,
+        private editHistoryManager: EditHistoryManager,
+        private contentRepo: VersionContentRepository,
+        private eventBus: PluginEvents
     ) {}
 
     public initialize(): void {

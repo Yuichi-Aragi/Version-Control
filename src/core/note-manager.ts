@@ -1,23 +1,21 @@
-import { App, TFile, WorkspaceLeaf, MarkdownView, type FrontMatterCache, FileView } from "obsidian";
-import { injectable, inject } from 'inversify';
+import { App, TFile, WorkspaceLeaf, MarkdownView, FileView } from "obsidian";
 import { ManifestManager } from "@/core";
 import type { ActiveNoteInfo } from "@/types";
 import { generateNoteId, extractUuidFromId, extractTimestampFromId } from "@/utils/id";
-import { TYPES } from '@/types/inversify.types';
 import type VersionControlPlugin from "@/main";
 import { EditHistoryManager } from "@/core";
+import { updateFrontmatter, getFrontmatterKey, DELETE } from "@/utils/frontmatter";
 
-@injectable()
 export class NoteManager {
     // A temporary exclusion list to prevent event handlers from processing files
     // that are in the middle of a special creation process (e.g., deviations).
     private pendingDeviations = new Set<string>();
 
     constructor(
-        @inject(TYPES.Plugin) private plugin: VersionControlPlugin,
-        @inject(TYPES.App) private app: App, 
-        @inject(TYPES.ManifestManager) private manifestManager: ManifestManager,
-        @inject(TYPES.EditHistoryManager) private editHistoryManager: EditHistoryManager
+        private plugin: VersionControlPlugin,
+        private app: App, 
+        private manifestManager: ManifestManager,
+        private editHistoryManager: EditHistoryManager
     ) {}
 
     private get noteIdKey(): string {
@@ -38,6 +36,11 @@ export class NoteManager {
         const file = targetLeaf.view.file;
         if (!(file instanceof TFile)) {
             return { file: null, noteId: null, source: 'none' };
+        }
+
+        // Check pending deviation status to prevent race conditions during creation
+        if (this.isPendingDeviation(file.path)) {
+            return { file, noteId: null, source: 'none' };
         }
 
         if (file.extension === 'base') {
@@ -80,6 +83,11 @@ export class NoteManager {
     async getNoteId(file: TFile): Promise<string | null> {
         if (!file) return null;
 
+        // Check pending deviation status
+        if (this.isPendingDeviation(file.path)) {
+            return null;
+        }
+
         // 1. Priority: Check Central Manifest for existing ID associated with this path.
         // This includes consolidation logic to ensure only one ID exists per path.
         const canonicalId = await this.manifestManager.getConsolidatedNoteIdForPath(file.path);
@@ -90,9 +98,14 @@ export class NoteManager {
                 const fileCache = this.app.metadataCache.getFileCache(file);
                 const currentFmId = fileCache?.frontmatter?.[this.noteIdKey];
                 
-                // If frontmatter ID doesn't match canonical ID, update it.
-                // This handles cases where file content might have been overwritten or is stale.
-                if (currentFmId !== canonicalId) {
+                // Check if any legacy keys are present in the file
+                const hasLegacyKeys = this.legacyNoteIdKeys.some(key => 
+                    fileCache?.frontmatter?.[key] !== undefined
+                );
+                
+                // If frontmatter ID doesn't match canonical ID OR legacy keys exist, update/clean.
+                // This handles cases where file content might have been overwritten, is stale, or contains deprecated keys.
+                if (currentFmId !== canonicalId || hasLegacyKeys) {
                     await this.writeNoteIdToFrontmatter(file, canonicalId);
                 }
             }
@@ -163,12 +176,19 @@ export class NoteManager {
 
     private async migrateLegacyKey(file: TFile, oldKey: string, newKey: string, value: string): Promise<void> {
         try {
-            await this.app.fileManager.processFrontMatter(file, (fm) => {
-                if (fm[oldKey] === value) {
-                    delete fm[oldKey];
-                    fm[newKey] = value;
+            // Check existence and value match before attempting update
+            const currentVal = await getFrontmatterKey(this.app, file, oldKey);
+            
+            if (currentVal.success && currentVal.data === value) {
+                const result = await updateFrontmatter(this.app, file, {
+                    [oldKey]: DELETE,
+                    [newKey]: value
+                });
+                
+                if (!result.success) {
+                    throw result.error || new Error(`Failed to migrate legacy key ${oldKey}`);
                 }
-            });
+            }
         } catch (error) {
             console.error(`VC: Error migrating legacy key for ${file.path}`, error);
         }
@@ -209,16 +229,21 @@ export class NoteManager {
 
     async writeNoteIdToFrontmatter(file: TFile, noteId: string): Promise<boolean> {
         try {
-            await this.app.fileManager.processFrontMatter(file, (frontmatter: FrontMatterCache) => {
-                frontmatter[this.noteIdKey] = noteId;
-                
-                // Also clean up any legacy keys if they exist, just in case
-                for (const legacyKey of this.legacyNoteIdKeys) {
-                    if (frontmatter[legacyKey]) {
-                        delete frontmatter[legacyKey];
-                    }
-                }
-            });
+            const updates: Record<string, any> = {
+                [this.noteIdKey]: noteId
+            };
+            
+            // Also clean up any legacy keys if they exist, just in case
+            for (const legacyKey of this.legacyNoteIdKeys) {
+                updates[legacyKey] = DELETE;
+            }
+
+            const result = await updateFrontmatter(this.app, file, updates);
+            
+            if (!result.success) {
+                throw result.error || new Error("Failed to update frontmatter");
+            }
+
             return true;
         } catch (error) {
             console.error(`VC: CRITICAL: Failed to write vc-id to frontmatter for '${file.path}'. Frontmatter might be invalid.`, error);

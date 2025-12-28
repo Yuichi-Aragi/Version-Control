@@ -1,38 +1,41 @@
-import { injectable } from 'inversify';
-import { wrap, releaseProxy, type Remote } from 'comlink';
 import type { CompressionWorkerApi } from '@/types';
+import { WorkerManager } from '@/workers';
 
+// Injected by esbuild define
 declare const compressionWorkerString: string;
 
 /**
  * Manages the lifecycle and interface of the Compression Worker.
+ * Uses WorkerManager for unified worker lifecycle management.
  * Provides methods to compress and decompress data off the main thread.
+ * 
+ * @example
+ * ```typescript
+ * const compressionManager = new CompressionManager();
+ * const compressed = await compressionManager.compress(content);
+ * const decompressed = await compressionManager.decompress(compressed);
+ * ```
  */
-@injectable()
 export class CompressionManager {
-    private worker: Worker | null = null;
-    private workerProxy: Remote<CompressionWorkerApi> | null = null;
-    private workerUrl: string | null = null;
+    private readonly workerManager: WorkerManager<CompressionWorkerApi>;
 
-    public initialize(): void {
-        this.initializeWorker();
+    constructor() {
+        // Access the global worker string (injected during build via define)
+        this.workerManager = new WorkerManager<CompressionWorkerApi>({
+            workerString: typeof compressionWorkerString !== 'undefined' ? compressionWorkerString : '',
+            workerName: 'Compression Worker',
+            validateOnInit: false, // Compression worker is simple, no validation needed
+            maxConsecutiveErrors: 3,
+            errorResetTime: 60000,
+        });
     }
 
-    private initializeWorker(): void {
-        if (this.worker) return;
-
-        try {
-            if (typeof compressionWorkerString === 'undefined' || compressionWorkerString === '') {
-                console.error("Version Control: Compression worker code missing.");
-                return;
-            }
-            const blob = new Blob([compressionWorkerString], { type: 'application/javascript' });
-            this.workerUrl = URL.createObjectURL(blob);
-            this.worker = new Worker(this.workerUrl);
-            this.workerProxy = wrap<CompressionWorkerApi>(this.worker);
-        } catch (error) {
-            console.error("Version Control: Failed to initialize Compression worker", error);
-        }
+    /**
+     * Initializes the worker synchronously.
+     * Safe to call multiple times - will be a no-op after first successful init.
+     */
+    public initialize(): void {
+        this.workerManager.initialize();
     }
 
     /**
@@ -40,24 +43,38 @@ export class CompressionManager {
      * @param content String or ArrayBuffer to compress.
      * @param level Compression level (0-9). Default is 9.
      * @returns Promise resolving to compressed ArrayBuffer.
+     * @throws Error if compression worker is unavailable
      */
     public async compress(content: string | ArrayBuffer, level = 9): Promise<ArrayBuffer> {
-        if (!this.workerProxy) this.initializeWorker();
-        if (!this.workerProxy) throw new Error("Compression Worker not available");
-
-        return await this.workerProxy.compress(content, level);
+        const startTime = performance.now();
+        try {
+            const proxy = this.workerManager.ensureWorker();
+            const result = await proxy.compress(content, level);
+            this.workerManager.recordOperation(performance.now() - startTime);
+            return result;
+        } catch (error) {
+            this.workerManager.recordError();
+            throw error instanceof Error ? error : new Error(String(error));
+        }
     }
 
     /**
      * Decompresses GZIP content via the worker.
      * @param content ArrayBuffer to decompress.
      * @returns Promise resolving to decompressed string.
+     * @throws Error if decompression worker is unavailable
      */
     public async decompress(content: ArrayBuffer): Promise<string> {
-        if (!this.workerProxy) this.initializeWorker();
-        if (!this.workerProxy) throw new Error("Compression Worker not available");
-
-        return await this.workerProxy.decompress(content);
+        const startTime = performance.now();
+        try {
+            const proxy = this.workerManager.ensureWorker();
+            const result = await proxy.decompress(content);
+            this.workerManager.recordOperation(performance.now() - startTime);
+            return result;
+        } catch (error) {
+            this.workerManager.recordError();
+            throw error instanceof Error ? error : new Error(String(error));
+        }
     }
 
     /**
@@ -65,26 +82,50 @@ export class CompressionManager {
      * @param files Map of filename to content (string or ArrayBuffer).
      * @param level Compression level (0-9). Default is 9.
      * @returns Promise resolving to ZIP ArrayBuffer.
+     * @throws Error if worker is unavailable
      */
     public async createZip(files: Record<string, string | ArrayBuffer>, level = 9): Promise<ArrayBuffer> {
-        if (!this.workerProxy) this.initializeWorker();
-        if (!this.workerProxy) throw new Error("Compression Worker not available");
-
-        return await this.workerProxy.createZip(files, level);
+        const startTime = performance.now();
+        try {
+            const proxy = this.workerManager.ensureWorker();
+            const result = await proxy.createZip(files, level);
+            this.workerManager.recordOperation(performance.now() - startTime);
+            return result;
+        } catch (error) {
+            this.workerManager.recordError();
+            throw error instanceof Error ? error : new Error(String(error));
+        }
     }
 
+    /**
+     * Terminates the worker and releases all resources.
+     */
     public terminate(): void {
-        if (this.workerProxy) {
-            this.workerProxy[releaseProxy]();
-            this.workerProxy = null;
-        }
-        if (this.worker) {
-            this.worker.terminate();
-            this.worker = null;
-        }
-        if (this.workerUrl) {
-            URL.revokeObjectURL(this.workerUrl);
-            this.workerUrl = null;
-        }
+        this.workerManager.terminate();
+    }
+
+    /**
+     * Gets the current worker status for monitoring.
+     * @returns Object with status information
+     */
+    public getStatus(): {
+        isInitialized: boolean;
+        isActive: boolean;
+        isHealthy: boolean;
+        healthStats: {
+            consecutiveErrors: number;
+            operationCount: number;
+            averageOperationTime: number;
+        };
+    } {
+        return this.workerManager.getStatus();
+    }
+
+    /**
+     * Checks if the worker is currently healthy.
+     * @returns true if worker is healthy, false otherwise
+     */
+    public isHealthy(): boolean {
+        return this.workerManager.isHealthy();
     }
 }

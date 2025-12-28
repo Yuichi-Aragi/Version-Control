@@ -1,10 +1,8 @@
-import { injectable, inject } from 'inversify';
 import type { Draft } from 'immer';
 import type { NoteManifest } from "@/types";
 import { PathService } from "@/core";
 import { CentralManifestRepository } from "@/core";
 import { NoteManifestRepository } from "@/core";
-import { TYPES } from '@/types/inversify.types';
 import type { StorageService } from "@/core";
 import { generateUniqueId } from '@/utils/id';
 
@@ -12,13 +10,12 @@ import { generateUniqueId } from '@/utils/id';
  * A high-level facade that coordinates operations across the manifest repositories.
  * It handles complex, multi-step operations that involve both the central and note manifests.
  */
-@injectable()
 export class ManifestManager {
     constructor(
-        @inject(TYPES.PathService) private pathService: PathService,
-        @inject(TYPES.StorageService) private storageService: StorageService,
-        @inject(TYPES.CentralManifestRepo) private centralManifestRepo: CentralManifestRepository,
-        @inject(TYPES.NoteManifestRepo) private noteManifestRepo: NoteManifestRepository
+        private pathService: PathService,
+        private storageService: StorageService,
+        private centralManifestRepo: CentralManifestRepository,
+        private noteManifestRepo: NoteManifestRepository
     ) {
     }
 
@@ -92,8 +89,7 @@ export class ManifestManager {
             await this.centralManifestRepo.addNoteEntry(
                 noteId, 
                 notePath, 
-                this.pathService.getNoteManifestPath(noteId),
-                false // Initialize hasEditHistory as false
+                this.pathService.getNoteManifestPath(noteId)
             );
             
             return newNoteManifest;
@@ -156,10 +152,6 @@ export class ManifestManager {
         await this.centralManifestRepo.updateNotePath(noteId, newPath);
     }
 
-    public async setHasEditHistory(noteId: string, hasEditHistory: boolean): Promise<void> {
-        await this.centralManifestRepo.updateHasEditHistory(noteId, hasEditHistory);
-    }
-
     public async renameNoteEntry(oldId: string, newId: string): Promise<void> {
         if (oldId === newId) return;
 
@@ -183,8 +175,7 @@ export class ManifestManager {
                 await this.centralManifestRepo.addNoteEntry(
                     newId, 
                     noteEntry.notePath, 
-                    this.pathService.getNoteManifestPath(newId),
-                    noteEntry.hasEditHistory
+                    this.pathService.getNoteManifestPath(newId)
                 );
                 await this.centralManifestRepo.removeNoteEntry(oldId);
             } else {

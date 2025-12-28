@@ -14,7 +14,7 @@
  * ### Managers
  * - **ManifestManager**: Orchestrates manifest loading/saving operations
  * - **NoteManager**: Handles note lifecycle events (create, modify, rename, delete)
- * - **VersionManager**: Manages version CRUD operations and restoration
+ * - Manages version CRUD **VersionManager**: operations and restoration
  * - **TimelineManager**: Generates and caches timeline events for visualization
  * - **EditHistoryManager**: Manages IndexedDB-based edit history operations
  * - **CompressionManager**: Provides GZIP compression/decompression via worker
@@ -36,8 +36,8 @@
  *   type VersionControlEvents
  * } from '@/core';
  *
- * // Inject via Inversify
- * constructor(@inject(TYPES.VersionManager) private versionManager: IVersionManager) {}
+ * // Services are accessed via ServiceRegistry
+ * constructor(private services: ServiceRegistry) {}
  * ```
  */
 
@@ -58,20 +58,6 @@ export { VersionManager } from './version-manager';
 // ============================================================================
 
 export type { VersionControlEvents } from './plugin-events';
-
-// ============================================================================
-// INTERFACE RE-EXPORTS
-// ============================================================================
-
-export type {
-    IManifestManager,
-    INoteManager,
-    IVersionManager,
-    ITimelineManager,
-    IEditHistoryManager,
-    ICompressionManager,
-    IPluginEvents,
-} from '@/types/interfaces';
 
 // ============================================================================
 // SUB-MODULE RE-EXPORTS

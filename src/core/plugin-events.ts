@@ -1,5 +1,4 @@
 import { Events } from 'obsidian';
-import { injectable } from 'inversify';
 
 /**
  * Defines the signatures for all custom events used within the plugin.
@@ -17,7 +16,6 @@ export interface VersionControlEvents {
  * `Events` class, providing a strongly-typed interface for custom plugin events.
  * This avoids inheritance issues with TypeScript's strict function types.
  */
-@injectable()
 export class PluginEvents {
     private bus = new Events();
 
