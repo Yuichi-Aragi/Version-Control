@@ -1,12 +1,12 @@
 import { transfer } from 'comlink';
 import type { VersionHistoryEntry, NoteManifest } from '@/types';
+import type VersionControlPlugin from '@/main';
 import type { WorkerClient } from '../infrastructure/worker-client';
 import type { PersistenceService } from '../persistence/persistence-service';
-import type { AtomicOperationCoordinator } from '../infrastructure/coordinator';
-import type { LockManager } from '../infrastructure/lock-manager';
-import type { ReadOperation } from './read-operation';
 import type { DeleteOperation } from './delete-operation';
 import { StatsHelper } from '../helpers/stats-helper';
+import type { QueueService } from '@/services';
+import { TaskPriority } from '@/types';
 
 // Helper for main thread hashing to ensure fast, deterministic duplicate checks
 async function computeHash(content: string): Promise<string> {
@@ -20,30 +20,66 @@ export class CreateOperation {
   private readonly encoder = new TextEncoder();
 
   constructor(
+    private readonly plugin: VersionControlPlugin,
     private readonly workerClient: WorkerClient,
     private readonly persistence: PersistenceService,
-    private readonly coordinator: AtomicOperationCoordinator,
-    private readonly lockManager: LockManager,
-    private readonly readOperation: ReadOperation,
+    private readonly queueService: QueueService,
     private readonly deleteOperation: DeleteOperation
   ) {}
 
+  /**
+   * Public API: Creates a new edit.
+   * Acquires lock 'edit:{noteId}' and calls internal implementation.
+   */
   async createEdit(
     noteId: string,
+    branchName: string,
     content: string,
     filePath: string,
     maxVersions: number
   ): Promise<{ entry: VersionHistoryEntry; deletedIds: string[] } | null> {
-    // STRICT SERIALIZATION: Ensure only one create operation happens per note at a time
-    return this.lockManager.runSerialized(noteId, async () => {
-      // 1. Get Fresh Manifest (Authoritative Source)
-      // We must fetch the manifest INSIDE the lock to ensure we are building upon the latest state.
-      const existingManifest = await this.readOperation.getEditManifest(noteId);
-      const activeBranch = existingManifest?.currentBranch || 'main';
+    return this.queueService.add(
+        `edit:${noteId}`,
+        () => this._createEditInternal(noteId, branchName, content, filePath, maxVersions),
+        { priority: TaskPriority.HIGH }
+    );
+  }
 
-      // 2. Initialize or Clone Manifest
-      // We use immer's produce pattern implicitly by creating a new object structure if needed,
-      // or cloning the existing one to avoid mutating shared state on failure.
+  /**
+   * Public API: Saves an edit.
+   * Acquires lock 'edit:{noteId}' and calls internal implementation.
+   */
+  async saveEdit(
+    noteId: string,
+    branchName: string,
+    editId: string,
+    content: string,
+    manifest: NoteManifest,
+    forcePersistence = false
+  ): Promise<{ size: number; contentHash: string }> {
+    return this.queueService.add(
+        `edit:${noteId}`,
+        () => this._saveEditInternal(noteId, branchName, editId, content, manifest, forcePersistence),
+        { priority: TaskPriority.HIGH }
+    );
+  }
+
+  // ==================================================================================
+  // INTERNAL IMPLEMENTATION (No Locking)
+  // ==================================================================================
+
+  private async _createEditInternal(
+    noteId: string,
+    branchName: string,
+    content: string,
+    filePath: string,
+    maxVersions: number
+  ): Promise<{ entry: VersionHistoryEntry; deletedIds: string[] } | null> {
+      // 1. Get Fresh Manifest (Authoritative Source for IDB state)
+      const proxy = this.workerClient.ensureWorker();
+      const existingManifest = await proxy.getEditManifest(noteId);
+      
+      const activeBranch = branchName;
       let manifest: NoteManifest;
       
       if (!existingManifest) {
@@ -62,9 +98,7 @@ export class CreateOperation {
           lastModified: now,
         };
       } else {
-        // Deep clone to ensure isolation
         manifest = JSON.parse(JSON.stringify(existingManifest));
-        
         if (manifest.currentBranch !== activeBranch) {
           manifest.currentBranch = activeBranch;
         }
@@ -78,28 +112,23 @@ export class CreateOperation {
         throw new Error(`Failed to initialize branch ${activeBranch} for note ${noteId}`);
       }
       
-      // 3. Check for Duplicate Content (Idempotency Check)
+      // 3. Check for Duplicate Content
       const currentHash = await computeHash(content);
-      
       const existingVersions = Object.entries(branch.versions);
+      
       if (existingVersions.length > 0) {
-        // Sort by version number desc to find the head
         existingVersions.sort(([, a], [, b]) => b.versionNumber - a.versionNumber);
-        
         const latestEntry = existingVersions[0];
         if (latestEntry) {
           const [lastEditId, lastVersionData] = latestEntry;
-          
-          // Primary Check: Content Hash (Fast & Deterministic)
           if (lastVersionData.contentHash && lastVersionData.contentHash === currentHash) {
-            return null; // Absolute Idempotency: Content is identical to head
+            return null;
           }
-          
-          // Fallback Check: Content Comparison (Legacy data support)
           if (!lastVersionData.contentHash) {
-             const lastContent = await this.readOperation.getEditContent(noteId, lastEditId, activeBranch);
-             if (lastContent === content) {
-               return null;
+             const lastContentBuffer = await proxy.getEditContent(noteId, activeBranch, lastEditId);
+             if (lastContentBuffer) {
+                 const lastContent = new TextDecoder().decode(lastContentBuffer);
+                 if (lastContent === content) return null;
              }
           }
         }
@@ -109,8 +138,6 @@ export class CreateOperation {
       const existingVersionNumbers = Object.values(branch.versions).map(v => v.versionNumber);
       const maxVersion = existingVersionNumbers.length > 0 ? Math.max(...existingVersionNumbers) : 0;
       const nextVersionNumber = maxVersion + 1;
-      
-      // Deterministic ID generation based on version number to help with debugging/tracing
       const editId = `E${nextVersionNumber}_${Date.now()}`;
       
       // 5. Calculate Stats
@@ -119,12 +146,10 @@ export class CreateOperation {
       const uncompressedSize = new Blob([content]).size;
 
       // 6. Prepare Manifest Update
-      // We optimistically update the manifest in memory to pass to the worker.
-      // The worker will perform the atomic write of both the edit blob and this manifest.
       branch.versions[editId] = {
         versionNumber: nextVersionNumber,
         timestamp,
-        size: 0, // Placeholder, updated by worker result
+        size: 0,
         uncompressedSize: uncompressedSize,
         contentHash: currentHash,
         wordCount: textStats.wordCount,
@@ -135,9 +160,7 @@ export class CreateOperation {
         lineCountWithoutMd: textStats.lineCountWithoutMd,
       };
 
-      // 6b. Enforce History Limit (Logical Cleanup)
-      // We remove old edits from the manifest *before* saving.
-      // This ensures the manifest written to disk/DB is already clean.
+      // 6b. Enforce History Limit
       const deletedIds: string[] = [];
       const allVersions = Object.values(branch.versions);
       
@@ -159,36 +182,23 @@ export class CreateOperation {
       branch.totalVersions = Object.keys(branch.versions).length;
       manifest.lastModified = timestamp;
 
-      // 7. Save Edit & Manifest (Atomic in Worker)
-      // This is the critical point of failure. If this fails, our local `manifest` variable is discarded
-      // and no harm is done to the system state.
-      const saveResult = await this.saveEdit(noteId, activeBranch, editId, content, manifest);
+      // 7. Save Edit & Manifest (Internal Call)
+      const saveResult = await this._saveEditInternal(noteId, activeBranch, editId, content, manifest);
 
-      // 8. Update local manifest copy with returned stats (compressed size)
       if (branch.versions[editId]) {
           branch.versions[editId]!.size = saveResult.size;
           branch.versions[editId]!.compressedSize = saveResult.size;
           branch.versions[editId]!.contentHash = saveResult.contentHash;
       }
 
-      // 9. Physical Cleanup (Async)
-      // Logical deletion happened via manifest update in step 7.
-      // Now we just need to clean up the blobs. We can do this asynchronously.
-      // We use `deleteEdit` which does NOT acquire the note lock (it uses coordinator),
-      // so it is safe to call from here.
+      // 9. Physical Cleanup
       if (deletedIds.length > 0) {
-          (async () => {
-             for (const id of deletedIds) {
-               try {
-                 await this.deleteOperation.deleteEdit(noteId, activeBranch, id);
-               } catch (e) {
-                 console.error(`Failed to physically delete edit ${id}`, e);
-               }
-             }
-          })();
+          Promise.all(deletedIds.map(id => 
+              this.deleteOperation.deleteEdit(noteId, activeBranch, id)
+                .catch(e => console.error(`Failed to physically delete edit ${id}`, e))
+          ));
       }
 
-      // 10. Return Entry and Deleted IDs
       return {
         entry: {
             id: editId,
@@ -210,23 +220,16 @@ export class CreateOperation {
         },
         deletedIds
       };
-    });
   }
 
-  async saveEdit(
+  private async _saveEditInternal(
     noteId: string,
     branchName: string,
     editId: string,
     content: string,
-    manifest: NoteManifest
+    manifest: NoteManifest,
+    forcePersistence = false
   ): Promise<{ size: number; contentHash: string }> {
-    const operationId = `save:${noteId}:${branchName}:${editId}`;
-    const key = `${noteId}:${branchName}`;
-    
-    // Coordinator tracks the operation but LockManager ensures serialization
-    await this.coordinator.beginAtomicOperation(key, operationId);
-
-    try {
       const proxy = this.workerClient.ensureWorker();
       
       const encoded = this.encoder.encode(content);
@@ -243,11 +246,22 @@ export class CreateOperation {
         manifest
       );
 
-      // Schedule disk persistence
-      this.persistence.diskWriter.schedule(noteId, branchName);
+      if (forcePersistence || await this.shouldPersist(manifest, branchName)) {
+          this.persistence.diskWriter.schedule(noteId, branchName);
+      }
       return result;
-    } finally {
-      this.coordinator.completeAtomicOperation(key, operationId);
-    }
+  }
+
+  private async shouldPersist(manifest: NoteManifest, branchName: string): Promise<boolean> {
+      const globalDefaults = this.plugin.settings.editHistorySettings;
+      const branch = manifest.branches[branchName];
+      const perBranchSettings = branch?.settings;
+      const isUnderGlobalInfluence = perBranchSettings?.isGlobal !== false;
+
+      if (isUnderGlobalInfluence) {
+          return globalDefaults.enableDiskPersistence ?? true;
+      } else {
+          return perBranchSettings?.enableDiskPersistence ?? globalDefaults.enableDiskPersistence ?? true;
+      }
   }
 }
