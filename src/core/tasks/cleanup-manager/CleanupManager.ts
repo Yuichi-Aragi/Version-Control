@@ -1,9 +1,7 @@
 import { App, Component } from 'obsidian';
-import { injectable, inject } from 'inversify';
 import { ManifestManager, EditHistoryManager } from '@/core';
 import { PluginEvents } from '@/core';
 import { PathService } from '@/core';
-import { TYPES } from '@/types/inversify.types';
 import { QueueService } from '@/services';
 import { VersionContentRepository } from '@/core';
 import type VersionControlPlugin from '@/main';
@@ -25,7 +23,6 @@ import { PolicyCleanupOperation, OrphanCleanupOperation } from './operations';
  * - Mode-aware: Handles Version History and Edit History independently.
  * - Concurrency control: Uses QueueService to prevent deadlocks and race conditions.
  */
-@injectable()
 export class CleanupManager extends Component {
   private readonly cleanupPromises = new Map<string, Promise<void>>();
   private readonly operationLocks = new Map<string, Promise<void>>();
@@ -37,16 +34,16 @@ export class CleanupManager extends Component {
   private isDestroyed = false;
 
   constructor(
-    @inject(TYPES.App) private readonly app: App,
-    @inject(TYPES.ManifestManager) private readonly manifestManager: ManifestManager,
-    @inject(TYPES.EditHistoryManager) private readonly editHistoryManager: EditHistoryManager,
-    @inject(TYPES.EventBus) private readonly eventBus: PluginEvents,
-    @inject(TYPES.PathService) private readonly pathService: PathService,
-    @inject(TYPES.QueueService) private readonly queueService: QueueService,
-    @inject(TYPES.VersionContentRepo) private readonly versionContentRepo: VersionContentRepository,
-    @inject(TYPES.Plugin) private readonly plugin: VersionControlPlugin,
-    @inject(TYPES.StorageService) private readonly storageService: StorageService,
-    @inject(TYPES.Store) private readonly store: AppStore
+    private readonly app: App,
+    private readonly manifestManager: ManifestManager,
+    private readonly editHistoryManager: EditHistoryManager,
+    private readonly eventBus: PluginEvents,
+    private readonly pathService: PathService,
+    private readonly queueService: QueueService,
+    private readonly versionContentRepo: VersionContentRepository,
+    private readonly plugin: VersionControlPlugin,
+    private readonly storageService: StorageService,
+    private readonly store: AppStore
   ) {
     super();
     this.debouncerManager = new DebouncerManager();
@@ -134,7 +131,7 @@ export class CleanupManager extends Component {
     if (this.isDestroyed) return;
 
     const state = this.store.getState();
-    const activeNoteId = state.noteId;
+    const activeNoteId = state.app.noteId;
 
     if (activeNoteId && this.isValidNoteId(activeNoteId)) {
       // We schedule cleanup for the active note.
