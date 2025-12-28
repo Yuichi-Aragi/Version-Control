@@ -1,9 +1,7 @@
-import { injectable, inject } from 'inversify';
 import { produce } from 'immer';
 import * as v from 'valibot';
 import type { CentralManifest, NoteEntry } from '@/types';
 import { CentralManifestSchema } from '@/schemas';
-import { TYPES } from '@/types/inversify.types';
 import { QueueService } from '@/services';
 import type VersionControlPlugin from '@/main';
 
@@ -17,15 +15,14 @@ const CENTRAL_MANIFEST_QUEUE_KEY = 'system:central-manifest';
  * Implements strict state synchronization with the plugin settings.
  * Utilises Immer for all state modifications to ensure immutability.
  */
-@injectable()
 export class CentralManifestRepository {
     private cache: CentralManifest | null = null;
     private pathToIdMap: Map<string, string> | null = null;
     private initializationPromise: Promise<void> | null = null;
 
     constructor(
-        @inject(TYPES.Plugin) private readonly plugin: VersionControlPlugin,
-        @inject(TYPES.QueueService) private readonly queueService: QueueService
+        private readonly plugin: VersionControlPlugin,
+        private readonly queueService: QueueService
     ) {}
 
     // ==================================================================================
@@ -44,7 +41,7 @@ export class CentralManifestRepository {
         });
     }
 
-    public async addNoteEntry(noteId: string, notePath: string, noteManifestPath: string, hasEditHistory: boolean = false): Promise<void> {
+    public async addNoteEntry(noteId: string, notePath: string, noteManifestPath: string): Promise<void> {
         const now = new Date().toISOString();
         await this._updateAndSaveManifest(draft => {
             if (draft.notes[noteId]) {
@@ -54,8 +51,7 @@ export class CentralManifestRepository {
                 notePath,
                 manifestPath: noteManifestPath,
                 createdAt: now,
-                lastModified: now,
-                hasEditHistory
+                lastModified: now
             };
         });
     }
@@ -76,16 +72,6 @@ export class CentralManifestRepository {
             if (noteEntry) {
                 noteEntry.notePath = newPath;
                 noteEntry.lastModified = now;
-            }
-        });
-    }
-
-    public async updateHasEditHistory(noteId: string, hasEditHistory: boolean): Promise<void> {
-        await this._updateAndSaveManifest(draft => {
-            const noteEntry = draft.notes[noteId];
-            if (noteEntry) {
-                noteEntry.hasEditHistory = hasEditHistory;
-                noteEntry.lastModified = new Date().toISOString();
             }
         });
     }

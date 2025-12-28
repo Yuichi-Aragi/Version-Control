@@ -1,8 +1,6 @@
 import { normalizePath } from "obsidian";
-import { injectable, inject } from 'inversify';
 import * as v from 'valibot';
 import { DEFAULT_DB_PATH } from "@/constants";
-import { TYPES } from '@/types/inversify.types';
 import type VersionControlPlugin from "@/main";
 
 /**
@@ -42,11 +40,10 @@ const BranchNameSchema = v.pipe(
  * Ensures consistency, type safety, error resilience, and backward compatibility.
  * All methods are strictly guarded against invalid inputs and edge cases using valibot validation.
  */
-@injectable()
 export class PathService {
     private readonly FALLBACK_DB_ROOT: string = DEFAULT_DB_PATH;
 
-    constructor(@inject(TYPES.Plugin) private readonly plugin: VersionControlPlugin) {
+    constructor(private readonly plugin: VersionControlPlugin) {
         // Defensive: Ensure plugin reference is valid at construction time
         if (!plugin) {
             throw new Error('PathService: Plugin dependency is required and cannot be null or undefined.');

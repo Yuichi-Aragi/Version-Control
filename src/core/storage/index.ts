@@ -3,7 +3,7 @@
  *
  * This module provides the storage abstraction layer for the version control plugin.
  * It exports concrete implementations and re-exports interface definitions for
- * loose coupling via Inversify dependency injection.
+ * loose coupling via Service Registry pattern.
  *
  * @module core/storage
  *
@@ -21,10 +21,10 @@
  * ## Usage
  *
  * ```typescript
- * import { PathService, type IPathService } from '@/core/storage';
+ * import { PathService } from '@/core/storage';
  *
- * // Bind to Inversify container
- * container.bind<IPathService>(TYPES.PathService).to(PathService);
+ * // Services are accessed via ServiceRegistry
+ * const pathService = services.pathService;
  * ```
  */
 
@@ -39,15 +39,3 @@ export { NoteManifestRepository } from './note-manifest-repository';
 export { VersionContentRepository } from './version-content-repository';
 export { TimelineDatabase } from './timeline-database';
 
-// ============================================================================
-// INTERFACE RE-EXPORTS
-// ============================================================================
-
-export type {
-    IPathService,
-    IStorageService,
-    ICentralManifestRepository,
-    INoteManifestRepository,
-    IVersionContentRepository,
-    ITimelineDatabase,
-} from '@/types/interfaces';

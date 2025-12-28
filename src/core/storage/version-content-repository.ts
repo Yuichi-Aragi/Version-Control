@@ -1,39 +1,28 @@
 import { App } from "obsidian";
-import { injectable, inject } from "inversify";
 import { PathService } from "@/core";
 import type { NoteManifest } from "@/types";
-import { TYPES } from '@/types/inversify.types';
 import { QueueService } from "@/services";
 import { CompressionManager } from "@/core";
 import type VersionControlPlugin from "@/main";
+import { TaskPriority } from "@/types";
+import { executeWithRetry } from "@/utils/retry";
 
 /**
  * Repository for managing the content of individual versions.
- * Handles reading, writing, and deleting the actual version files.
- * 
- * FEATURES:
- * - Transparent GZIP compression/decompression via CompressionManager.
- * - Lazy migration: Automatically compresses uncompressed files on read if enabled.
- * - Backward compatibility: Handles both compressed and uncompressed files.
- * - Concurrency control via QueueService.
+ * Uses shared retry logic with timeout configuration.
  */
-@injectable()
 export class VersionContentRepository {
-  private readonly MAX_RETRIES = 3;
-  private readonly RETRY_DELAY_MS = 100;
   private readonly FILE_OPERATION_TIMEOUT_MS = 5000;
   private readonly QUEUE_PREFIX = 'content:';
-
-  // GZIP Magic Numbers
   private readonly GZIP_MAGIC_0 = 0x1f;
   private readonly GZIP_MAGIC_1 = 0x8b;
 
   constructor(
-    @inject(TYPES.App) private readonly app: App,
-    @inject(TYPES.Plugin) private readonly plugin: VersionControlPlugin,
-    @inject(TYPES.PathService) private readonly pathService: PathService,
-    @inject(TYPES.QueueService) private readonly queueService: QueueService,
-    @inject(TYPES.CompressionManager) private readonly compressionManager: CompressionManager
+    private readonly app: App,
+    private readonly plugin: VersionControlPlugin,
+    private readonly pathService: PathService,
+    private readonly queueService: QueueService,
+    private readonly compressionManager: CompressionManager
   ) {
     if (!this.app?.vault?.adapter) throw new Error('VersionContentRepository: Invalid dependencies');
   }
@@ -42,28 +31,44 @@ export class VersionContentRepository {
     return `${this.QUEUE_PREFIX}${noteId}`;
   }
 
-  // ==================================================================================
-  // PUBLIC API (Queued)
-  // ==================================================================================
-
   public async read(noteId: string, versionId: string): Promise<string | null> {
-    return this.queueService.enqueue(this.getQueueKey(noteId), () => this._read(noteId, versionId));
+    return this.queueService.add(
+        this.getQueueKey(noteId), 
+        () => this._readInternal(noteId, versionId),
+        { priority: TaskPriority.NORMAL }
+    );
   }
 
   public async readBinary(noteId: string, versionId: string): Promise<ArrayBuffer | null> {
-    return this.queueService.enqueue(this.getQueueKey(noteId), () => this._readBinary(noteId, versionId));
+    return this.queueService.add(
+        this.getQueueKey(noteId), 
+        () => this._readBinaryInternal(noteId, versionId),
+        { priority: TaskPriority.NORMAL }
+    );
   }
 
   public async write(noteId: string, versionId: string, content: string): Promise<{ size: number }> {
-    return this.queueService.enqueue(this.getQueueKey(noteId), () => this._write(noteId, versionId, content));
+    return this.queueService.add(
+        this.getQueueKey(noteId), 
+        () => this._writeInternal(noteId, versionId, content),
+        { priority: TaskPriority.HIGH }
+    );
   }
 
   public async delete(noteId: string, versionId: string): Promise<void> {
-    return this.queueService.enqueue(this.getQueueKey(noteId), () => this._delete(noteId, versionId));
+    return this.queueService.add(
+        this.getQueueKey(noteId), 
+        () => this._deleteInternal(noteId, versionId),
+        { priority: TaskPriority.HIGH }
+    );
   }
 
   public async rename(noteId: string, oldVersionId: string, newVersionId: string): Promise<void> {
-    return this.queueService.enqueue(this.getQueueKey(noteId), () => this._rename(noteId, oldVersionId, newVersionId));
+    return this.queueService.add(
+        this.getQueueKey(noteId), 
+        () => this._renameInternal(noteId, oldVersionId, newVersionId),
+        { priority: TaskPriority.HIGH }
+    );
   }
 
   public async getLatestVersionContent(noteId: string, noteManifest: NoteManifest): Promise<string | null> {
@@ -83,43 +88,33 @@ export class VersionContentRepository {
     return this.read(noteId, latestVersionId);
   }
 
-  // ==================================================================================
-  // INTERNAL IMPLEMENTATION (Unqueued, Retry Logic)
-  // ==================================================================================
-
   private isGzip(buffer: ArrayBuffer): boolean {
     if (buffer.byteLength < 2) return false;
     const view = new Uint8Array(buffer);
     return view[0] === this.GZIP_MAGIC_0 && view[1] === this.GZIP_MAGIC_1;
   }
 
-  private async _read(noteId: string, versionId: string): Promise<string | null> {
+  private async _readInternal(noteId: string, versionId: string): Promise<string | null> {
     const versionFilePath = this.pathService.getNoteVersionPath(noteId, versionId);
     
-    return this.executeWithRetryAndTimeout(
+    return executeWithRetry(
       async () => {
         const exists = await this.app.vault.adapter.exists(versionFilePath);
         if (!exists) return null;
 
-        // Always read as binary first to check for compression
         const buffer = await this.app.vault.adapter.readBinary(versionFilePath);
         const isCompressed = this.isGzip(buffer);
         const enableCompression = this.plugin.settings.enableCompression;
 
         if (isCompressed) {
             const decompressed = await this.compressionManager.decompress(buffer);
-            
-            // Migration: If compression is disabled but file is compressed, save decompressed version
             if (!enableCompression) {
                 await this.app.vault.adapter.write(versionFilePath, decompressed);
             }
             return decompressed;
         } else {
-            // File is uncompressed (legacy or text)
             const decoder = new TextDecoder('utf-8');
             const content = decoder.decode(buffer);
-
-            // Migration: If compression is enabled but file is uncompressed, compress and save
             if (enableCompression) {
                 const compressed = await this.compressionManager.compress(content);
                 await this.app.vault.adapter.writeBinary(versionFilePath, compressed);
@@ -127,26 +122,27 @@ export class VersionContentRepository {
             return content;
         }
       },
-      `read_${noteId}_${versionId}`
+      { 
+          context: `read_${noteId}_${versionId}`,
+          timeout: this.FILE_OPERATION_TIMEOUT_MS
+      }
     ).catch((error) => {
         console.error(`VC: Failed to read version ${versionId}`, error);
         return null;
     });
   }
 
-  private async _readBinary(noteId: string, versionId: string): Promise<ArrayBuffer | null> {
-    // DiffManager expects the *logical* binary content (utf-8 bytes of the text), 
-    // not the physical compressed bytes.
-    const content = await this._read(noteId, versionId);
+  private async _readBinaryInternal(noteId: string, versionId: string): Promise<ArrayBuffer | null> {
+    const content = await this._readInternal(noteId, versionId);
     if (content === null) return null;
     return new TextEncoder().encode(content).buffer;
   }
 
-  private async _write(noteId: string, versionId: string, content: string): Promise<{ size: number }> {
+  private async _writeInternal(noteId: string, versionId: string, content: string): Promise<{ size: number }> {
     const versionFilePath = this.pathService.getNoteVersionPath(noteId, versionId);
     const enableCompression = this.plugin.settings.enableCompression;
 
-    await this.executeWithRetryAndTimeout(
+    await executeWithRetry(
       async () => {
         if (enableCompression) {
             const compressed = await this.compressionManager.compress(content);
@@ -155,37 +151,43 @@ export class VersionContentRepository {
             await this.app.vault.adapter.write(versionFilePath, content);
         }
       },
-      `write_${noteId}_${versionId}`
+      { 
+          context: `write_${noteId}_${versionId}`,
+          timeout: this.FILE_OPERATION_TIMEOUT_MS
+      }
     );
 
     return { size: new Blob([content]).size };
   }
 
-  private async _delete(noteId: string, versionId: string): Promise<void> {
+  private async _deleteInternal(noteId: string, versionId: string): Promise<void> {
     const versionFilePath = this.pathService.getNoteVersionPath(noteId, versionId);
 
-    await this.executeWithRetryAndTimeout(
+    await executeWithRetry(
       async () => {
         const exists = await this.app.vault.adapter.exists(versionFilePath);
         if (exists) {
           await this.app.vault.adapter.remove(versionFilePath);
         }
       },
-      `delete_${noteId}_${versionId}`
+      { 
+          context: `delete_${noteId}_${versionId}`,
+          timeout: this.FILE_OPERATION_TIMEOUT_MS
+      }
     );
   }
 
-  private async _rename(noteId: string, oldVersionId: string, newVersionId: string): Promise<void> {
+  private async _renameInternal(noteId: string, oldVersionId: string, newVersionId: string): Promise<void> {
     const oldPath = this.pathService.getNoteVersionPath(noteId, oldVersionId);
     const newPath = this.pathService.getNoteVersionPath(noteId, newVersionId);
 
-    await this.executeWithRetryAndTimeout(
+    await executeWithRetry(
       async () => {
         const sourceExists = await this.app.vault.adapter.exists(oldPath);
         const targetExists = await this.app.vault.adapter.exists(newPath);
 
         if (!sourceExists) {
-          if (targetExists) return; // Idempotency: already renamed
+          if (targetExists) return;
           throw new Error(`Source file missing: ${oldPath}`);
         }
         if (targetExists) throw new Error(`Target file exists: ${newPath}`);
@@ -193,44 +195,16 @@ export class VersionContentRepository {
         try {
             await this.app.vault.adapter.rename(oldPath, newPath);
         } catch (error) {
-            // False positive check
             const s = await this.app.vault.adapter.exists(oldPath);
             const t = await this.app.vault.adapter.exists(newPath);
             if (!s && t) return;
             throw error;
         }
       },
-      `rename_${noteId}_${oldVersionId}_to_${newVersionId}`
-    );
-  }
-
-  // ==================================================================================
-  // HELPERS
-  // ==================================================================================
-
-  private async executeWithRetryAndTimeout<T>(
-    operation: () => Promise<T>,
-    operationId: string,
-    maxRetries = this.MAX_RETRIES,
-    retryDelay = this.RETRY_DELAY_MS
-  ): Promise<T> {
-    let lastError: unknown;
-    
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        return await Promise.race([
-          operation(),
-          new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error(`Timeout: ${operationId}`)), this.FILE_OPERATION_TIMEOUT_MS)
-          )
-        ]);
-      } catch (error) {
-        lastError = error;
-        if (attempt < maxRetries) {
-          await new Promise(resolve => setTimeout(resolve, retryDelay * Math.pow(2, attempt)));
-        }
+      { 
+          context: `rename_${noteId}_${oldVersionId}_to_${newVersionId}`,
+          timeout: this.FILE_OPERATION_TIMEOUT_MS
       }
-    }
-    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+    );
   }
 }
