@@ -121,7 +121,7 @@ export class SettingsInitializer {
             // Load Version History (Primary Source of Truth)
             for (const [id, entry] of Object.entries(centralNotes)) {
                 // @ts-ignore
-                unifiedNotes.set(id, { ...entry, hasEditHistory: false, _source: 'version' });
+                unifiedNotes.set(id, { ...entry, _source: 'version' });
             }
 
             // Merge Edit History
@@ -129,13 +129,12 @@ export class SettingsInitializer {
                 if (unifiedNotes.has(id)) {
                     // ID exists in both. Merge.
                     const existing = unifiedNotes.get(id)!;
-                    existing.hasEditHistory = true;
                     existing._source = 'both';
                     // We implicitly keep the Version History's path/metadata as primary.
                 } else {
                     // Only in edit history. Add it.
                     // @ts-ignore
-                    unifiedNotes.set(id, { ...entry, hasEditHistory: true, _source: 'edit' });
+                    unifiedNotes.set(id, { ...entry, _source: 'edit' });
                 }
             }
 
