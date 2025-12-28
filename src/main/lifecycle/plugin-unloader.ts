@@ -1,5 +1,3 @@
-import { TYPES } from '@/types/inversify.types';
-import type { CompressionManager } from '@/core';
 import type VersionControlPlugin from '@/main/VersionControlPlugin';
 
 /**
@@ -28,13 +26,20 @@ export class PluginUnloader {
             //  - Caches cleared via `component.register(() => cache.clear())`.
             //  - Intervals cleared in component `onunload` methods.
 
-            const compressionManager = this.plugin.container?.get<CompressionManager>(TYPES.CompressionManager);
-            if (compressionManager) {
-                compressionManager.terminate();
+            if (this.plugin.services) {
+                const compressionManager = this.plugin.services.compressionManager;
+                if (compressionManager) {
+                    compressionManager.terminate();
+                }
             }
 
-            // 4. Manually clean up the dependency injection container and its non-component services.
-            await this.plugin.cleanupContainer();
+            // 4. Manually clean up the service registry and its non-component services.
+            await this.plugin.cleanupServices();
+
+            // 5. Clean up the service registry singleton
+            if (this.plugin.services) {
+                await this.plugin.services.cleanupAll();
+            }
 
             this.plugin.setInitialized(false);
         } catch (error) {

@@ -1,8 +1,9 @@
 import { Notice } from 'obsidian';
-import { appSlice } from '@/state';
-import { SettingsInitializer, ContainerInitializer, UIInitializer } from '@/main/initialization';
+import { appSlice, getInitialState } from '@/state';
+import { SettingsInitializer, ServiceRegistryInitializer, UIInitializer } from '@/main/initialization';
 import { EventRegistrar } from '@/main/events';
 import type VersionControlPlugin from '@/main/VersionControlPlugin';
+import { createAppStore } from '@/state';
 
 /**
  * Handles plugin loading lifecycle.
@@ -28,12 +29,20 @@ export class PluginLoader {
             const settingsInitializer = new SettingsInitializer(this.plugin);
             await settingsInitializer.loadSettings();
 
-            // Initialize dependency injection container
-            const containerInitializer = new ContainerInitializer(this.plugin);
-            this.plugin.container = containerInitializer.initializeContainer();
+            // Initialize service registry (without store for now)
+            const registryInitializer = new ServiceRegistryInitializer(this.plugin);
+            const services = registryInitializer.initializeServices();
 
-            // Get all services from container
-            const services = containerInitializer.getServices(this.plugin.container);
+            // Store reference to service registry
+            this.plugin.services = services;
+
+            // Create store with properly loaded settings (NOT in constructor)
+            // This ensures state.settings is populated before any UI subscribes
+            const initialState = getInitialState(this.plugin.settings);
+            services.store = createAppStore(initialState, services);
+
+            // Finalize initialization (update services that depend on store)
+            services.finalizeInitialization();
 
             // Store references to frequently used services
             this.plugin.store = services.store;
@@ -59,7 +68,7 @@ export class PluginLoader {
             this.plugin.addChild(services.backgroundTaskManager);
 
             // Initialize database
-            await containerInitializer.initializeDatabase(services.manifestManager);
+            await registryInitializer.initializeDatabase(services);
 
             // Set up event listeners
             const eventRegistrar = new EventRegistrar(this.plugin, services.store, services.eventBus);
@@ -100,7 +109,7 @@ export class PluginLoader {
         try {
             this.plugin.cancelDebouncedOperations();
             await this.plugin.completePendingOperations();
-            await this.plugin.cleanupContainer();
+            await this.plugin.cleanupServices();
         } catch (error) {
             console.error("Version Control: Emergency cleanup failed", error);
         }
