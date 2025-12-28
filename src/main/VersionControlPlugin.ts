@@ -1,23 +1,20 @@
-import 'reflect-metadata'; // Must be the first import
 import { Plugin, WorkspaceLeaf } from 'obsidian';
 import type { Debouncer } from 'obsidian';
-import type { Container } from 'inversify';
 import type { AppStore, AppState } from '@/state';
 import { AppStatus, thunks } from '@/state';
-import type { CleanupManager, BackgroundTaskManager, CentralManifestRepository, NoteManifestRepository, EditHistoryManager } from '@/core';
-import type { QueueService } from '@/services';
+import type { CleanupManager, BackgroundTaskManager } from '@/core';
 import type { VersionControlSettings } from '@/types';
-import { TYPES } from '@/types/inversify.types';
 import { SettingsInitializer } from '@/main/initialization';
 import { PluginLoader, PluginUnloader } from '@/main/lifecycle';
 import type { DebouncerInfo, QueuedChangelogRequest } from '@/main/types';
+import type { Services } from '@/services-registry';
 
 /**
  * Main plugin class for Version Control.
  * Orchestrates initialization, lifecycle, and event handling through modular components.
  */
 export default class VersionControlPlugin extends Plugin {
-    public container!: Container;
+    public services!: Services;
     public store!: AppStore;
     public cleanupManager!: CleanupManager;
     public backgroundTaskManager!: BackgroundTaskManager;
@@ -99,7 +96,7 @@ export default class VersionControlPlugin extends Plugin {
             return isViewStable && isPanelAvailable;
         };
 
-        if (isChangelogReady(currentState)) {
+        if (isChangelogReady(currentState.app)) {
             // Use a timeout to avoid dispatching during a dispatch cycle.
             setTimeout(() => {
                 if (this.isUnloading) return;
@@ -139,16 +136,16 @@ export default class VersionControlPlugin extends Plugin {
     }
 
     /**
-     * Cleans up the dependency injection container.
+     * Cleans up the service registry.
      */
-    public async cleanupContainer(): Promise<void> {
+    public async cleanupServices(): Promise<void> {
         try {
-            if (this.container) {
+            if (this.services) {
                 // Get services that hold state but aren't components.
-                const centralRepo = this.container.get<CentralManifestRepository>(TYPES.CentralManifestRepo);
-                const noteRepo = this.container.get<NoteManifestRepository>(TYPES.NoteManifestRepo);
-                const queueService = this.container.get<QueueService>(TYPES.QueueService);
-                const editHistoryManager = this.container.get<EditHistoryManager>(TYPES.EditHistoryManager);
+                const centralRepo = this.services.centralManifestRepo;
+                const noteRepo = this.services.noteManifestRepo;
+                const queueService = this.services.queueService;
+                const editHistoryManager = this.services.editHistoryManager;
 
                 // Invalidate caches and clear all pending task queues to prevent orphaned operations.
                 if (centralRepo) centralRepo.invalidateCache();
@@ -157,14 +154,10 @@ export default class VersionControlPlugin extends Plugin {
                 
                 // Explicitly terminate EditHistoryManager to clear IDB cache and stop worker
                 if (editHistoryManager) await editHistoryManager.terminate();
-
-                // Unbind all services from the DI container. This is a crucial step to allow
-                // the garbage collector to reclaim memory and prevent issues on plugin reload.
-                this.container.unbindAll();
             }
         } catch (error) {
-            // This might happen if the container failed to initialize or was already unbound.
-            console.error("Version Control: Error during container cleanup on unload.", error);
+            // This might happen if the services failed to initialize or were already cleaned up.
+            console.error("Version Control: Error during services cleanup on unload.", error);
         }
     }
 }
