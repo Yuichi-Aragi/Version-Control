@@ -15,11 +15,10 @@
  * ## Usage
  *
  * ```typescript
- * import { BackgroundTaskManager, type IBackgroundTaskManager } from '@/core/tasks';
+ * import { BackgroundTaskManager } from '@/core/tasks';
  *
- * // Bind to Inversify container
- * container.bind<IBackgroundTaskManager>(TYPES.BackgroundTaskManager)
- *   .to(BackgroundTaskManager).inSingletonScope();
+ * // Services are accessed via ServiceRegistry
+ * const backgroundManager = services.backgroundTaskManager;
  * ```
  */
 
@@ -29,13 +28,3 @@
 
 export { BackgroundTaskManager } from './BackgroundTaskManager';
 export { CleanupManager } from './cleanup-manager';
-
-// ============================================================================
-// INTERFACE RE-EXPORTS
-// ============================================================================
-
-export type {
-    IBackgroundTaskManager,
-    ICleanupManager,
-    CleanupResult,
-} from '@/types/interfaces';
