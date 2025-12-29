@@ -1,17 +1,16 @@
+import * as v from 'valibot';
+import type { AppThunk, Services } from '@/state';
+import { appSlice, AppStatus } from '@/state';
+import { shouldAbort } from '@/state/utils/guards';
+import { loadEditHistory } from './load-edit-history.thunk';
+import type { EditDetails } from '../types';
+import { EditDetailsSchema } from '@/state/thunks/schemas';
+
 /**
  * Update Edit Thunk
  *
  * Handles updating edit metadata (name and description)
  */
-
-import type { AppThunk } from '@/state';
-import { appSlice, AppStatus } from '@/state';
-import { TYPES } from '@/types/inversify.types';
-import { EditHistoryManager, PluginEvents } from '@/core';
-import { UIService } from '@/services';
-import { isPluginUnloading } from '@/state/utils/settingsUtils';
-import { loadEditHistory } from './load-edit-history.thunk';
-import type { EditDetails } from '../types';
 
 /**
  * Updates the metadata (name and description) of an edit
@@ -22,14 +21,21 @@ import type { EditDetails } from '../types';
  */
 export const updateEditDetails =
     (editId: string, details: EditDetails): AppThunk =>
-    async (dispatch, getState, container) => {
-        if (isPluginUnloading(container)) return;
+    async (dispatch, getState, services: Services) => {
+        if (shouldAbort(services, getState)) return;
 
-        const state = getState();
-        const editHistoryManager =
-            container.get<EditHistoryManager>(TYPES.EditHistoryManager);
-        const uiService = container.get<UIService>(TYPES.UIService);
-        const eventBus = container.get<PluginEvents>(TYPES.EventBus);
+        // Aggressive Input Validation
+        try {
+            v.parse(EditDetailsSchema, details);
+        } catch (validationError) {
+            console.error("Version Control: Invalid EditDetails", validationError);
+            return;
+        }
+
+        const state = getState().app;
+        const editHistoryManager = services.editHistoryManager;
+        const uiService = services.uiService;
+        const eventBus = services.eventBus;
 
         if (state.status !== AppStatus.READY || !state.noteId) return;
         const { noteId } = state;
@@ -61,8 +67,12 @@ export const updateEditDetails =
         } catch (error) {
             console.error('VC: Failed to update edit details', error);
             uiService.showNotice('Failed to update edit details.');
-            dispatch(loadEditHistory(noteId)); // Revert
+            if (!shouldAbort(services, getState, { noteId })) {
+                dispatch(loadEditHistory(noteId)); // Revert
+            }
         } finally {
-            dispatch(appSlice.actions.stopVersionEditing());
+            if (!shouldAbort(services, getState)) {
+                dispatch(appSlice.actions.stopVersionEditing());
+            }
         }
     };

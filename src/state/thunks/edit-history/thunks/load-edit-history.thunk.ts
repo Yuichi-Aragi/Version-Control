@@ -1,37 +1,32 @@
-/**
- * Load Edit History Thunk
- *
- * Handles loading edit history for a note
- */
-
-import type { AppThunk } from '@/state';
-import { appSlice } from '@/state';
-import { TYPES } from '@/types/inversify.types';
-import { EditHistoryManager, ManifestManager } from '@/core';
-import { isPluginUnloading } from '@/state/utils/settingsUtils';
+import { createAsyncThunk } from '@reduxjs/toolkit';
+import { shouldAbort } from '@/state/utils/guards';
+import type { ThunkConfig } from '@/state/store';
+import type { VersionHistoryEntry } from '@/types';
 import { buildEditHistory, syncEditManifest } from '../helpers';
 
 /**
- * Loads edit history for a specific note
- *
- * @param noteId - The note ID to load history for
- * @returns AppThunk that loads and dispatches edit history
+ * Loads edit history for a specific note.
  */
-export const loadEditHistory =
-    (noteId: string): AppThunk =>
-    async (dispatch, _getState, container) => {
-        if (isPluginUnloading(container)) return;
+export const loadEditHistory = createAsyncThunk<
+    { editHistory: VersionHistoryEntry[]; currentBranch: string | null; availableBranches: string[]; contextVersion: number },
+    string,
+    ThunkConfig
+>(
+    'editHistory/loadEditHistory',
+    async (noteId, { getState, extra: services, rejectWithValue }) => {
+        // Capture context version immediately
+        const contextVersion = getState().app.contextVersion;
+        
+        if (shouldAbort(services, getState, { contextVersion })) return rejectWithValue('Context changed');
 
-        const editHistoryManager =
-            container.get<EditHistoryManager>(TYPES.EditHistoryManager);
-        const manifestManager =
-            container.get<ManifestManager>(TYPES.ManifestManager);
+        const editHistoryManager = services.editHistoryManager;
+        const manifestManager = services.manifestManager;
 
         try {
-            // 1. Get Note Manifest (Source of Truth for Branches)
+            // 1. Get Note Manifest
             let noteManifest = await manifestManager.loadNoteManifest(noteId);
 
-            // Lazy Recovery: If physical manifest is missing but central manifest has it (e.g. migration from edit-only history)
+            // Lazy Recovery
             if (!noteManifest) {
                 const centralManifest = await manifestManager.loadCentralManifest();
                 const centralEntry = centralManifest.notes[noteId];
@@ -46,29 +41,32 @@ export const loadEditHistory =
                 }
             }
 
+            // Race Check
+            if (shouldAbort(services, getState, { contextVersion })) return rejectWithValue('Context changed');
+
             // If still missing, return empty state
             if (!noteManifest) {
-                dispatch(
-                    appSlice.actions.editHistoryLoadedSuccess({
-                        editHistory: [],
-                        currentBranch: null,
-                        availableBranches: [],
-                    })
-                );
-                return;
+                return {
+                    editHistory: [],
+                    currentBranch: null,
+                    availableBranches: [],
+                    contextVersion,
+                };
             }
 
             const activeBranch = noteManifest.currentBranch;
             const availableBranches = Object.keys(noteManifest.branches);
 
-            // NEW: Load cache from disk for the active branch
-            // This populates the IDB with the source of truth from the .vctrl file
+            // 2. Load cache from disk
             await editHistoryManager.loadBranchFromDisk(noteId, activeBranch);
 
-            // 2. Get Edit Manifest
+            // Race Check
+            if (shouldAbort(services, getState, { contextVersion })) return rejectWithValue('Context changed');
+
+            // 3. Get Edit Manifest
             let manifest = await editHistoryManager.getEditManifest(noteId);
 
-            // 3. Sync/Initialize Edit Manifest Logic
+            // 4. Sync/Initialize Edit Manifest Logic
             if (manifest) {
                 const syncResult = syncEditManifest(manifest, activeBranch);
 
@@ -77,18 +75,19 @@ export const loadEditHistory =
                 }
             }
 
-            // 4. Extract History for Active Branch
+            // 5. Extract History
             const currentBranchData = manifest?.branches[activeBranch];
 
+            // Race Check
+            if (shouldAbort(services, getState, { contextVersion })) return rejectWithValue('Context changed');
+
             if (!manifest || !currentBranchData || !currentBranchData.versions) {
-                dispatch(
-                    appSlice.actions.editHistoryLoadedSuccess({
-                        editHistory: [],
-                        currentBranch: activeBranch,
-                        availableBranches,
-                    })
-                );
-                return;
+                return {
+                    editHistory: [],
+                    currentBranch: activeBranch,
+                    availableBranches,
+                    contextVersion,
+                };
             }
 
             const sortedHistory = buildEditHistory(
@@ -97,21 +96,25 @@ export const loadEditHistory =
                 activeBranch
             );
 
-            dispatch(
-                appSlice.actions.editHistoryLoadedSuccess({
-                    editHistory: sortedHistory,
-                    currentBranch: activeBranch,
-                    availableBranches,
-                })
-            );
+            return {
+                editHistory: sortedHistory,
+                currentBranch: activeBranch,
+                availableBranches,
+                contextVersion,
+            };
+
         } catch (error) {
+            // Check context before reporting error
+            if (shouldAbort(services, getState, { contextVersion })) return rejectWithValue('Context changed');
+
             console.error('VC: Failed to load edit history', error);
-            dispatch(
-                appSlice.actions.editHistoryLoadedSuccess({
-                    editHistory: [],
-                    currentBranch: null,
-                    availableBranches: [],
-                })
-            );
+            // Return empty state on error to clear UI
+            return {
+                editHistory: [],
+                currentBranch: null,
+                availableBranches: [],
+                contextVersion,
+            };
         }
-    };
+    }
+);

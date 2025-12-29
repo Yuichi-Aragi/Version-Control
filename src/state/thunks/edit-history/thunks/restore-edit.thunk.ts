@@ -4,38 +4,36 @@
  * Handles restoring edits and related confirmation dialogs
  */
 
-import { App, TFile } from 'obsidian';
+import { createAsyncThunk } from '@reduxjs/toolkit';
+import { TFile } from 'obsidian';
 import type { AppThunk } from '@/state';
 import { appSlice, AppStatus } from '@/state';
 import type { VersionHistoryEntry } from '@/types';
-import { TYPES } from '@/types/inversify.types';
-import { EditHistoryManager, NoteManager } from '@/core';
-import { UIService } from '@/services';
-import { isPluginUnloading } from '@/state/utils/settingsUtils';
+import { shouldAbort } from '@/state/utils/guards';
+import type { ThunkConfig } from '@/state/store';
 
 /**
  * Restores an edit to the current note
- *
- * @param editId - The edit ID to restore
- * @returns AppThunk that restores the edit
  */
-export const restoreEdit =
-    (editId: string): AppThunk =>
-    async (dispatch, getState, container) => {
-        if (isPluginUnloading(container)) return;
+export const restoreEdit = createAsyncThunk<
+    void,
+    string,
+    ThunkConfig
+>(
+    'editHistory/restoreEdit',
+    async (editId, { dispatch, getState, extra: services, rejectWithValue }) => {
+        if (shouldAbort(services, getState)) return rejectWithValue('Aborted');
 
-        const state = getState();
-        const editHistoryManager =
-            container.get<EditHistoryManager>(TYPES.EditHistoryManager);
-        const noteManager = container.get<NoteManager>(TYPES.NoteManager);
-        const uiService = container.get<UIService>(TYPES.UIService);
-        const app = container.get<App>(TYPES.App);
+        const state = getState().app;
+        const editHistoryManager = services.editHistoryManager;
+        const noteManager = services.noteManager;
+        const uiService = services.uiService;
+        const app = services.app;
 
         if (state.status !== AppStatus.READY || !state.noteId || !state.file)
-            return;
+            return rejectWithValue('Not ready');
         const { noteId, file, currentBranch } = state;
 
-        dispatch(appSlice.actions.setProcessing(true));
         dispatch(appSlice.actions.closePanel());
 
         try {
@@ -45,6 +43,9 @@ export const restoreEdit =
                 currentBranch!
             );
             if (content === null) throw new Error('Content not found');
+
+            // Race Check: Verify context after content load
+            if (shouldAbort(services, getState, { noteId, filePath: file.path })) return rejectWithValue('Context changed');
 
             const liveFile = app.vault.getAbstractFileByPath(file.path);
             if (liveFile instanceof TFile) {
@@ -59,15 +60,14 @@ export const restoreEdit =
                     `Restored Edit #${editId.substring(0, 6)}...`
                 );
             }
+            return;
         } catch (error) {
             console.error('VC: Failed to restore edit', error);
             uiService.showNotice('Failed to restore edit.');
-        } finally {
-            if (!isPluginUnloading(container)) {
-                dispatch(appSlice.actions.setProcessing(false));
-            }
+            return rejectWithValue(String(error));
         }
-    };
+    }
+);
 
 /**
  * Opens a confirmation dialog before restoring an edit
@@ -77,7 +77,7 @@ export const restoreEdit =
  */
 export const requestRestoreEdit =
     (edit: VersionHistoryEntry): AppThunk =>
-    (dispatch, _getState, _container) => {
+    (dispatch, _getState, _services) => {
         dispatch(
             appSlice.actions.openPanel({
                 type: 'confirmation',
