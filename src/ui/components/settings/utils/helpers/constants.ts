@@ -20,8 +20,9 @@ export const RESERVED_FRONTMATTER_KEYS = Object.freeze([
  * Precompiled regex patterns for maximum performance
  */
 export const REGEX_PATTERNS = Object.freeze({
-    // Characters strictly forbidden in file/folder names across major OSs
-    INVALID_FILENAME_CHARS: /[<>:"|?*\\\x00-\x1F\x7F]/,
+    // Characters strictly forbidden in file/folder names across major OSs (Windows, Linux, macOS, Android, iOS)
+    // Includes: < > : " / \ | ? * and control characters 0x00-0x1F and 0x7F
+    INVALID_FILENAME_CHARS: /[<>:"|?*\\/^\x00-\x1F\x7F]/,
 
     // Path traversal detection - optimized pattern
     PATH_TRAVERSAL: /(?:^|[\\/])\.\.(?:[\\/]|$)/,
