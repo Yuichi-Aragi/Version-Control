@@ -6,8 +6,6 @@ class EditHistoryDB extends Dexie {
     edits!: Table<StoredEdit, number>;
     manifests!: Table<StoredManifest, string>;
 
-    private static readonly VERSION = 6;
-
     constructor() {
         super(CONFIG.DB_NAME);
         this.configureDatabase();
@@ -53,7 +51,7 @@ class EditHistoryDB extends Dexie {
             });
         });
 
-        this.version(EditHistoryDB.VERSION).stores({
+        this.version(6).stores({
             edits: '++id, [noteId+branchName+editId], [noteId+branchName], noteId, createdAt, size, contentHash, [noteId+branchName+createdAt], storageType, chainLength',
             manifests: 'noteId, updatedAt, [updatedAt+noteId]'
         }).upgrade((tx) => {
@@ -62,6 +60,19 @@ class EditHistoryDB extends Dexie {
                 edit.chainLength = edit.chainLength || 0;
                 edit.uncompressedSize = edit.uncompressedSize || 0;
                 edit.contentHash = edit.contentHash || '';
+            });
+        });
+
+        // Version 7: Repair migration for corrupted state where 'full' edits have chainLength > 0
+        this.version(7).stores({
+            edits: '++id, [noteId+branchName+editId], [noteId+branchName], noteId, createdAt, size, contentHash, [noteId+branchName+createdAt], storageType, chainLength',
+            manifests: 'noteId, updatedAt, [updatedAt+noteId]'
+        }).upgrade((tx) => {
+            return tx.table('edits').toCollection().modify((edit) => {
+                // Enforce invariant: Full edits must start a new chain (length 0)
+                if (edit.storageType === 'full' && edit.chainLength > 0) {
+                    edit.chainLength = 0;
+                }
             });
         });
     }
