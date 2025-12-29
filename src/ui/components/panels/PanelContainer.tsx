@@ -33,7 +33,7 @@ const renderPanelComponent = (p: NonNullable<PanelState>): React.ReactNode => {
 };
 
 export const PanelContainer: FC = () => {
-    const panel = useAppSelector((state) => state.panel);
+    const panel = useAppSelector((state) => state.app.panel);
     
     if (!panel || panel.type === 'settings') {
         return null;

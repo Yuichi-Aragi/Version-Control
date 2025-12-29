@@ -4,17 +4,19 @@ import type { ChangelogPanel as ChangelogPanelState } from '@/state';
 import { Icon } from '@/ui/components';
 import { useApp } from '@/ui/AppContext';
 import { usePanelClose } from '@/ui/hooks';
+import { useGetChangelogQuery } from '@/state/apis/changelog.api';
 
 interface ChangelogPanelProps {
     panelState: ChangelogPanelState;
 }
 
-export const ChangelogPanel: FC<ChangelogPanelProps> = ({ panelState }) => {
+export const ChangelogPanel: FC<ChangelogPanelProps> = ({ panelState: _ }) => {
     const app = useApp();
     const markdownRef = useRef<HTMLDivElement>(null);
-    const { content } = panelState;
-
     const handleClose = usePanelClose();
+
+    // Use RTK Query hook to fetch data
+    const { data: content, isLoading, error } = useGetChangelogQuery();
 
     useLayoutEffect(() => {
         if (content && markdownRef.current) {
@@ -43,10 +45,14 @@ export const ChangelogPanel: FC<ChangelogPanelProps> = ({ panelState }) => {
                         </div>
                     </div>
                     <div className="v-version-content-preview">
-                        {content === null ? (
+                        {isLoading ? (
                             <div className="is-loading">
                                 <div className="loading-spinner" />
                                 <p>Loading changelog...</p>
+                            </div>
+                        ) : error ? (
+                            <div className="v-error-message">
+                                <p>Failed to load changelog.</p>
                             </div>
                         ) : (
                             <div ref={markdownRef} />

@@ -15,8 +15,8 @@ interface ConfirmationPanelProps {
 export const ConfirmationPanel: FC<ConfirmationPanelProps> = ({ panelState }) => {
     const dispatch = useAppDispatch();
     const { status, isProcessing } = useAppSelector(state => ({
-        status: state.status,
-        isProcessing: state.isProcessing,
+        status: state.app.status,
+        isProcessing: state.app.isProcessing,
     }));
     const confirmBtnRef = useRef<HTMLButtonElement>(null);
 

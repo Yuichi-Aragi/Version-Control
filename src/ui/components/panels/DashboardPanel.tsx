@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useEffect } from 'react';
 import HeatMap from '@uiw/react-heat-map';
 import { useAppDispatch, useAppSelector } from '@/ui/hooks';
-import { appSlice } from '@/state';
+import { appSlice, selectAllHistory, selectAllEditHistory } from '@/state/appSlice';
 import { moment } from 'obsidian';
 
 // Define granular color scale for heatmap
@@ -23,9 +23,9 @@ export const DashboardPanel: React.FC = () => {
     const dispatch = useAppDispatch();
     
     // Select state individually to prevent unnecessary re-renders while ensuring instant updates
-    const history = useAppSelector(state => state.history);
-    const editHistory = useAppSelector(state => state.editHistory);
-    const viewMode = useAppSelector(state => state.viewMode);
+    const history = useAppSelector(selectAllHistory);
+    const editHistory = useAppSelector(selectAllEditHistory);
+    const viewMode = useAppSelector(state => state.app.viewMode);
 
     const contentRef = useRef<HTMLDivElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
@@ -34,7 +34,7 @@ export const DashboardPanel: React.FC = () => {
         const source = viewMode === 'versions' ? history : editHistory;
         const counts: Record<string, number> = {};
 
-        source.forEach(entry => {
+        source.forEach((entry: any) => {
             // Cast moment to any to bypass TS call signature error common in Obsidian plugins
             const date = (moment as any)(entry.timestamp).format('YYYY/MM/DD');
             counts[date] = (counts[date] || 0) + 1;
