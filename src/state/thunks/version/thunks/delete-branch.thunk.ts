@@ -1,9 +1,6 @@
-import type { AppThunk } from '@/state';
+import type { AppThunk, Services } from '@/state';
 import { appSlice, AppStatus } from '@/state';
-import { VersionManager, EditHistoryManager, ManifestManager } from '@/core';
-import { UIService } from '@/services';
-import { TYPES } from '@/types/inversify.types';
-import { isPluginUnloading } from '@/state/utils/settingsUtils';
+import { shouldAbort } from '@/state/utils/guards';
 import { initializeView } from '@/state/thunks/core.thunks';
 import { switchBranch } from './branch.thunk';
 
@@ -16,15 +13,18 @@ import { switchBranch } from './branch.thunk';
 export const requestDeleteBranch = (branchName: string): AppThunk => async (
     dispatch,
     getState,
-    container
+    services: Services
 ) => {
-    if (isPluginUnloading(container)) return;
+    if (shouldAbort(services, getState)) return;
 
-    const state = getState();
+    const state = getState().app;
     if (state.status !== AppStatus.READY || !state.noteId) return;
 
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const manifestManager = services.manifestManager;
     const noteManifest = await manifestManager.loadNoteManifest(state.noteId);
+    
+    // Race Check: Verify context after async load
+    if (shouldAbort(services, getState, { noteId: state.noteId })) return;
     
     if (!noteManifest) return;
 
@@ -59,18 +59,18 @@ export const requestDeleteBranch = (branchName: string): AppThunk => async (
 export const deleteBranch = (branchName: string): AppThunk => async (
     dispatch,
     getState,
-    container
+    services: Services
 ) => {
-    if (isPluginUnloading(container)) return;
+    if (shouldAbort(services, getState)) return;
 
-    const state = getState();
+    const state = getState().app;
     if (state.status !== AppStatus.READY || !state.noteId) return;
     const { noteId } = state;
 
-    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
-    const editHistoryManager = container.get<EditHistoryManager>(TYPES.EditHistoryManager);
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
-    const uiService = container.get<UIService>(TYPES.UIService);
+    const versionManager = services.versionManager;
+    const editHistoryManager = services.editHistoryManager;
+    const manifestManager = services.manifestManager;
+    const uiService = services.uiService;
 
     dispatch(appSlice.actions.setProcessing(true));
     dispatch(appSlice.actions.closePanel());
@@ -88,10 +88,16 @@ export const deleteBranch = (branchName: string): AppThunk => async (
         // Note: VersionManager.deleteBranch handles unregistering the note if it's the last branch
         await versionManager.deleteBranch(noteId, branchName);
 
+        // Race Check: Verify context after async deletes
+        if (shouldAbort(services, getState, { noteId })) {
+             // If context changed, we don't update UI state, but operation succeeded.
+             return;
+        }
+
         if (isLastBranch) {
             // Note was unregistered
             uiService.showNotice(`Note unregistered from version control.`);
-            dispatch(initializeView());
+            dispatch(initializeView(undefined));
         } else {
             uiService.showNotice(`Branch "${branchName}" deleted.`);
             
@@ -110,17 +116,12 @@ export const deleteBranch = (branchName: string): AppThunk => async (
                 // Just refresh the branch switcher UI if it was open (it's closed now by closePanel)
                 // but we might want to refresh available branches in state if we were just viewing
                 // We can trigger a reload of history/settings to sync state
-                // Actually, switchBranch does a full reload. Since we aren't switching, we should reload manually.
-                // But wait, if we aren't switching, we are staying on current branch.
-                // We just need to update availableBranches in state.
                 const updatedManifest = await manifestManager.loadNoteManifest(noteId);
                 if (updatedManifest) {
-                    // We can dispatch a partial update or just reload history which updates everything
-                    // Reloading history is safer
                     const { file } = state;
                     if (file) {
                         const { loadHistoryForNoteId } = await import('@/state/thunks/core.thunks');
-                        dispatch(loadHistoryForNoteId(file, noteId));
+                        dispatch(loadHistoryForNoteId({ file, noteId }));
                     }
                 }
             }

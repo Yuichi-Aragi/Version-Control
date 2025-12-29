@@ -1,12 +1,10 @@
-import type { AppThunk } from '@/state';
+import * as v from 'valibot';
+import type { AppThunk, Services } from '@/state';
 import { appSlice, AppStatus } from '@/state';
 import { loadHistoryForNoteId } from '@/state/thunks/core.thunks';
-import { VersionManager } from '@/core';
-import { PluginEvents } from '@/core';
-import { UIService } from '@/services';
-import { TYPES } from '@/types/inversify.types';
-import { isPluginUnloading } from '@/state/utils/settingsUtils';
+import { shouldAbort } from '@/state/utils/guards';
 import type { UpdateVersionDetailsPayload } from '../types';
+import { UpdateVersionDetailsPayloadSchema } from '@/state/thunks/schemas';
 import { validateNotRenaming, validateNoteContext } from '../validation';
 import { updateVersionDetailsInState } from '../helpers';
 
@@ -23,18 +21,26 @@ import { updateVersionDetailsInState } from '../helpers';
 export const updateVersionDetails = (
     versionId: string,
     details: UpdateVersionDetailsPayload
-): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
+): AppThunk => async (dispatch, getState, services: Services) => {
+    if (shouldAbort(services, getState)) return;
 
-    const uiService = container.get<UIService>(TYPES.UIService);
-    const state = getState();
+    // Aggressive Input Validation
+    try {
+        v.parse(UpdateVersionDetailsPayloadSchema, details);
+    } catch (validationError) {
+        console.error("Version Control: Invalid UpdateVersionDetailsPayload", validationError);
+        return;
+    }
+
+    const uiService = services.uiService;
+    const state = getState().app;
 
     // Validate not renaming
     if (!validateNotRenaming(state.isRenaming, uiService, 'edit version')) {
         return;
     }
 
-    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+    const versionManager = services.versionManager;
 
     if (state.status !== AppStatus.READY) {
         return;
@@ -66,13 +72,13 @@ export const updateVersionDetails = (
         );
 
         // Trigger event to update IndexedDB timeline metadata
-        const eventBus = container.get<PluginEvents>(TYPES.EventBus);
+        const eventBus = services.eventBus;
         eventBus.trigger('version-updated', noteId, versionId, updatePayload);
 
         // If the ID changed due to renaming, we must reload the history to reflect the new ID in the state
         if (newVersionId !== versionId) {
-            if (!isPluginUnloading(container)) {
-                dispatch(loadHistoryForNoteId(file, noteId));
+            if (!shouldAbort(services, getState, { noteId })) {
+                dispatch(loadHistoryForNoteId({ file, noteId }));
             }
         }
     } catch (error) {
@@ -81,11 +87,11 @@ export const updateVersionDetails = (
             error
         );
         uiService.showNotice("VC: Error, could not save version details. Reverting changes.", 5000);
-        if (!isPluginUnloading(container)) {
-            dispatch(loadHistoryForNoteId(file, noteId));
+        if (!shouldAbort(services, getState, { noteId })) {
+            dispatch(loadHistoryForNoteId({ file, noteId }));
         }
     } finally {
-        if (!isPluginUnloading(container)) {
+        if (!shouldAbort(services, getState)) {
             dispatch(appSlice.actions.stopVersionEditing());
         }
     }

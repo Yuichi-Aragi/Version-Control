@@ -1,10 +1,7 @@
-import type { AppThunk } from '@/state';
+import type { AppThunk, Services } from '@/state';
 import { appSlice, AppStatus } from '@/state';
 import type { VersionHistoryEntry } from '@/types';
-import { VersionManager } from '@/core';
-import { UIService } from '@/services';
-import { TYPES } from '@/types/inversify.types';
-import { isPluginUnloading } from '@/state/utils/settingsUtils';
+import { shouldAbort } from '@/state/utils/guards';
 
 /**
  * Requests to edit a version's name and description.
@@ -17,11 +14,11 @@ import { isPluginUnloading } from '@/state/utils/settingsUtils';
 export const requestEditVersion = (version: VersionHistoryEntry): AppThunk => (
     dispatch,
     getState,
-    container
+    services: Services
 ) => {
-    if (isPluginUnloading(container)) return;
+    if (shouldAbort(services, getState)) return;
 
-    const state = getState();
+    const state = getState().app;
     if (state.status !== AppStatus.READY) return;
 
     // This action does not open a new panel, so we must explicitly close the current one first.
@@ -41,12 +38,12 @@ export const requestEditVersion = (version: VersionHistoryEntry): AppThunk => (
 export const viewVersionInPanel = (version: VersionHistoryEntry): AppThunk => async (
     dispatch,
     getState,
-    container
+    services: Services
 ) => {
-    if (isPluginUnloading(container)) return;
+    if (shouldAbort(services, getState)) return;
 
-    const state = getState();
-    const uiService = container.get<UIService>(TYPES.UIService);
+    const state = getState().app;
+    const uiService = services.uiService;
 
     if (state.status !== AppStatus.READY || !state.noteId) {
         uiService.showNotice('Cannot view version: context not ready.');
@@ -60,16 +57,10 @@ export const viewVersionInPanel = (version: VersionHistoryEntry): AppThunk => as
 
     try {
         if (viewMode === 'versions') {
-            const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+            const versionManager = services.versionManager;
             content = await versionManager.getVersionContent(noteId, version.id);
         } else {
-            // We need to dynamically import or use container to get EditHistoryManager to avoid circular imports if any
-            // But since we are in thunks, we can just use container.
-            // Note: EditHistoryManager type is needed.
-            const { EditHistoryManager } = require('../../../../core/edit-history-manager');
-            const editHistoryManager = container.get<typeof EditHistoryManager>(
-                TYPES.EditHistoryManager
-            );
+            const editHistoryManager = services.editHistoryManager;
             content = await editHistoryManager.getEditContent(noteId, version.id);
         }
 
@@ -77,9 +68,8 @@ export const viewVersionInPanel = (version: VersionHistoryEntry): AppThunk => as
             throw new Error('Content not found.');
         }
 
-        // Check if state is still valid for this note before opening panel
-        const currentState = getState();
-        if (currentState.noteId !== noteId) {
+        // Race Check: Verify context after async content load
+        if (shouldAbort(services, getState, { noteId })) {
             console.warn('VC: Note ID changed during preview load. Aborting panel open.');
             return;
         }
@@ -95,7 +85,7 @@ export const viewVersionInPanel = (version: VersionHistoryEntry): AppThunk => as
         console.error('VC: Failed to view version content.', error);
         uiService.showNotice('Failed to load content for preview.');
     } finally {
-        if (!isPluginUnloading(container)) {
+        if (!shouldAbort(services, getState)) {
             dispatch(appSlice.actions.setProcessing(false));
         }
     }

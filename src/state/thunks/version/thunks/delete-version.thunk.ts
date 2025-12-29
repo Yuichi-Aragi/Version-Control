@@ -1,36 +1,31 @@
-import { TFile, App } from 'obsidian';
-import type { AppThunk } from '@/state';
+import { createAsyncThunk } from '@reduxjs/toolkit';
+import { TFile } from 'obsidian';
 import { appSlice, AppStatus } from '@/state';
 import type { VersionHistoryEntry } from '@/types';
 import { initializeView, loadHistoryForNoteId } from '@/state/thunks/core.thunks';
-import { deleteAllEdits } from '@/state/thunks/edit-history';
-import { VersionManager, NoteManager } from '@/core';
-import { UIService } from '@/services';
-import { TYPES } from '@/types/inversify.types';
-import { isPluginUnloading } from '@/state/utils/settingsUtils';
+import { deleteAllEdits } from '@/state/thunks/edit-history/thunks/delete-edits.thunk';
+import { shouldAbort } from '@/state/utils/guards';
+import type { ThunkConfig } from '@/state/store';
 import { validateNotRenaming, validateNoteContext } from '../validation';
 import {
     handleVersionErrorWithMessage,
     notifyDeleteSuccess,
     notifyDeleteInBackground,
+    notifyDeleteAllSuccess,
+    notifyDeleteAllInBackground,
 } from '../helpers';
 
 /**
  * Prompts the user to confirm deleting a version.
- *
- * Opens a confirmation panel with a warning message.
- *
- * @param version - The version to delete.
- * @returns A thunk that opens the confirmation panel.
  */
-export const requestDelete = (version: VersionHistoryEntry): AppThunk => (
-    dispatch,
-    getState,
-    container
+export const requestDelete = (version: VersionHistoryEntry): any => (
+    dispatch: any,
+    getState: any,
+    services: any
 ) => {
-    if (isPluginUnloading(container)) return;
+    if (shouldAbort(services, getState)) return;
 
-    const state = getState();
+    const state = getState().app;
     if (state.status === AppStatus.READY) {
         const { file } = state;
         if (!file) return;
@@ -54,100 +49,93 @@ export const requestDelete = (version: VersionHistoryEntry): AppThunk => (
 
 /**
  * Deletes a version from the history.
- *
- * @param versionId - The ID of the version to delete.
- * @returns An async thunk that performs the delete operation.
  */
-export const deleteVersion = (versionId: string): AppThunk => async (
-    dispatch,
-    getState,
-    container
-) => {
-    if (isPluginUnloading(container)) return;
+export const deleteVersion = createAsyncThunk<
+    void,
+    string,
+    ThunkConfig
+>(
+    'version/deleteVersion',
+    async (versionId, { dispatch, getState, extra: services, rejectWithValue }) => {
+        if (shouldAbort(services, getState)) return rejectWithValue('Aborted');
 
-    const uiService = container.get<UIService>(TYPES.UIService);
-    const initialState = getState();
+        const uiService = services.uiService;
+        const initialState = getState().app;
 
-    // Validate not renaming
-    if (!validateNotRenaming(initialState.isRenaming, uiService, 'delete version')) {
-        return;
-    }
-
-    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
-    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
-    const app = container.get<App>(TYPES.App);
-
-    if (initialState.status !== AppStatus.READY) return;
-
-    const initialFileFromState = initialState.file;
-    const initialNoteIdFromState = initialState.noteId;
-    if (!validateNoteContext(initialNoteIdFromState, initialFileFromState)) return;
-
-    // At this point, we know both are non-null (validated above)
-    const file = initialFileFromState!;
-    const noteId = initialNoteIdFromState!;
-
-    dispatch(appSlice.actions.setProcessing(true));
-    dispatch(appSlice.actions.closePanel());
-
-    try {
-        const liveFile = app.vault.getAbstractFileByPath(file.path);
-        if (liveFile instanceof TFile) {
-            const currentNoteIdOnDisk = await noteManager.getNoteId(liveFile);
-            if (
-                currentNoteIdOnDisk !== noteId &&
-                currentNoteIdOnDisk !== null
-            ) {
-                throw new Error(
-                    `Delete failed. Note's version control ID has changed. Expected "${noteId}", found "${currentNoteIdOnDisk}".`
-                );
-            }
+        if (!validateNotRenaming(initialState.isRenaming, uiService, 'delete version')) {
+            return rejectWithValue('Renaming in progress');
         }
 
-        const success = await versionManager.deleteVersion(noteId, versionId);
+        const versionManager = services.versionManager;
+        const noteManager = services.noteManager;
+        const app = services.app;
 
-        const stateAfterDelete = getState();
-        if (
-            isPluginUnloading(container) ||
-            stateAfterDelete.file?.path !== file.path
-        ) {
+        if (initialState.status !== AppStatus.READY) return rejectWithValue('Not ready');
+
+        const initialFileFromState = initialState.file;
+        const initialNoteIdFromState = initialState.noteId;
+        if (!validateNoteContext(initialNoteIdFromState, initialFileFromState)) return rejectWithValue('Invalid context');
+
+        const file = initialFileFromState!;
+        const noteId = initialNoteIdFromState!;
+
+        dispatch(appSlice.actions.closePanel());
+
+        try {
+            const liveFile = app.vault.getAbstractFileByPath(file.path);
+            if (liveFile instanceof TFile) {
+                const currentNoteIdOnDisk = await noteManager.getNoteId(liveFile);
+                if (
+                    currentNoteIdOnDisk !== noteId &&
+                    currentNoteIdOnDisk !== null
+                ) {
+                    throw new Error(
+                        `Delete failed. Note's version control ID has changed. Expected "${noteId}", found "${currentNoteIdOnDisk}".`
+                    );
+                }
+            }
+
+            const success = await versionManager.deleteVersion(noteId, versionId);
+
+            // Race Check
+            if (shouldAbort(services, getState, { noteId, filePath: file.path })) {
+                if (success) {
+                    notifyDeleteInBackground(uiService, file.basename);
+                }
+                return rejectWithValue('Context changed');
+            }
+
             if (success) {
-                notifyDeleteInBackground(uiService, file.basename);
+                dispatch(loadHistoryForNoteId({ file, noteId }));
+                notifyDeleteSuccess(uiService, versionId);
+                return;
+            } else {
+                throw new Error(`Failed to delete version ${versionId.substring(0, 6)}...`);
             }
-            return;
-        }
-
-        if (success) {
-            dispatch(loadHistoryForNoteId(file, noteId));
-            notifyDeleteSuccess(uiService, versionId);
-        } else {
-            throw new Error(`Failed to delete version ${versionId.substring(0, 6)}...`);
-        }
-    } catch (error) {
-        const message = error instanceof Error ? error.message : 'An unexpected error occurred.';
-        handleVersionErrorWithMessage(
-            error,
-            'deleteVersion',
-            `Delete failed: ${message}`,
-            uiService,
-            7000
-        );
-        if (!isPluginUnloading(container)) {
-            dispatch(initializeView());
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'An unexpected error occurred.';
+            handleVersionErrorWithMessage(
+                error,
+                'deleteVersion',
+                `Delete failed: ${message}`,
+                uiService,
+                7000
+            );
+            if (!shouldAbort(services, getState)) {
+                dispatch(initializeView(undefined));
+            }
+            return rejectWithValue(message);
         }
     }
-};
+);
 
 /**
- * Prompts the user to confirm deleting all versions/edits in the current branch
- * based on the active view mode.
- *
- * @returns A thunk that opens the confirmation panel.
+ * Prompts the user to confirm deleting all versions/edits.
  */
-export const requestDeleteAll = (): AppThunk => (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
+export const requestDeleteAll = (): any => (dispatch: any, getState: any, services: any) => {
+    if (shouldAbort(services, getState)) return;
 
-    const state = getState();
+    const state = getState().app;
     if (state.status === AppStatus.READY) {
         const { file, currentBranch, viewMode } = state;
         if (!file || !currentBranch) return;
@@ -169,67 +157,67 @@ export const requestDeleteAll = (): AppThunk => (dispatch, getState, container) 
 
 /**
  * Deletes all versions in the current branch.
- *
- * @returns An async thunk that performs the delete all operation.
  */
-export const deleteAllVersions = (): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
+export const deleteAllVersions = createAsyncThunk<
+    void,
+    void,
+    ThunkConfig
+>(
+    'version/deleteAllVersions',
+    async (_, { dispatch, getState, extra: services, rejectWithValue }) => {
+        if (shouldAbort(services, getState)) return rejectWithValue('Aborted');
 
-    const uiService = container.get<UIService>(TYPES.UIService);
-    const initialState = getState();
+        const uiService = services.uiService;
+        const initialState = getState().app;
 
-    // Validate not renaming
-    if (!validateNotRenaming(initialState.isRenaming, uiService, 'delete history')) {
-        return;
-    }
+        if (!validateNotRenaming(initialState.isRenaming, uiService, 'delete history')) {
+            return rejectWithValue('Renaming in progress');
+        }
 
-    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
+        const versionManager = services.versionManager;
 
-    if (initialState.status !== AppStatus.READY) return;
+        if (initialState.status !== AppStatus.READY) return rejectWithValue('Not ready');
 
-    const initialFileFromState = initialState.file;
-    const initialNoteIdFromState = initialState.noteId;
-    if (!validateNoteContext(initialNoteIdFromState, initialFileFromState)) return;
+        const initialFileFromState = initialState.file;
+        const initialNoteIdFromState = initialState.noteId;
+        if (!validateNoteContext(initialNoteIdFromState, initialFileFromState)) return rejectWithValue('Invalid context');
 
-    // At this point, we know both are non-null (validated above)
-    const file = initialFileFromState!;
-    const noteId = initialNoteIdFromState!;
+        const file = initialFileFromState!;
+        const noteId = initialNoteIdFromState!;
 
-    dispatch(appSlice.actions.setProcessing(true));
-    dispatch(appSlice.actions.closePanel());
+        dispatch(appSlice.actions.closePanel());
 
-    try {
-        const success = await versionManager.deleteAllVersionsInCurrentBranch(noteId);
+        try {
+            const success = await versionManager.deleteAllVersionsInCurrentBranch(noteId);
 
-        if (
-            isPluginUnloading(container) ||
-            getState().file?.path !== file.path
-        ) {
-            if (success) {
-                const { notifyDeleteAllInBackground } = await import('../helpers');
-                notifyDeleteAllInBackground(uiService, file.basename);
+            // Race Check
+            if (shouldAbort(services, getState, { noteId, filePath: file.path })) {
+                if (success) {
+                    notifyDeleteAllInBackground(uiService, file.basename);
+                }
+                return rejectWithValue('Context changed');
             }
-            return;
-        }
 
-        if (success) {
-            const { notifyDeleteAllSuccess } = await import('../helpers');
-            notifyDeleteAllSuccess(uiService, file.basename);
-            dispatch(initializeView());
-        } else {
-            throw new Error(`Failed to delete all versions for "${file.basename}".`);
-        }
-    } catch (error) {
-        const message = error instanceof Error ? error.message : 'An unexpected error occurred.';
-        handleVersionErrorWithMessage(
-            error,
-            'deleteAllVersions',
-            `Delete all failed: ${message}`,
-            uiService,
-            7000
-        );
-        if (!isPluginUnloading(container)) {
-            dispatch(initializeView());
+            if (success) {
+                notifyDeleteAllSuccess(uiService, file.basename);
+                dispatch(initializeView(undefined));
+                return;
+            } else {
+                throw new Error(`Failed to delete all versions for "${file.basename}".`);
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'An unexpected error occurred.';
+            handleVersionErrorWithMessage(
+                error,
+                'deleteAllVersions',
+                `Delete all failed: ${message}`,
+                uiService,
+                7000
+            );
+            if (!shouldAbort(services, getState)) {
+                dispatch(initializeView(undefined));
+            }
+            return rejectWithValue(message);
         }
     }
-};
+);

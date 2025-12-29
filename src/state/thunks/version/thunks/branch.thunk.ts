@@ -2,10 +2,7 @@ import type { AppThunk } from '@/state';
 import { appSlice, AppStatus } from '@/state';
 import { loadEffectiveSettingsForNote, loadHistoryForNoteId } from '@/state/thunks/core.thunks';
 import { loadEditHistory } from '@/state/thunks/edit-history';
-import { VersionManager, ManifestManager, BackgroundTaskManager } from '@/core';
-import { UIService } from '@/services';
-import { TYPES } from '@/types/inversify.types';
-import { isPluginUnloading } from '@/state/utils/settingsUtils';
+import { shouldAbort } from '@/state/utils/guards';
 import { notifyBranchCreated, notifyBranchSwitched } from '../helpers';
 
 /**
@@ -19,19 +16,23 @@ import { notifyBranchCreated, notifyBranchSwitched } from '../helpers';
 export const createBranch = (newBranchName: string): AppThunk => async (
     dispatch,
     getState,
-    container
+    services
 ) => {
-    if (isPluginUnloading(container)) return;
+    if (shouldAbort(services, getState)) return;
 
-    const state = getState();
+    const state = getState().app;
     if (state.status !== AppStatus.READY || !state.noteId) return;
     const { noteId } = state;
 
-    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
-    const uiService = container.get<UIService>(TYPES.UIService);
+    const versionManager = services.versionManager;
+    const uiService = services.uiService;
 
     try {
         await versionManager.createBranch(noteId, newBranchName);
+        
+        // Race Check: Verify context after async create
+        if (shouldAbort(services, getState, { noteId })) return;
+
         dispatch(appSlice.actions.closePanel());
         notifyBranchCreated(uiService, newBranchName);
         dispatch(switchBranch(newBranchName));
@@ -61,17 +62,17 @@ export const createBranch = (newBranchName: string): AppThunk => async (
 export const switchBranch = (newBranchName: string): AppThunk => async (
     dispatch,
     getState,
-    container
+    services
 ) => {
-    if (isPluginUnloading(container)) return;
+    if (shouldAbort(services, getState)) return;
 
-    const state = getState();
+    const state = getState().app;
     if (state.status !== AppStatus.READY || !state.noteId || !state.file) return;
     const { noteId, file, viewMode } = state;
 
-    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
-    const uiService = container.get<UIService>(TYPES.UIService);
+    const versionManager = services.versionManager;
+    const manifestManager = services.manifestManager;
+    const uiService = services.uiService;
 
     // We do NOT set isProcessing here anymore. We rely on the LOADING status set by clearHistoryForBranchSwitch.
     dispatch(appSlice.actions.closePanel());
@@ -92,6 +93,9 @@ export const switchBranch = (newBranchName: string): AppThunk => async (
             );
         }
 
+        // Race Check: Verify context before clearing state
+        if (shouldAbort(services, getState, { noteId, filePath: file.path })) return;
+
         // 4. Clear state & Set Loading
         // This forces the UI to reset (show skeletons) and prevents stale state rendering.
         const availableBranches = Object.keys(manifest.branches);
@@ -106,16 +110,17 @@ export const switchBranch = (newBranchName: string): AppThunk => async (
         // We await settings first to ensure they are ready for whatever history loading needs them.
         await dispatch(loadEffectiveSettingsForNote(noteId));
 
+        // Race Check: Verify context after settings load
+        if (shouldAbort(services, getState, { noteId, filePath: file.path })) return;
+
         if (viewMode === 'edits') {
             await dispatch(loadEditHistory(noteId));
         } else {
-            await dispatch(loadHistoryForNoteId(file, noteId));
+            await dispatch(loadHistoryForNoteId({ file, noteId }));
         }
 
         // Sync watch mode (important if switching branches changes settings like auto-save)
-        const backgroundTaskManager = container.get<BackgroundTaskManager>(
-            TYPES.BackgroundTaskManager
-        );
+        const backgroundTaskManager = services.backgroundTaskManager;
         backgroundTaskManager.syncWatchMode();
 
         notifyBranchSwitched(uiService, newBranchName);
@@ -126,7 +131,9 @@ export const switchBranch = (newBranchName: string): AppThunk => async (
         );
 
         // Attempt to reload current state to ensure consistency
-        dispatch(loadHistoryForNoteId(file, noteId));
+        if (!shouldAbort(services, getState, { noteId })) {
+            dispatch(loadHistoryForNoteId({ file, noteId }));
+        }
     }
     // No finally block needed to unset processing, as success actions in loadHistory/loadEditHistory set status to READY.
 };
