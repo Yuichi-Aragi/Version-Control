@@ -1,38 +1,36 @@
 /**
  * DiffManager - Lean orchestrator for diff operations
+ * Uses WorkerManager for centralized worker lifecycle management.
  */
 
 import { App, TFile, Component, MarkdownView } from 'obsidian';
-import { injectable, inject } from 'inversify';
 import { VersionManager } from '@/core';
 import type { DiffTarget, DiffType, Change } from '@/types';
 import { PluginEvents } from '@/core';
-import { TYPES } from '@/types/inversify.types';
 import { VersionContentRepository } from '@/core';
-import { WorkerHealthMonitor, WorkerProxy } from '@/services/diff-manager/workers';
+import { DiffWorkerManager, WorkerHealthMonitor } from '@/services/diff-manager/workers';
 import { DiffCache, CacheKeyGenerator } from '@/services/diff-manager/cache';
 import { DiffComputer, DiffValidator } from '@/services/diff-manager/operations';
 import { DiffManagerError, type WorkerStatus, type CacheStats } from '@/services/diff-manager/types';
 import { WORKER_TIMEOUT, DIFF_CACHE_CAPACITY } from '@/services/diff-manager/config';
 
-@injectable()
 export class DiffManager extends Component {
     private readonly diffCache: DiffCache;
-    private readonly workerProxy: WorkerProxy;
+    private readonly workerManager: DiffWorkerManager;
     private readonly workerHealthMonitor: WorkerHealthMonitor;
     private readonly diffComputer: DiffComputer;
     private isInitializing = false;
-    private pendingOperations = new Set<Promise<any>>();
+    private pendingOperations = new Set<Promise<unknown>>();
 
     constructor(
-        @inject(TYPES.App) private readonly app: App,
-        @inject(TYPES.VersionManager) private readonly versionManager: VersionManager,
-        @inject(TYPES.VersionContentRepo) private readonly contentRepo: VersionContentRepository,
-        @inject(TYPES.EventBus) private readonly eventBus: PluginEvents
+        private readonly app: App,
+        private readonly versionManager: VersionManager,
+        private readonly contentRepo: VersionContentRepository,
+        private readonly eventBus: PluginEvents
     ) {
         super();
         this.diffCache = new DiffCache();
-        this.workerProxy = new WorkerProxy();
+        this.workerManager = new DiffWorkerManager();
         this.workerHealthMonitor = new WorkerHealthMonitor();
         this.diffComputer = new DiffComputer();
     }
@@ -63,33 +61,21 @@ export class DiffManager extends Component {
     }
 
     private async initializeWorker(): Promise<void> {
-        if (this.workerProxy.isInitialized() || this.isInitializing) {
+        if (this.workerManager.isInitialized() || this.isInitializing) {
             return;
         }
 
         this.isInitializing = true;
 
         try {
-            await this.workerProxy.initialize(this.handleWorkerError.bind(this));
+            await this.workerManager.initializeAsync();
         } catch (error) {
             console.error("Version Control: Failed to initialize the diff worker", error);
-            this.workerProxy.terminate();
+            this.workerManager.terminate();
             throw error;
         } finally {
             this.isInitializing = false;
         }
-    }
-
-    private handleWorkerError(error: ErrorEvent): void {
-        console.error("Version Control: Critical error in diff worker", {
-            message: error.message,
-            filename: error.filename,
-            lineno: error.lineno,
-            colno: error.colno
-        });
-
-        this.workerHealthMonitor.recordError();
-        this.workerProxy.terminate();
     }
 
     private handleHistoryChange = (noteId: string): void => {
@@ -162,13 +148,19 @@ export class DiffManager extends Component {
             if (cachedResult) return cachedResult;
         }
 
-        if (!this.workerProxy.getProxy()) await this.initializeWorker();
-        if (!this.workerProxy.getProxy()) throw new DiffManagerError("Diff worker unavailable", 'WORKER_UNAVAILABLE');
+        if (!this.workerManager.isActive()) {
+            await this.initializeWorker();
+        }
+        if (!this.workerManager.isActive()) {
+            throw new DiffManagerError("Diff worker unavailable", 'WORKER_UNAVAILABLE');
+        }
 
-        if (!this.workerHealthMonitor.isHealthy()) {
+        if (!this.workerManager.isHealthy()) {
             console.warn("Version Control: Worker health check failed, restarting worker");
             await this.restartWorker();
-            if (!this.workerProxy.getProxy()) throw new DiffManagerError("Diff worker unavailable after restart", 'WORKER_UNAVAILABLE');
+            if (!this.workerManager.isActive()) {
+                throw new DiffManagerError("Diff worker unavailable after restart", 'WORKER_UNAVAILABLE');
+            }
         }
 
         const timeoutPromise = new Promise<never>((_, reject) => {
@@ -177,20 +169,27 @@ export class DiffManager extends Component {
 
         try {
             const diffOperation = this.diffComputer.compute(
-                this.workerProxy.getProxy()!,
+                this.workerManager.getProxy(),
                 content1,
                 content2,
                 diffType,
                 version2Id,
                 cacheKey,
-                (duration) => this.workerHealthMonitor.recordOperation(duration),
-                () => this.workerHealthMonitor.recordError(),
+                (duration) => {
+                    this.workerHealthMonitor.recordOperation(duration);
+                    this.workerManager.recordOperation(duration);
+                },
+                () => {
+                    this.workerHealthMonitor.recordError();
+                    this.workerManager.recordError();
+                },
                 () => this.restartWorker(),
                 (key, value) => this.diffCache.set(key, value)
             );
             return await Promise.race([diffOperation, timeoutPromise]);
         } catch (error) {
             this.workerHealthMonitor.recordError();
+            this.workerManager.recordError();
             throw error;
         }
     }
@@ -219,7 +218,7 @@ export class DiffManager extends Component {
     private cleanup(): void {
         Promise.allSettled(Array.from(this.pendingOperations))
             .then(() => {
-                this.workerProxy.terminate();
+                this.workerManager.terminate();
                 return this.diffCache.clear();
             })
             .catch(error => console.error("Version Control: Error during cleanup", error));
@@ -227,7 +226,7 @@ export class DiffManager extends Component {
 
     public async restartWorker(): Promise<void> {
         try {
-            this.workerProxy.terminate();
+            this.workerManager.terminate();
             await this.initializeWorker();
         } catch (error) {
             console.error("Version Control: Error restarting worker", error);
@@ -236,16 +235,12 @@ export class DiffManager extends Component {
     }
 
     public getWorkerStatus(): WorkerStatus {
-        const stats = this.workerHealthMonitor.getStats();
+        const status = this.workerManager.getStatus();
         return {
-            isInitialized: this.workerProxy.isInitialized(),
-            isActive: this.workerProxy.isActive(),
-            isHealthy: stats.isHealthy,
-            healthStats: {
-                consecutiveErrors: stats.consecutiveErrors,
-                operationCount: stats.operationCount,
-                averageOperationTime: stats.averageOperationTime
-            }
+            isInitialized: status.isInitialized,
+            isActive: status.isActive,
+            isHealthy: status.isHealthy,
+            healthStats: status.healthStats,
         };
     }
 
