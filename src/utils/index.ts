@@ -11,15 +11,16 @@
  * - **file**: File-related utilities (path manipulation, extension handling)
  * - **id**: ID generation utilities (UUID, version IDs)
  * - **lruCache**: LRU cache implementation for caching
- * - **network**: Network utilities (retry logic, fetch helpers)
+ * - **executeWithRetry**: retry utilities (retry logic)
  * - **pathFilter**: Path filtering for include/exclude patterns
  * - **textStats**: Text statistics calculation (word count, character count)
  * - **versions**: Version comparison and sorting utilities
+ * - **frontmatter**: Frontmatter manipulation utilities
  *
  * ## Usage
  *
  * ```typescript
- * import { id, file, lruCache } from '@/utils';
+ * import { id, file, lruCache, frontmatter } from '@/utils';
  *
  * // Generate a unique ID
  * const noteId = id.generateNoteId();
@@ -27,8 +28,8 @@
  * // Check file extension
  * const isMarkdown = file.isMarkdownFile(filePath);
  *
- * // Create LRU cache
- * const cache = new lruCache.LruCache<string, DiffResult>(100);
+ * // Update frontmatter
+ * await frontmatter.updateFrontmatter(app, file, { tags: ['new-tag'] });
  * ```
  */
 
@@ -38,11 +39,19 @@
 
 export * as file from './file';
 export * as id from './id';
-export * as lruCache from './lru-cache';
-export * as network from './network';
+export * as lruCache from './LruCache';
+export * as executeWithRetry from './retry';
 export * as pathFilter from './path-filter/index';
 export * as textStats from './text-stats/index';
 export * as versions from './versions';
+export * as frontmatter from './frontmatter';
+
+// ============================================================================
+// DIRECT EXPORTS
+// ============================================================================
+
+export { LruCache } from './LruCache';
+export type { LruCacheOptions, CacheStats } from './LruCache';
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -58,16 +67,6 @@ export interface ICache<K, V> {
     delete(key: K): boolean;
     clear(): void;
     readonly size: number;
-}
-
-/**
- * Configuration for retry operations.
- */
-export interface RetryConfig {
-    maxRetries: number;
-    baseDelay: number;
-    maxDelay: number;
-    backoffMultiplier: number;
 }
 
 /**
