@@ -25,7 +25,7 @@ export const AutoRegisterSettings: React.FC<AutoRegisterSettingsProps> = memo(({
     const dispatch = useAppDispatch();
     
     // We read from the global settings directly since this is a global config
-    const settings = useAppSelector(state => state.settings[settingKey]);
+    const settings = useAppSelector(state => state.app.settings[settingKey]);
     const autoRegisterNotes = settings.autoRegisterNotes;
     const pathFilters = settings.pathFilters;
 

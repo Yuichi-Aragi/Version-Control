@@ -5,48 +5,6 @@
  * Each control handles a particular setting or group of related settings.
  *
  * @module ui/components/settings/setting-controls
- *
- * ## Components
- *
- * ### Setting Groups
- * - **AutoCleanupSettings**: Auto-cleanup configuration controls
- * - **AutoRegisterSettings**: Auto-register new notes controls
- * - **AutoSaveSettings**: Auto-save configuration controls
- * - **WatchModeSettings**: Watch mode interval controls
- *
- * ### Individual Controls
- * - **IsGlobalSetting**: Global/local settings toggle
- * - **MaxVersionsSetting**: Maximum versions slider
- * - **MinLinesControl**: Minimum lines threshold control
- * - **NoteSettingsControls**: Note-specific settings container
- *
- * ### Text Statistics
- * - **WordCountSettings**: Word count threshold setting
- * - **CharacterCountSettings**: Character count threshold setting
- * - **LineCountSettings**: Line count threshold setting
- *
- * ### Toggle Settings (Factory-created)
- * - **EnableNamingSetting**: Enable version naming toggle
- * - **EnableDescriptionSetting**: Enable description toggle
- * - **ShowDescriptionInListSetting**: Show description in list toggle
- * - **ListViewSetting**: List view mode toggle
- * - **RelativeTimestampSetting**: Relative timestamp toggle
- * - **RenderMarkdownSetting**: Render markdown toggle
- *
- * ## Factories
- *
- * - **createToggleSliderSetting**: Creates toggle with slider setting
- * - **createToggleSliderWithMinLinesSetting**: Creates toggle with slider and min lines
- *
- * ## Usage
- *
- * ```typescript
- * import {
- *   AutoSaveSettings,
- *   MaxVersionsSetting,
- *   WatchModeSettings
- * } from '@/ui/components/settings/setting-controls';
- * ```
  */
 
 // ============================================================================
@@ -66,6 +24,7 @@ export { IsGlobalSetting } from './IsGlobalSetting';
 export { MaxVersionsSetting } from './MaxVersionsSetting';
 export { MinLinesControl } from './MinLinesControl';
 export { NoteSettingsControls } from './NoteSettingsControls';
+export { DiskPersistenceSettings } from './DiskPersistenceSettings';
 
 // ============================================================================
 // TEXT STATISTICS SETTINGS

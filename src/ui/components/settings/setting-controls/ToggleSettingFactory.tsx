@@ -9,13 +9,12 @@ type TextResolver = string | ((mode: ViewMode) => string);
 const resolveText = (text: TextResolver, mode: ViewMode) => 
     typeof text === 'function' ? text(mode) : text;
 
-const createToggleSetting = (name: TextResolver, desc: TextResolver, settingKey: keyof HistorySettings) => 
+export const createToggleSetting = (name: TextResolver, desc: TextResolver, settingKey: keyof HistorySettings) => 
     memo(({ disabled }: { disabled: boolean }) => {
         const dispatch = useAppDispatch();
-        // Read from effectiveSettings and viewMode
         const { isEnabled, viewMode } = useAppSelector(state => ({
-            isEnabled: !!state.effectiveSettings[settingKey],
-            viewMode: state.viewMode
+            isEnabled: !!state.app.effectiveSettings[settingKey],
+            viewMode: state.app.viewMode
         }));
         
         const handleToggle = useCallback((val: boolean) => {

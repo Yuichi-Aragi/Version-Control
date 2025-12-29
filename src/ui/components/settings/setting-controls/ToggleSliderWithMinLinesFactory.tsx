@@ -36,9 +36,9 @@ export const createToggleSliderWithMinLinesSetting = (config: ToggleSliderWithMi
         const dispatch = useAppDispatch();
         
         const { enabled, value, viewMode } = useAppSelector(state => ({
-            enabled: !!state.effectiveSettings[config.toggleKey],
-            value: state.effectiveSettings[config.sliderKey] as number,
-            viewMode: state.viewMode,
+            enabled: !!state.app.effectiveSettings[config.toggleKey],
+            value: state.app.effectiveSettings[config.sliderKey] as number,
+            viewMode: state.app.viewMode,
         }), isEqual);
         
         const handleToggle = useCallback((v: boolean) => {

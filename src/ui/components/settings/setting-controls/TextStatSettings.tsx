@@ -23,9 +23,9 @@ const createTextStatSetting = (config: TextStatSettingConfig) =>
     memo(({ disabled }: { disabled: boolean }) => {
         const dispatch = useAppDispatch();
         const { isEnabled, includeSyntax, viewMode } = useAppSelector(state => ({
-            isEnabled: !!state.effectiveSettings[config.enableKey],
-            includeSyntax: !!state.effectiveSettings[config.includeSyntaxKey],
-            viewMode: state.viewMode,
+            isEnabled: !!state.app.effectiveSettings[config.enableKey],
+            includeSyntax: !!state.app.effectiveSettings[config.includeSyntaxKey],
+            viewMode: state.app.viewMode,
         }), isEqual);
 
         const handleEnableToggle = useCallback((val: boolean) => {
@@ -74,8 +74,8 @@ export const WordCountSettings = createTextStatSetting({
     includeSyntaxKey: 'includeMdSyntaxInWordCount',
     enableName: 'Enable word count',
     enableDesc: (mode) => `Display the word count for each ${mode === 'versions' ? 'version' : 'edit'}.`,
-    includeSyntaxName: 'Include Markdown syntax',
-    includeSyntaxDesc: 'If enabled, the word count will include Markdown characters (e.g., "**", "#").',
+    includeSyntaxName: 'Include markdown syntax',
+    includeSyntaxDesc: 'If enabled, the word count will include markdown characters (e.g., "**", "#").',
 });
 WordCountSettings.displayName = 'WordCountSettings';
 
@@ -84,8 +84,8 @@ export const CharacterCountSettings = createTextStatSetting({
     includeSyntaxKey: 'includeMdSyntaxInCharacterCount',
     enableName: 'Enable character count',
     enableDesc: (mode) => `Display the character count for each ${mode === 'versions' ? 'version' : 'edit'}.`,
-    includeSyntaxName: 'Include Markdown syntax',
-    includeSyntaxDesc: 'If enabled, the character count will include Markdown characters.',
+    includeSyntaxName: 'Include markdown syntax',
+    includeSyntaxDesc: 'If enabled, the character count will include markdown characters.',
 });
 CharacterCountSettings.displayName = 'CharacterCountSettings';
 
@@ -95,6 +95,6 @@ export const LineCountSettings = createTextStatSetting({
     enableName: 'Enable line count',
     enableDesc: (mode) => `Display the line count for each ${mode === 'versions' ? 'version' : 'edit'}.`,
     includeSyntaxName: 'Include empty lines',
-    includeSyntaxDesc: 'If enabled, the line count will be based on the raw text. If disabled, it will count lines in a Markdown-stripped version, which may be fewer.',
+    includeSyntaxDesc: 'If enabled, the line count will be based on the raw text. If disabled, it will count lines in a markdown-stripped version, which may be fewer.',
 });
 LineCountSettings.displayName = 'LineCountSettings';
