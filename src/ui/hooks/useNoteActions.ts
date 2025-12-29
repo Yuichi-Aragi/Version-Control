@@ -4,12 +4,12 @@ import { thunks } from '@/state';
 
 export const useNoteActions = () => {
     const dispatch = useAppDispatch();
-    const { file, noteId, history, editHistory, viewMode } = useAppSelector(state => ({
-        file: state.file,
-        noteId: state.noteId,
-        history: state.history,
-        editHistory: state.editHistory,
-        viewMode: state.viewMode,
+    const { file, noteId, historyCount, editHistoryCount, viewMode } = useAppSelector(state => ({
+        file: state.app.file,
+        noteId: state.app.noteId,
+        historyCount: state.app.history.ids.length,
+        editHistoryCount: state.app.editHistory.ids.length,
+        viewMode: state.app.viewMode,
     }));
 
     const handleRefresh = useCallback(() => {
@@ -27,11 +27,11 @@ export const useNoteActions = () => {
     }, [dispatch, noteId]);
     
     const handleDeleteAll = useCallback(() => {
-        const hasItems = viewMode === 'versions' ? history.length > 0 : editHistory.length > 0;
+        const hasItems = viewMode === 'versions' ? historyCount > 0 : editHistoryCount > 0;
         if (noteId && hasItems) {
             dispatch(thunks.requestDeleteAll());
         }
-    }, [dispatch, noteId, history.length, editHistory.length, viewMode]);
+    }, [dispatch, noteId, historyCount, editHistoryCount, viewMode]);
     
     const handleViewChangelog = useCallback(() => {
         dispatch(thunks.showChangelogPanel({ forceRefresh: true }));
@@ -45,7 +45,7 @@ export const useNoteActions = () => {
         }
     }, []);
 
-    const hasItems = viewMode === 'versions' ? history.length > 0 : editHistory.length > 0;
+    const hasItems = viewMode === 'versions' ? historyCount > 0 : editHistoryCount > 0;
     const deleteLabel = viewMode === 'versions' ? 'Delete all versions' : 'Delete all edits';
 
     return {
