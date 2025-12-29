@@ -1,10 +1,8 @@
 import { App, TFile, TFolder, normalizePath } from "obsidian"; 
-import { injectable, inject } from 'inversify';
 import * as v from "valibot";
 import { VersionManager, EditHistoryManager, CompressionManager } from '@/core';
 import type { VersionData, VersionHistoryEntry } from '@/types';
 import { VersionDataSchema } from '@/schemas';
-import { TYPES } from '@/types/inversify.types';
 import { customSanitizeFileName } from '@/utils/file';
 
 /**
@@ -12,16 +10,15 @@ import { customSanitizeFileName } from '@/utils/file';
  * formatting, and file writing. This class is a pure service and does not
  * create any UI elements.
  */
-@injectable()
 export class ExportManager {
     private readonly MAX_CONCURRENT_FETCHES = 10; // Prevents resource exhaustion
     private readonly MAX_EXPORT_SIZE_BYTES = 100 * 1024 * 1024; // 100MB safety cap
 
     constructor(
-        @inject(TYPES.App) private readonly app: App, 
-        @inject(TYPES.VersionManager) private readonly versionManager: VersionManager,
-        @inject(TYPES.EditHistoryManager) private readonly editHistoryManager: EditHistoryManager,
-        @inject(TYPES.CompressionManager) private readonly compressionManager: CompressionManager
+        private readonly app: App, 
+        private readonly versionManager: VersionManager,
+        private readonly editHistoryManager: EditHistoryManager,
+        private readonly compressionManager: CompressionManager
     ) {}
 
     /**
@@ -182,7 +179,7 @@ export class ExportManager {
                         const name = v.name ?? '';
                         const escapedName = name.replace(/"/g, '\\"');
                         return `---\nversion_id: ${v.id}\nversion_number: ${v.versionNumber}\ntimestamp: "${v.timestamp}"\nname: "${escapedName}"\nsize_bytes: ${v.size}\n---\n\n${v.content}`;
-                    }).join(validatedVersions.length > 1 ? '\n\n<!-- --- VERSION SEPARATOR --- -->\n\n' : '');
+                    }).join(validatedVersions.length > 1 ? '\n\n<!-- --- VERSION SEPARATOR --->\n\n' : '');
                     break;
                 }
                 case 'json': {

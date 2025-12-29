@@ -41,14 +41,3 @@ export { DiffManager } from './diff-manager';
 export { ExportManager } from './export-manager';
 export { QueueService } from './queue-service';
 export { UIService } from './ui-service';
-
-// ============================================================================
-// INTERFACE RE-EXPORTS
-// ============================================================================
-
-export type {
-    IDiffManager,
-    IExportManager,
-    IQueueService,
-    IUIService,
-} from '@/types/interfaces';

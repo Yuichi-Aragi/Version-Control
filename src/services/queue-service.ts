@@ -1,92 +1,118 @@
-import { injectable } from 'inversify';
 import PQueue from 'p-queue';
+import { TaskPriority, type TaskOptions } from '@/types';
 
 /**
- * A service that manages and provides access to keyed `p-queue` instances.
- * This ensures that operations on a specific resource (like a file or a note ID)
- * are executed sequentially, preventing race conditions.
+ * A centralized scheduler for managing concurrent operations across the application.
+ * 
+ * FEATURES:
+ * - Resource-based Locking: Ensures sequential execution for specific resources (e.g., Note IDs).
+ * - Priority Scheduling: Critical tasks preempt background tasks.
+ * - Deadlock Prevention: Automatically sorts multi-resource locks to prevent circular dependencies.
+ * - Scalability: Uses lightweight `p-queue` instances created on demand.
  */
-@injectable()
+
 export class QueueService {
-    private fileQueues = new Map<string, PQueue>();
+    private queues = new Map<string, PQueue>();
 
     /**
-     * Retrieves or creates a queue for a specific key.
-     * All queues created through this service have a concurrency of 1 to ensure
-     * sequential execution of tasks for the same key.
-     * @param key A unique key identifying the resource (e.g., a file path or a note ID).
-     * @returns A `PQueue` instance for the given key.
+     * Retrieves or creates a priority queue for a specific scope (key).
+     * Each queue has a concurrency of 1 to ensure sequential execution within that scope.
      */
     private getQueue(key: string): PQueue {
-        if (!this.fileQueues.has(key)) {
-            const newQueue = new PQueue({ concurrency: 1 });
-            this.fileQueues.set(key, newQueue);
+        if (!this.queues.has(key)) {
+            // Concurrency 1 ensures strict sequentiality per resource.
+            // PQueue handles the priority ordering internally.
+            const newQueue = new PQueue({ concurrency: 1, autoStart: true });
+            
+            // Cleanup empty queues to prevent memory leaks? 
+            // PQueue is lightweight, but we could implement idle cleanup if needed.
+            // For now, we keep them to avoid overhead of recreation during bursts.
+            this.queues.set(key, newQueue);
         }
-        return this.fileQueues.get(key)!;
+        return this.queues.get(key)!;
     }
 
     /**
-     * Adds a task to the queue for a specific key. The task will be executed
-     * after all previously added tasks for the same key have completed.
-     * @param key The key identifying the queue.
-     * @param task A function that returns a value or a promise to be executed.
-     * @returns A promise that resolves with the result of the task.
+     * Schedules a task to run with exclusive access to the specified scope(s).
+     * 
+     * @param scopes A single key or array of keys representing the resources to lock.
+     * @param task The async function to execute.
+     * @param options Scheduling options including priority.
+     * @returns The result of the task.
+     */
+    public async add<T>(
+        scopes: string | string[], 
+        task: () => Promise<T> | T, 
+        options: TaskOptions = {}
+    ): Promise<T> {
+        const priority = options.priority ?? TaskPriority.NORMAL;
+        const keys = Array.isArray(scopes) ? scopes : [scopes];
+        
+        // DEADLOCK PREVENTION:
+        // Always acquire locks in deterministic (lexicographical) order.
+        // This prevents cycle formation (e.g., A waiting for B while B waits for A).
+        keys.sort();
+
+        // Recursive function to acquire locks sequentially
+        const executeWithLocks = async (index: number): Promise<T> => {
+            if (index >= keys.length) {
+                // All locks acquired, execute the actual task
+                return await task();
+            }
+
+            const currentKey = keys[index]!;
+            const queue = this.getQueue(currentKey);
+
+            // Add the next step to the current queue.
+            // We use the priority to ensure this task jumps ahead of lower priority tasks
+            // waiting for this resource.
+            return queue.add(
+                () => executeWithLocks(index + 1), 
+                { priority }
+            ) as Promise<T>;
+        };
+
+        return executeWithLocks(0);
+    }
+
+    /**
+     * Legacy alias for `add` to maintain compatibility during refactoring steps,
+     * but enhanced to use priorities.
+     * @deprecated Use `add` with explicit priority instead.
      */
     public enqueue<T>(key: string, task: () => Promise<T> | T): Promise<T> {
-        const queue = this.getQueue(key);
-        return new Promise<T>((resolve, reject) => {
-            // We add a task to the queue. We don't use the return value of `add` itself,
-            // as we will resolve/reject our own promise from within the task's execution.
-            queue.add(async () => {
-                try {
-                    // Await the original task. This correctly handles both plain values and promises.
-                    const result = await task();
-                    // If the task succeeds, resolve our outer promise with the result.
-                    resolve(result);
-                } catch (error) {
-                    // If the task throws an error, reject our outer promise.
-                    reject(error);
-                }
-            }).catch(error => {
-                // This secondary catch handles errors related to the queue operation itself,
-                // such as the queue being cleared before the task can run.
-                reject(error);
-            });
-        });
+        return this.add(key, task, { priority: TaskPriority.NORMAL });
     }
 
     /**
-     * Clears the queue for a specific key and stops any pending tasks.
-     * This is useful when a resource is deleted and its associated queue is no longer needed.
-     * @param key The key of the queue to clear.
+     * Clears the queue for a specific key.
+     * WARNING: This aborts pending tasks for this resource. Use with caution.
      */
     public clear(key: string): void {
-        if (this.fileQueues.has(key)) {
-            const queue = this.fileQueues.get(key)!;
+        if (this.queues.has(key)) {
+            const queue = this.queues.get(key)!;
             queue.clear();
-            this.fileQueues.delete(key);
+            this.queues.delete(key);
         }
     }
 
     /**
-     * Clears all managed queues and stops any pending tasks.
-     * This is a critical cleanup step during plugin unload to prevent orphaned operations.
+     * Clears all queues.
+     * Used during plugin unload.
      */
     public clearAll(): void {
-        for (const queue of this.fileQueues.values()) {
+        for (const queue of this.queues.values()) {
             queue.clear();
         }
-        this.fileQueues.clear();
+        this.queues.clear();
     }
 
     /**
-     * Waits for a specific queue to become idle (empty and no pending tasks).
-     * @param key The key of the queue to wait for.
-     * @returns A promise that resolves when the queue is idle.
+     * Waits for a specific queue to become idle.
      */
     public async onIdle(key: string): Promise<void> {
-        if (this.fileQueues.has(key)) {
-            const queue = this.fileQueues.get(key)!;
+        if (this.queues.has(key)) {
+            const queue = this.queues.get(key)!;
             await queue.onIdle();
         }
     }

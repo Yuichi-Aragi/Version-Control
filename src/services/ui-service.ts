@@ -1,18 +1,15 @@
 import { App, Notice, Component } from 'obsidian';
-import { injectable, inject } from 'inversify';
 import type { AppStore } from '@/state';
-import { TYPES } from '@/types/inversify.types';
 
 /**
  * A dedicated service for managing all UI interactions, such as notices,
  * modals, and context menus. This decouples the business logic (thunks)
  * from the Obsidian-specific UI APIs.
  */
-@injectable()
 export class UIService extends Component {
     constructor(
-        @inject(TYPES.App) _app: App, 
-        @inject(TYPES.Store) _store: AppStore
+        _app: App, 
+        _store: AppStore
     ) {
         super();
     }
