@@ -8,7 +8,7 @@ import {
 
 /**
  * Schema for validating the database folder path.
- * Enforces security rules: no traversal, no reserved names, valid characters.
+ * Enforces strict security rules: no traversal, no reserved names, valid characters for all OSs.
  */
 export const DatabasePathSchema = v.pipe(
     v.string(),
@@ -19,9 +19,15 @@ export const DatabasePathSchema = v.pipe(
     v.check((val) => !val.endsWith('/'), "Path cannot end with a slash"),
     v.check((val) => !REGEX_PATTERNS.PATH_TRAVERSAL.test(val), "Path traversal (..) is not allowed"),
     v.check((val) => {
+        // Strict character check for the entire path string first (excluding separators)
+        // We allow forward slashes as separators, but no other restricted chars
+        const charsToCheck = val.replace(/\//g, '');
+        return !REGEX_PATTERNS.INVALID_FILENAME_CHARS.test(charsToCheck);
+    }, "Path contains invalid characters (<>:\"|?*\\)"),
+    v.check((val) => {
         const segmentValidation = validatePathSegments(val);
         return segmentValidation.isValid;
-    }, "Path contains invalid segments")
+    }, "Path contains invalid segments or reserved names")
 );
 
 /**
