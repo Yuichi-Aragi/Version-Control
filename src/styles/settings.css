@@ -36,10 +36,22 @@
     /* Ensure header has a solid background to prevent transparency issues */
     background-color: var(--background-secondary);
 }
+
+.v-settings-header-title-group {
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-2);
+}
+
 .v-settings-panel-header h3 {
     margin: 0;
     font-size: var(--font-ui-medium);
     font-weight: var(--font-semibold);
+}
+
+.v-settings-badge {
+    height: 20px;
+    display: block;
 }
 
 .v-settings-panel-content-wrapper {

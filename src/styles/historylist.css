@@ -37,13 +37,22 @@
 
 .v-history-list {
     flex-grow: 1;
-    overflow-y: auto;
+    overflow: hidden; /* Changed from overflow-y: auto to prevent double scrollbars with Virtuoso */
     min-height: 0;
     position: relative;
     padding-left: 0;
     padding-right: 0;
     height: 100%; /* Needed for Virtuoso */
     padding-top: var(--size-4-2);
+}
+
+/* NEW: Scrollable container for manual content (e.g. loading skeletons) */
+.v-history-manual-scroll {
+    height: 100%;
+    overflow-y: auto;
+    padding-left: 0;
+    padding-right: 0;
+    /* Inherit padding-top behavior from container if needed, or handle internally */
 }
 
 /* Wrapper for card-view items */
@@ -344,7 +353,8 @@
 
 
 /* --- Skeleton Styles for History List --- */
-.v-history-list .v-history-entry.is-skeleton {
+.v-history-list .v-history-entry.is-skeleton,
+.v-history-manual-scroll .v-history-entry.is-skeleton {
     position: static;
     transform: none;
     animation: none; /* No entry animation for skeletons */
