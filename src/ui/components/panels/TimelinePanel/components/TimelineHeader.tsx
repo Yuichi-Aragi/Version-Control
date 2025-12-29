@@ -16,8 +16,8 @@ export const TimelineHeader: FC<TimelineHeaderProps> = ({
 }) => {
     const dispatch = useAppDispatch();
     const { isProcessing, isRenaming } = useAppSelector(state => ({
-        isProcessing: state.isProcessing,
-        isRenaming: state.isRenaming,
+        isProcessing: state.app.isProcessing,
+        isRenaming: state.app.isRenaming,
     }));
 
     const isBusy = isProcessing || isRenaming;
