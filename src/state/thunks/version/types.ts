@@ -1,4 +1,4 @@
-import type { VersionControlSettings } from '@/types';
+import type { VersionControlSettings, SaveVersionResult } from '@/types';
 
 /**
  * Type definitions for version thunk payloads and related interfaces.
@@ -8,6 +8,16 @@ import type { VersionControlSettings } from '@/types';
  * Options for saving a new version.
  */
 export interface SaveVersionOptions {
+    /**
+     * Optional name for the version.
+     */
+    name?: string;
+
+    /**
+     * Whether to force save even if content hasn't changed (e.g. for initial version).
+     */
+    force?: boolean;
+
     /**
      * Whether this is an automatic save.
      */
@@ -34,3 +44,5 @@ export interface UpdateVersionDetailsPayload {
      */
     description: string;
 }
+
+export type { SaveVersionResult };
