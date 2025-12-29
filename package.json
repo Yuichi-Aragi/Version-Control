@@ -29,7 +29,6 @@
     "diff": "^8.0.2",
     "fflate": "^0.8.2",
     "immer": "^11.0.1",
-    "inversify": "^7.10.6",
     "p-queue": "^9.0.1",
     "radix-ui": "^1.4.3",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -38,13 +37,13 @@
     "react-hook-form": "^7.68.0",
     "react-redux": "^9.2.0",
     "react-virtuoso": "^4.17.0",
-    "reflect-metadata": "^0.2.2",
     "semver": "^7.7.3",
     "es-toolkit": "^1.42.0",
     "valibot": "^1.2.0",
     "@uiw/react-heat-map": "^2.3.3",
     "diff-match-patch": "^1.0.5",
-    "framer-motion": "^12.23.26"
+    "framer-motion": "^12.23.26",
+    "yaml": "^2.8.2"
   },
   "devDependencies": {
     "@types/node": "^25.0.0",
