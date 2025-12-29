@@ -1,12 +1,13 @@
 import { moment } from 'obsidian';
 import { orderBy } from 'es-toolkit';
 import clsx from 'clsx';
-import { type FC, useEffect, useRef, useState, useTransition, memo } from 'react';
+import { type FC, useEffect, useMemo, memo } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppSelector } from '@/ui/hooks';
 import { AppStatus } from '@/state';
-import type { VersionHistoryEntry as VersionHistoryEntryType, ViewMode } from '@/types';
+import { selectAllHistory, selectAllEditHistory } from '@/state/appSlice';
+import type { VersionHistoryEntry as VersionHistoryEntryType } from '@/types';
 import { formatFileSize } from '@/ui/utils/dom';
 import { HistoryEntry } from '@/ui/components';
 import { Icon } from '@/ui/components';
@@ -96,172 +97,125 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
         panel, 
         settings, // Effective settings
     } = useAppSelector(state => ({
-        status: state.status,
-        history: state.history ?? [],
-        editHistory: state.editHistory ?? [],
-        viewMode: state.viewMode,
-        searchQuery: state.searchQuery ?? '',
-        isSearchCaseSensitive: state.isSearchCaseSensitive,
-        sortOrder: state.sortOrder ?? { property: 'versionNumber', direction: 'desc' },
-        panel: state.panel,
-        settings: state.effectiveSettings,
+        status: state.app.status,
+        history: selectAllHistory(state),
+        editHistory: selectAllEditHistory(state),
+        viewMode: state.app.viewMode,
+        searchQuery: state.app.searchQuery ?? '',
+        isSearchCaseSensitive: state.app.isSearchCaseSensitive,
+        sortOrder: state.app.sortOrder ?? { property: 'versionNumber', direction: 'desc' },
+        panel: state.app.panel,
+        settings: state.app.effectiveSettings,
     }));
-
-    const [processedHistory, setProcessedHistory] = useState<VersionHistoryEntryType[]>([]);
-    // Track the viewMode for which the current processedHistory is valid
-    const [processedMode, setProcessedMode] = useState<ViewMode>(viewMode);
-    // Track initial load to prevent flash of empty state before first processing
-    const [isFirstLoad, setIsFirstLoad] = useState(true);
-    const [isPending, startTransition] = useTransition();
 
     // Determine active list based on mode
     const activeList = viewMode === 'versions' ? history : editHistory;
     // Use isListView from effective settings
     const isListView = settings.isListView;
 
-    const isMountedRef = useRef<boolean>(false);
-    useEffect(() => {
-        isMountedRef.current = true;
-        return () => {
-            isMountedRef.current = false;
-        };
-    }, []);
+    // Memoize the processed history to ensure synchronous updates with state changes.
+    // This replaces the previous async useEffect/useState logic which caused stale data issues.
+    const processedHistory = useMemo(() => {
+        // If loading, we don't process anything, the render logic will show skeletons.
+        if (status !== AppStatus.READY) return [];
 
-    // Strict reset when status changes to LOADING to prevent stale data
-    useEffect(() => {
-        if (status === AppStatus.LOADING) {
-            setProcessedHistory([]);
-            onCountChange(0, 0);
-            setIsFirstLoad(true);
+        const src = Array.isArray(activeList) ? activeList : [];
+        const trimmedQuery = String(searchQuery ?? '').trim();
+
+        if (trimmedQuery === '') {
+            const iteratee = (v: VersionHistoryEntryType): string | number => {
+                const prop = sortOrder?.property ?? 'versionNumber';
+                switch (prop) {
+                    case 'name':
+                        return (String(v.name ?? '').toLowerCase()) || '\uffff';
+                    case 'size':
+                        return typeof v.size === 'number' ? v.size : 0;
+                    case 'timestamp': {
+                        const ms = (() => {
+                            const t = v.timestamp;
+                            const parsed = Number(new Date(String(t)));
+                            return Number.isFinite(parsed) ? parsed : 0;
+                        })();
+                        return ms;
+                    }
+                    case 'versionNumber':
+                    default:
+                        const num = Number((v as any).versionNumber);
+                        return Number.isFinite(num) ? num : 0;
+                }
+            };
+
+            const dir = sortOrder?.direction === 'asc' ? 'asc' : 'desc';
+            return orderBy(src, [iteratee], [dir]);
         }
-    }, [status, onCountChange]);
 
-    useEffect(() => {
-        if (status !== AppStatus.READY) {
-            if (status !== AppStatus.LOADING) {
-                setProcessedHistory([]);
-                onCountChange(0, activeList.length);
-            }
-            return;
-        }
+        // Search Logic
+        const query = isSearchCaseSensitive ? trimmedQuery : trimmedQuery.toLowerCase();
 
-        let isCancelled = false;
+        // Calculate score for each item
+        const scored = src.map(v => {
+            let score = 0;
+            const versionId = `V${v.versionNumber ?? ''}`;
+            const name = String(v.name ?? '');
+            const description = String(v.description ?? '');
+            
+            const size = formatFileSize(typeof v.size === 'number' ? v.size : 0);
+            
+            const timestampStr = settings.useRelativeTimestamps 
+                ? (() => { try { return (moment as any)(v.timestamp).fromNow(true); } catch { return ''; } })()
+                : safeFormatTimestamp(v.timestamp, 'LLLL');
 
-        startTransition(() => {
-            try {
-                const src = Array.isArray(activeList) ? activeList : [];
-                const trimmedQuery = String(searchQuery ?? '').trim();
+            const wordCount = settings.enableWordCount 
+                ? String(settings.includeMdSyntaxInWordCount ? v.wordCountWithMd : v.wordCount) 
+                : '';
+            const charCount = settings.enableCharacterCount
+                ? String(settings.includeMdSyntaxInCharacterCount ? v.charCountWithMd : v.charCount)
+                : '';
+            const lineCount = settings.enableLineCount
+                ? String(settings.includeMdSyntaxInLineCount ? v.lineCount : v.lineCountWithoutMd)
+                : '';
 
-                let result = src;
+            const check = (val: string) => isSearchCaseSensitive ? val : val.toLowerCase();
+            const q = query;
 
-                if (trimmedQuery !== '') {
-                    const query = isSearchCaseSensitive ? trimmedQuery : trimmedQuery.toLowerCase();
+            if (check(versionId) === q) score += 100;
+            else if (check(versionId).includes(q)) score += 80;
 
-                    // Calculate score for each item
-                    const scored = src.map(v => {
-                        let score = 0;
-                        const versionId = `V${v.versionNumber ?? ''}`;
-                        const name = String(v.name ?? '');
-                        const description = String(v.description ?? '');
-                        
-                        const size = formatFileSize(typeof v.size === 'number' ? v.size : 0);
-                        
-                        const timestampStr = settings.useRelativeTimestamps 
-                            ? (() => { try { return (moment as any)(v.timestamp).fromNow(true); } catch { return ''; } })()
-                            : safeFormatTimestamp(v.timestamp, 'LLLL');
+            if (check(name).startsWith(q)) score += 60;
+            else if (check(name).includes(q)) score += 50;
 
-                        const wordCount = settings.enableWordCount 
-                            ? String(settings.includeMdSyntaxInWordCount ? v.wordCountWithMd : v.wordCount) 
-                            : '';
-                        const charCount = settings.enableCharacterCount
-                            ? String(settings.includeMdSyntaxInCharacterCount ? v.charCountWithMd : v.charCount)
-                            : '';
-                        const lineCount = settings.enableLineCount
-                            ? String(settings.includeMdSyntaxInLineCount ? v.lineCount : v.lineCountWithoutMd)
-                            : '';
+            if (check(description).includes(q)) score += 40;
 
-                        const check = (val: string) => isSearchCaseSensitive ? val : val.toLowerCase();
-                        const q = query;
+            if (check(size).includes(q)) score += 20;
+            if (check(timestampStr).includes(q)) score += 20;
+            
+            if (wordCount && check(wordCount) === q) score += 15;
+            if (charCount && check(charCount) === q) score += 15;
+            if (lineCount && check(lineCount) === q) score += 15;
 
-                        if (check(versionId) === q) score += 100;
-                        else if (check(versionId).includes(q)) score += 80;
-
-                        if (check(name).startsWith(q)) score += 60;
-                        else if (check(name).includes(q)) score += 50;
-
-                        if (check(description).includes(q)) score += 40;
-
-                        if (check(size).includes(q)) score += 20;
-                        if (check(timestampStr).includes(q)) score += 20;
-                        
-                        if (wordCount && check(wordCount) === q) score += 15;
-                        if (charCount && check(charCount) === q) score += 15;
-                        if (lineCount && check(lineCount) === q) score += 15;
-
-                        return { version: v, score };
-                    });
-
-                    const filteredScored = scored.filter(item => item.score > 0);
-                    const sortedByScore = orderBy(filteredScored, ['score'], ['desc']);
-                    result = sortedByScore.map(item => item.version);
-
-                } else {
-                    const iteratee = (v: VersionHistoryEntryType): string | number => {
-                        const prop = sortOrder?.property ?? 'versionNumber';
-                        switch (prop) {
-                            case 'name':
-                                return (String(v.name ?? '').toLowerCase()) || '\uffff';
-                            case 'size':
-                                return typeof v.size === 'number' ? v.size : 0;
-                            case 'timestamp': {
-                                const ms = (() => {
-                                    const t = v.timestamp;
-                                    const parsed = Number(new Date(String(t)));
-                                    return Number.isFinite(parsed) ? parsed : 0;
-                                })();
-                                return ms;
-                            }
-                            case 'versionNumber':
-                            default:
-                                const num = Number((v as any).versionNumber);
-                                return Number.isFinite(num) ? num : 0;
-                        }
-                    };
-
-                    const dir = sortOrder?.direction === 'asc' ? 'asc' : 'desc';
-                    result = orderBy(src, [iteratee], [dir]);
-                }
-
-                if (isMountedRef.current && !isCancelled) {
-                    setProcessedHistory(result);
-                    setProcessedMode(viewMode);
-                    setIsFirstLoad(false);
-                    onCountChange(result.length, src.length);
-                }
-            } catch (err) {
-                console.error('HistoryList: failed to process history:', err);
-                if (isMountedRef.current && !isCancelled) {
-                    setProcessedHistory([]);
-                    setProcessedMode(viewMode);
-                    setIsFirstLoad(false);
-                    onCountChange(0, activeList.length);
-                }
-            }
+            return { version: v, score };
         });
 
-        return () => {
-            isCancelled = true;
-        };
-    }, [status, activeList, searchQuery, isSearchCaseSensitive, sortOrder, startTransition, onCountChange, settings, viewMode]);
+        const filteredScored = scored.filter(item => item.score > 0);
+        const sortedByScore = orderBy(filteredScored, ['score'], ['desc']);
+        return sortedByScore.map(item => item.version);
 
-    const isDataStale = viewMode !== processedMode;
-    const total = Array.isArray(activeList) ? activeList.length : 0;
+    }, [activeList, status, searchQuery, isSearchCaseSensitive, sortOrder, settings]);
+
+    // Notify parent of count changes
+    useEffect(() => {
+        const total = Array.isArray(activeList) ? activeList.length : 0;
+        const filtered = processedHistory.length;
+        onCountChange(filtered, total);
+    }, [processedHistory.length, activeList, onCountChange]);
 
     // Unique key to force Virtuoso remount on layout changes
     const listKey = `list-${viewMode}-${isListView ? 'list' : 'card'}`;
+    const total = Array.isArray(activeList) ? activeList.length : 0;
 
     const renderContent = () => {
-        if (status === AppStatus.LOADING || isDataStale || (isFirstLoad && total > 0)) {
+        // STRICT: If loading, show skeletons.
+        if (status === AppStatus.LOADING) {
             return (
                 <motion.div 
                     key="loading"
@@ -269,7 +223,8 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.15 }}
-                    className={clsx('v-history-list', { 'is-list-view': isListView })}
+                    // Use a separate scrollable container for manual loading state to avoid nesting .v-history-list
+                    className={clsx('v-history-manual-scroll', { 'is-list-view': isListView })}
                 >
                     {Array.from({ length: 8 }).map((_, i) => (
                         <div key={i} className={isListView ? 'v-history-item-list-wrapper' : 'v-history-item-card-wrapper'}>
@@ -295,7 +250,7 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
             );
         }
         
-        if ((Array.isArray(processedHistory) ? processedHistory.length : 0) === 0 && String(searchQuery ?? '').trim()) {
+        if (processedHistory.length === 0 && String(searchQuery ?? '').trim()) {
             return (
                 <EmptyState 
                     key="no-results" 
@@ -319,7 +274,7 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
                 <Virtuoso
                     style={{ height: '100%' }}
                     className="v-virtuoso-container"
-                    data={processedHistory ?? []}
+                    data={processedHistory}
                     itemContent={(_index, version) => {
                         if (!version) return null;
                         return (
@@ -346,7 +301,7 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
     return (
         <div className={clsx('v-history-list-container', { 'is-panel-active': panel !== null })}>
             <div 
-                className={clsx('v-history-list', { 'is-list-view': isListView, 'is-searching-bg': isPending && !isDataStale })}
+                className={clsx('v-history-list', { 'is-list-view': isListView })}
                 style={{ height: '100%', position: 'relative' }}
             >
                 <AnimatePresence mode="wait">

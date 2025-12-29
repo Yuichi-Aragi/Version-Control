@@ -16,12 +16,12 @@ import { HistoryListHeader } from '@/ui/components';
 export const VersionControlRoot: FC = () => {
     const dispatch = useAppDispatch();
     const { status, error, panel, isProcessing, isRenaming, viewMode } = useAppSelector(state => ({
-        status: state.status,
-        error: state.error,
-        panel: state.panel,
-        isProcessing: state.isProcessing,
-        isRenaming: state.isRenaming,
-        viewMode: state.viewMode,
+        status: state.app.status,
+        error: state.app.error,
+        panel: state.app.panel,
+        isProcessing: state.app.isProcessing,
+        isRenaming: state.app.isRenaming,
+        viewMode: state.app.viewMode,
     }));
 
     const [historyCounts, setHistoryCounts] = useState({ filtered: 0, total: 0 });
@@ -32,7 +32,7 @@ export const VersionControlRoot: FC = () => {
     const handleSaveClick = useCallback(() => {
         if (status !== AppStatus.READY || isProcessing || isRenaming) return;
         if (viewMode === 'versions') {
-            dispatch(thunks.saveNewVersion());
+            dispatch(thunks.saveNewVersion({}));
         } else {
             dispatch(thunks.saveNewEdit());
         }

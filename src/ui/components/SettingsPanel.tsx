@@ -11,20 +11,18 @@ import { useNoteActions } from '@/ui/hooks/useNoteActions';
 // Helper to aggressively stop event propagation to prevent "click-through" issues
 const stopPropagation = (e: SyntheticEvent) => {
     e.stopPropagation();
-    // Stop native propagation to ensure no other listeners on parents or document fire
     e.nativeEvent?.stopImmediatePropagation?.();
 };
 
 const SettingsPanelComponent: FC = () => {
     const dispatch = useAppDispatch();
-    const isActive = useAppSelector(state => state.panel?.type === 'settings');
-    const viewMode = useAppSelector(state => state.viewMode);
+    const isActive = useAppSelector(state => state.app.panel?.type === 'settings');
+    const viewMode = useAppSelector(state => state.app.viewMode);
     
-    // Use state for ref to ensure re-render when element is available for collision boundary
     const [rootElement, setRootElement] = useState<HTMLDivElement | null>(null);
-    
     const [isAdvancedMode, setIsAdvancedMode] = useState(false);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const [isOnline, setIsOnline] = useState(navigator.onLine);
 
     const {
         handleRefresh,
@@ -37,7 +35,17 @@ const SettingsPanelComponent: FC = () => {
         noteId
     } = useNoteActions();
 
-    // Ensure menu closes when the panel is deactivated
+    useEffect(() => {
+        const handleOnline = () => setIsOnline(true);
+        const handleOffline = () => setIsOnline(false);
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, []);
+
     useEffect(() => {
         if (!isActive) {
             setIsMenuOpen(false);
@@ -50,7 +58,6 @@ const SettingsPanelComponent: FC = () => {
                 <button 
                     className="clickable-icon" 
                     aria-label="Settings options"
-                    // Stop propagation at the button level to prevent leaks during interaction
                     onPointerDown={(e) => e.stopPropagation()}
                     onMouseDown={(e) => e.stopPropagation()}
                     onClick={(e) => e.stopPropagation()}
@@ -66,13 +73,11 @@ const SettingsPanelComponent: FC = () => {
                     sideOffset={5}
                     collisionBoundary={rootElement}
                     collisionPadding={8}
-                    // Ensure menu interactions don't leak
                     onPointerDown={stopPropagation}
                     onMouseDown={stopPropagation}
                     onClick={stopPropagation}
                     style={{ zIndex: 100 }}
                 >
-                    {/* Use Sub component to ensure proper closing behavior for nested menus */}
                     <DropdownMenu.Sub>
                         <DropdownMenu.SubTrigger className="v-dropdown-item v-dropdown-sub-trigger">
                             <span>Actions</span>
@@ -86,8 +91,6 @@ const SettingsPanelComponent: FC = () => {
                                 className="v-dropdown-content" 
                                 sideOffset={2}
                                 alignOffset={-5}
-                                // Removed collisionBoundary to allow the sub-menu to use the full viewport
-                                // This ensures it won't be clipped by the panel and can flip correctly
                                 collisionPadding={8}
                                 style={{ zIndex: 105 }}
                                 onPointerDown={stopPropagation}
@@ -105,11 +108,11 @@ const SettingsPanelComponent: FC = () => {
                                 <DropdownMenu.Separator className="v-dropdown-separator" />
                                 <DropdownMenu.Item className="v-dropdown-item" onSelect={handleViewChangelog}>
                                     <Icon name="file-text" className="v-dropdown-item-icon" />
-                                    View Changelog
+                                    View changelog
                                 </DropdownMenu.Item>
                                 <DropdownMenu.Item className="v-dropdown-item" onSelect={handleReportIssue}>
                                     <Icon name="bug" className="v-dropdown-item-icon" />
-                                    Report Issue
+                                    Report issue
                                 </DropdownMenu.Item>
                                 <DropdownMenu.Separator className="v-dropdown-separator" />
                                 <DropdownMenu.Item 
@@ -125,7 +128,7 @@ const SettingsPanelComponent: FC = () => {
                     </DropdownMenu.Sub>
 
                     <DropdownMenu.Item className="v-dropdown-item" onSelect={() => setIsAdvancedMode(!isAdvancedMode)}>
-                        {isAdvancedMode ? 'Basic Settings' : 'Advanced Settings'}
+                        {isAdvancedMode ? 'Basic settings' : 'Advanced settings'}
                     </DropdownMenu.Item>
                 </DropdownMenu.Content>
             </DropdownMenu.Portal>
@@ -138,8 +141,6 @@ const SettingsPanelComponent: FC = () => {
             className={clsx("v-settings-panel", { "is-active": isActive })}
             role="dialog"
             aria-modal={isActive}
-            // Aggressively stop all pointer events from bubbling through the panel.
-            // onPointerDown is crucial as it fires before click/mousedown in modern browsers.
             onPointerDown={stopPropagation}
             onMouseDown={stopPropagation}
             onMouseUp={stopPropagation}
@@ -147,19 +148,26 @@ const SettingsPanelComponent: FC = () => {
         >
             <div 
                 className="v-settings-panel-header"
-                // Ensure header specifically captures interactions
                 onPointerDown={stopPropagation}
                 onMouseDown={stopPropagation}
                 onClick={stopPropagation}
             >
-                <h3>Settings</h3>
+                <div className="v-settings-header-title-group">
+                    <h3>Settings</h3>
+                    {isOnline && (
+                        <img 
+                            src="https://img.shields.io/github/v/release/Yuichi-Aragi/Version-Control" 
+                            alt="GitHub Release" 
+                            className="v-settings-badge"
+                        />
+                    )}
+                </div>
                 <div className="v-panel-header-actions">
                     <button 
                         className="clickable-icon v-panel-close" 
                         aria-label="Close settings" 
                         onClick={(e) => {
                             stopPropagation(e);
-                            // Explicitly close menu when closing panel
                             setIsMenuOpen(false);
                             dispatch(appSlice.actions.closePanel());
                         }}

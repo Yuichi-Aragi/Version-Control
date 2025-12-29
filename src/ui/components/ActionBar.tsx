@@ -20,28 +20,28 @@ export const ActionBar: FC = () => {
         diffRequest, 
         settings, // Effective settings
         watchModeCountdown, 
-        history, 
-        editHistory,
+        historyCount, 
+        editHistoryCount,
         viewMode,
         panel,
         currentBranch,
         availableBranches,
     } = useAppSelector(state => ({
-        status: state.status,
-        isSearchActive: state.isSearchActive,
-        searchQuery: state.searchQuery,
-        isSearchCaseSensitive: state.isSearchCaseSensitive,
-        isProcessing: state.isProcessing,
-        isRenaming: state.isRenaming,
-        diffRequest: state.diffRequest,
-        settings: state.effectiveSettings,
-        watchModeCountdown: state.watchModeCountdown,
-        history: state.history,
-        editHistory: state.editHistory,
-        viewMode: state.viewMode,
-        panel: state.panel,
-        currentBranch: state.currentBranch,
-        availableBranches: state.availableBranches,
+        status: state.app.status,
+        isSearchActive: state.app.isSearchActive,
+        searchQuery: state.app.searchQuery,
+        isSearchCaseSensitive: state.app.isSearchCaseSensitive,
+        isProcessing: state.app.isProcessing,
+        isRenaming: state.app.isRenaming,
+        diffRequest: state.app.diffRequest,
+        settings: state.app.effectiveSettings,
+        watchModeCountdown: state.app.watchModeCountdown,
+        historyCount: state.app.history.ids.length,
+        editHistoryCount: state.app.editHistory.ids.length,
+        viewMode: state.app.viewMode,
+        panel: state.app.panel,
+        currentBranch: state.app.currentBranch,
+        availableBranches: state.app.availableBranches,
     }));
 
     const [localQuery, setLocalQuery] = useState(globalSearchQuery);
@@ -51,7 +51,7 @@ export const ActionBar: FC = () => {
         setLocalQuery(globalSearchQuery);
     }, [globalSearchQuery]);
 
-    const isBusy = isProcessing || isRenaming;
+    const isBusy = isProcessing || isRenaming || status === AppStatus.LOADING; // STRICT: Disable when loading
 
     const handleOpenDiffPanel = useCallback(() => {
         if (diffRequest?.status === 'ready') {
@@ -164,7 +164,7 @@ export const ActionBar: FC = () => {
     const diffIndicatorIcon = isDiffGenerating ? 'loader' : 'diff';
     const diffIndicatorAriaLabel = isDiffGenerating ? 'Diff is being generated...' : 'Diff is ready. Click to view.';
 
-    const hasHistory = viewMode === 'versions' ? history.length > 0 : editHistory.length > 0;
+    const hasHistory = viewMode === 'versions' ? historyCount > 0 : editHistoryCount > 0;
     const switchViewLabel = viewMode === 'versions' ? 'Switch to Edit History' : 'Switch to Version History';
 
     return (
@@ -211,7 +211,12 @@ export const ActionBar: FC = () => {
                                 <span>{currentBranch}</span>
                             </button>
                         )}
-                        {settings.enableWatchMode && watchModeCountdown !== null && !isProcessing && (
+                        {/* 
+                            Watch Mode Timer
+                            Now directly reactive to state changes. When status is LOADING (during context switch),
+                            watchModeCountdown is reset in state, causing this to unmount instantly.
+                        */}
+                        {settings.enableWatchMode && watchModeCountdown !== null && !isProcessing && status === AppStatus.READY && (
                             <div className="v-watch-mode-timer" title="Time until next auto-save">({watchModeCountdown}s)</div>
                         )}
                     </div>

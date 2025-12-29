@@ -14,7 +14,7 @@ interface HistoryListHeaderProps {
 export const HistoryListHeader: FC<HistoryListHeaderProps> = ({ status, filteredCount, totalCount }) => {
     const dispatch = useAppDispatch();
     const { viewMode } = useAppSelector(state => ({
-        viewMode: state.viewMode,
+        viewMode: state.app.viewMode,
     }));
 
     const countText = useMemo(() => {
