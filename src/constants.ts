@@ -11,6 +11,7 @@ const DEFAULT_HISTORY_SETTINGS = v.parse(HistorySettingsSchema, {
     // Explicit defaults for auto-registration to ensure they are present
     autoRegisterNotes: false,
     pathFilters: [],
+    enableDiskPersistence: true,
 });
 
 export const DEFAULT_SETTINGS: VersionControlSettings = v.parse(VersionControlSettingsSchema, {

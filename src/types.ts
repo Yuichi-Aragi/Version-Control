@@ -1,4 +1,4 @@
-import type { TFile } from "obsidian";
+import type { TFile, TFolder } from "obsidian";
 import type * as v from "valibot";
 import type {
     VersionControlSettingsSchema,
@@ -16,9 +16,23 @@ import type {
     DiffRequestSchema,
     ChangeSchema,
     TimelineSettingsSchema,
+    TimelineEventSchema,
+    OperationPrioritySchema,
+    OperationMetadataSchema,
+    ScheduledWriteSchema,
+    EditHistoryStatsSchema,
+    WorkerHealthStatsSchema,
+    WorkerStatusSchema,
+    CacheStatsSchema,
+    RetentionSettingsSchema,
+    CleanupResultSchema,
+    GenericVersionMetadataSchema,
+    TimelineStatsSchema,
 } from "./schemas";
 
-// --- Inferred Types from Valibot Schemas ---
+// ============================================================================
+// INFERRED TYPES FROM VALIBOT SCHEMAS
+// ============================================================================
 
 export type VersionControlSettings = v.InferOutput<typeof VersionControlSettingsSchema>;
 export type HistorySettings = v.InferOutput<typeof HistorySettingsSchema>;
@@ -35,11 +49,31 @@ export type DiffTarget = v.InferOutput<typeof DiffTargetSchema>;
 export type Change = v.InferOutput<typeof ChangeSchema>;
 export type DiffRequest = v.InferOutput<typeof DiffRequestSchema>;
 export type TimelineSettings = v.InferOutput<typeof TimelineSettingsSchema>;
+export type TimelineEvent = v.InferOutput<typeof TimelineEventSchema>;
+export type OperationPriority = v.InferOutput<typeof OperationPrioritySchema>;
+export type OperationMetadata = v.InferOutput<typeof OperationMetadataSchema>;
+export type ScheduledWrite = v.InferOutput<typeof ScheduledWriteSchema>;
+export type EditHistoryStats = v.InferOutput<typeof EditHistoryStatsSchema>;
+export type WorkerHealthStats = v.InferOutput<typeof WorkerHealthStatsSchema>;
+export type WorkerStatus = v.InferOutput<typeof WorkerStatusSchema>;
+export type CacheStats = v.InferOutput<typeof CacheStatsSchema>;
+export type RetentionSettings = v.InferOutput<typeof RetentionSettingsSchema>;
+export type CleanupResult = v.InferOutput<typeof CleanupResultSchema>;
+export type GenericVersionMetadata = v.InferOutput<typeof GenericVersionMetadataSchema>;
+export type TimelineStats = v.InferOutput<typeof TimelineStatsSchema>;
 
-// --- Other Types ---
+// ============================================================================
+// OTHER TYPES
+// ============================================================================
 
+/**
+ * View mode for the version control panel.
+ */
 export type ViewMode = 'versions' | 'edits';
 
+/**
+ * Information about the currently active note.
+ */
 export interface ActiveNoteInfo {
     file: TFile | null;
     noteId: string | null;
@@ -47,7 +81,10 @@ export interface ActiveNoteInfo {
     source: 'frontmatter' | 'manifest' | 'filepath' | 'none';
 }
 
-// --- Comlink Worker API ---
+// ============================================================================
+// COMLINK WORKER APIs
+// ============================================================================
+
 /**
  * Defines the API exposed by the diff web worker.
  * This interface is used by Comlink to create a typed proxy.
@@ -184,7 +221,7 @@ export interface EditWorkerApi {
      * Reads the manifest.json from a .vctrl zip buffer without importing the full data.
      * Used for timestamp comparison.
      */
-    readManifestFromZip(zipData: ArrayBuffer): Promise<any>;
+    readManifestFromZip(zipData: ArrayBuffer): Promise<unknown>;
 
     /**
      * Clears all data from the IDB.
@@ -193,26 +230,206 @@ export interface EditWorkerApi {
     clearAll(): Promise<void>;
 }
 
-// --- Timeline Types ---
+// ============================================================================
+// ERROR TYPES
+// ============================================================================
 
-export interface TimelineStats {
-    additions: number;
-    deletions: number;
+/**
+ * Error codes for DiffManager operations.
+ */
+export type DiffManagerErrorCode =
+    | 'WORKER_CODE_MISSING'
+    | 'WORKER_INIT_FAILED'
+    | 'WORKER_PROXY_MISSING'
+    | 'WORKER_TEST_FAILED'
+    | 'WORKER_UNAVAILABLE'
+    | 'INVALID_NOTE_ID'
+    | 'INVALID_TARGET'
+    | 'INVALID_NOTE_PATH'
+    | 'FILE_NOT_FOUND'
+    | 'VERSION_CONTENT_NOT_FOUND'
+    | 'OPERATION_TIMEOUT'
+    | 'INIT_FAILED';
+
+/**
+ * Error class for DiffManager operations.
+ */
+export class DiffManagerError extends Error {
+    constructor(
+        message: string,
+        public readonly code: DiffManagerErrorCode,
+        public readonly context?: Record<string, unknown>
+    ) {
+        super(message);
+        this.name = 'DiffManagerError';
+    }
 }
 
-export interface TimelineEvent {
-    id?: number; // Auto-incrementing ID from IndexedDB
-    noteId: string;
-    branchName: string;
-    source: 'version' | 'edit'; // Distinguishes between version history and edit history timelines
-    fromVersionId: string | null; // null indicates the start of history (creation)
-    toVersionId: string;
-    timestamp: string; // ISO string of the 'toVersion'
-    diffData: Change[];
-    stats: TimelineStats;
+/**
+ * Error codes for EditHistoryManager operations.
+ */
+export type EditHistoryErrorCode =
+    | 'WORKER_UNAVAILABLE'
+    | 'DISK_WRITE_FAILED'
+    | 'DISK_READ_FAILED'
+    | 'OPERATION_TIMEOUT'
+    | 'OPERATION_CANCELLED'
+    | 'INTEGRITY_CHECK_FAILED'
+    | 'CONCURRENCY_CONFLICT'
+    | 'INVALID_STATE'
+    | 'CAPACITY_EXCEEDED';
 
-    // Metadata for display
-    toVersionName?: string;
-    toVersionNumber: number;
-    toVersionDescription?: string;
+/**
+ * Error class for EditHistoryManager operations.
+ */
+export class EditHistoryError extends Error {
+    readonly timestamp: number;
+    readonly operationId?: string;
+
+    constructor(
+        message: string,
+        readonly code: EditHistoryErrorCode,
+        readonly metadata: Partial<OperationMetadata> = {},
+        override readonly cause?: unknown
+    ) {
+        super(message);
+        this.name = 'EditHistoryError';
+        this.timestamp = Date.now();
+        if (metadata.id !== undefined) {
+            this.operationId = metadata.id;
+        }
+        Object.freeze(this);
+    }
+
+    static isRetryable(error: unknown): boolean {
+        if (!(error instanceof EditHistoryError)) return false;
+        
+        switch (error.code) {
+            case 'OPERATION_TIMEOUT':
+            case 'DISK_WRITE_FAILED':
+            case 'DISK_READ_FAILED':
+                return true;
+            default:
+                return false;
+        }
+    }
+}
+
+// ============================================================================
+// VERSION MANAGER TYPES
+// ============================================================================
+
+/**
+ * Options for saving a new version of a file.
+ */
+export interface SaveVersionOptions {
+    name?: string;
+    force?: boolean;
+    isAuto?: boolean;
+    settings: VersionControlSettings;
+}
+
+/**
+ * Result of a save operation.
+ */
+export interface SaveVersionResult {
+    status: 'saved' | 'duplicate' | 'skipped_min_lines';
+    newVersionEntry: VersionHistoryEntry | null;
+    displayName: string;
+    newNoteId: string;
+}
+
+/**
+ * Options for updating version details.
+ */
+export interface UpdateVersionDetails {
+    name?: string;
+    description?: string;
+}
+
+/**
+ * Parameters for creating a deviation from a version.
+ */
+export interface CreateDeviationParams {
+    noteId: string;
+    versionId: string;
+    targetFolder: TFolder | null;
+}
+
+/**
+ * Parameters for creating a deviation from content.
+ */
+export interface CreateDeviationFromContentParams {
+    noteId: string;
+    content: string;
+    targetFolder: TFolder | null;
+    suffix: string;
+}
+
+/**
+ * Restore operation parameters.
+ */
+export interface RestoreVersionParams {
+    liveFile: TFile;
+    noteId: string;
+    versionId: string;
+}
+
+/**
+ * Delete operation parameters.
+ */
+export interface DeleteVersionParams {
+    noteId: string;
+    versionId: string;
+}
+
+/**
+ * Defines the priority levels for tasks within the system.
+ * Higher values indicate higher priority.
+ */
+export enum TaskPriority {
+    /**
+     * User-initiated, blocking operations that must complete immediately.
+     * Examples: Manual Save, Restore, Delete.
+     */
+    CRITICAL = 100,
+
+    /**
+     * Important operations that should block lower priority tasks but aren't immediate user blocks.
+     * Examples: Auto-save, UI updates.
+     */
+    HIGH = 50,
+
+    /**
+     * Standard operations.
+     * Examples: Loading history, reading file content.
+     */
+    NORMAL = 0,
+
+    /**
+     * Deferrable operations.
+     * Examples: Indexing, pre-fetching.
+     */
+    LOW = -50,
+
+    /**
+     * Invisible background maintenance.
+     * Examples: Cleanup, compression, integrity checks.
+     */
+    BACKGROUND = -100
+}
+
+/**
+ * Options for scheduling a task.
+ */
+export interface TaskOptions {
+    /**
+     * The priority of the task. Defaults to TaskPriority.NORMAL.
+     */
+    priority?: TaskPriority;
+    
+    /**
+     * Optional label for debugging and logging.
+     */
+    label?: string;
 }
