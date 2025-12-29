@@ -11,12 +11,12 @@ import type { HistoryEntryProps } from '@/ui/components/HistoryEntry/types';
 
 export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery, isSearchCaseSensitive, viewMode = 'versions' }) => {
     const { settings, enableCompression, namingVersionId, highlightedVersionId, isManualVersionEdit, isSearchActive } = useAppSelector(state => ({
-        settings: state.effectiveSettings,
-        enableCompression: state.settings.enableCompression,
-        namingVersionId: state.namingVersionId,
-        highlightedVersionId: state.highlightedVersionId,
-        isManualVersionEdit: state.isManualVersionEdit,
-        isSearchActive: state.isSearchActive,
+        settings: state.app.effectiveSettings,
+        enableCompression: state.app.settings.enableCompression,
+        namingVersionId: state.app.namingVersionId,
+        highlightedVersionId: state.app.highlightedVersionId,
+        isManualVersionEdit: state.app.isManualVersionEdit,
+        isSearchActive: state.app.isSearchActive,
     }));
     const { now } = useTime();
 
