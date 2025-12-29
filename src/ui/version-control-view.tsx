@@ -61,7 +61,7 @@ export class VersionControlView extends ItemView {
         // The changelog is a global notification. It should persist even if the view
         // is temporarily closed (e.g., by Obsidian on mobile to save resources).
         // Other panels are context-specific and should be cleared.
-        if (state.panel?.type !== 'changelog') {
+        if (state.app.panel?.type !== 'changelog') {
             this.store.dispatch(appSlice.actions.closePanel());
         }
         
