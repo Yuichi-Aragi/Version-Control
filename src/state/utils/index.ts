@@ -7,25 +7,15 @@
  *
  * ## Utilities
  *
+ * - **guards**: Race condition prevention and lifecycle guards
  * - **settingsUtils**: Settings resolution and merging utilities
- *
- * ## Usage
- *
- * ```typescript
- * import { resolveEffectiveSettings, mergeSettings } from '@/state/utils';
- *
- * // Resolve effective settings for a note and branch
- * const settings = await resolveEffectiveSettings(noteId, branchName, type);
- *
- * // Merge global and local settings
- * const merged = mergeSettings(globalSettings, localOverrides);
- * ```
  */
 
 // ============================================================================
 // UTILITY EXPORTS
 // ============================================================================
 
+export * from './guards';
 export * from './settingsUtils';
 
 // ============================================================================

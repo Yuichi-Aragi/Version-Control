@@ -1,10 +1,9 @@
-import type { Container } from 'inversify';
 import { pickBy, isUndefined } from 'es-toolkit';
+import * as v from 'valibot';
 import type { HistorySettings } from '@/types';
-import { TYPES } from '@/types/inversify.types';
-import type VersionControlPlugin from '@/main';
-import type { ManifestManager } from '@/core';
-import type { EditHistoryManager } from '@/core';
+import type { Services } from '../store';
+import { DEFAULT_SETTINGS } from '@/constants';
+import { HistorySettingsSchema } from '@/schemas';
 
 /**
  * Filters out undefined values from a settings object using es-toolkit.
@@ -23,16 +22,23 @@ const filterDefinedSettings = (settings: Record<string, unknown> | undefined): P
  * 1. Always using the NoteManifest as the source of truth for the current branch.
  * 2. Correctly merging global defaults with local overrides.
  * 3. Handling the 'isGlobal' flag logic (defaulting to true if undefined).
+ * 4. Validating the final output against the schema.
  */
 export async function resolveSettings(
     noteId: string,
     type: 'version' | 'edit',
-    container: Container
+    services: Services
 ): Promise<HistorySettings> {
-    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
-    const editHistoryManager = container.get<EditHistoryManager>(TYPES.EditHistoryManager);
+    // Defensive check: ensure plugin and settings are available
+    if (!services?.plugin?.settings) {
+        console.warn("Version Control: Plugin settings not available, using defaults");
+        const defaultSettings = type === 'version'
+            ? { ...DEFAULT_SETTINGS.versionHistorySettings, isGlobal: true }
+            : { ...DEFAULT_SETTINGS.editHistorySettings, isGlobal: true };
+        return v.parse(HistorySettingsSchema, defaultSettings);
+    }
 
+    const { manifestManager, editHistoryManager, plugin } = services;
     const globalDefaults = type === 'version'
         ? plugin.settings.versionHistorySettings
         : plugin.settings.editHistorySettings;
@@ -44,7 +50,7 @@ export async function resolveSettings(
 
         // If note manifest is missing, we default to global settings
         if (!noteManifest) {
-            return { ...globalDefaults, isGlobal: true };
+            return v.parse(HistorySettingsSchema, { ...globalDefaults, isGlobal: true });
         }
 
         const currentBranch = noteManifest.currentBranch;
@@ -68,8 +74,10 @@ export async function resolveSettings(
         // Explicit 'false' is required to enable local settings.
         const isUnderGlobalInfluence = perBranchSettings?.isGlobal !== false;
 
+        let finalSettings: HistorySettings;
+
         if (isUnderGlobalInfluence) {
-            return { ...globalDefaults, isGlobal: true };
+            finalSettings = { ...globalDefaults, isGlobal: true };
         } else {
             // Filter undefineds using es-toolkit pickBy to ensure clean merge
             const definedBranchSettings = pickBy(
@@ -77,27 +85,14 @@ export async function resolveSettings(
                 (value) => !isUndefined(value)
             );
             // Local overrides Global
-            return { ...globalDefaults, ...definedBranchSettings, isGlobal: false };
+            finalSettings = { ...globalDefaults, ...definedBranchSettings, isGlobal: false };
         }
+
+        // Strict validation of the resolved settings
+        return v.parse(HistorySettingsSchema, finalSettings);
+
     } catch (e) {
         console.error("Version Control: Error resolving settings", e);
-        return { ...globalDefaults, isGlobal: true };
+        return v.parse(HistorySettingsSchema, { ...globalDefaults, isGlobal: true });
     }
 }
-
-/**
- * Checks if the plugin is in the process of unloading.
- * This is a crucial guard to prevent thunks from executing against a destroyed
- * or partially destroyed dependency injection container.
- */
-export const isPluginUnloading = (container: Container): boolean => {
-    try {
-        const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
-        if (plugin.isUnloading) {
-            return true;
-        }
-        return false;
-    } catch (e) {
-        return true;
-    }
-};
