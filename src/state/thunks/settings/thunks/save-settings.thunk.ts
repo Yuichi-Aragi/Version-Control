@@ -1,13 +1,9 @@
-import { App, normalizePath } from 'obsidian';
+import { normalizePath } from 'obsidian';
 import { produce } from 'immer';
-import type { AppThunk } from '@/state';
+import type { AppThunk, Services } from '@/state';
 import { appSlice } from '@/state';
 import type { VersionControlSettings } from '@/types';
-import { UIService } from '@/services';
-import { ManifestManager, BackgroundTaskManager, StorageService } from '@/core';
-import { TYPES } from '@/types/inversify.types';
-import { isPluginUnloading } from '@/state/utils/settingsUtils';
-import type VersionControlPlugin from '@/main';
+import { shouldAbort } from '@/state/utils/guards';
 import { initializeView } from '@/state/thunks/core.thunks';
 import {
     validateGlobalSettings,
@@ -28,11 +24,11 @@ import { mergeGlobalSettings, updateLegacyKeys } from '@/state/thunks/settings/h
  * @param settingsUpdate - Partial settings to update
  * @returns Async thunk
  */
-export const updateGlobalSettings = (settingsUpdate: Partial<VersionControlSettings>): AppThunk => async (dispatch, _getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
-    const uiService = container.get<UIService>(TYPES.UIService);
-    const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
+export const updateGlobalSettings = (settingsUpdate: Partial<VersionControlSettings>): AppThunk => async (dispatch, getState, services: Services) => {
+    if (shouldAbort(services, getState)) return;
+    const plugin = services.plugin;
+    const uiService = services.uiService;
+    const backgroundTaskManager = services.backgroundTaskManager;
 
     try {
         const newGlobalSettings = mergeGlobalSettings(plugin.settings, settingsUpdate);
@@ -61,10 +57,10 @@ export const updateGlobalSettings = (settingsUpdate: Partial<VersionControlSetti
  * @param newKeyRaw - The new frontmatter key (will be trimmed)
  * @returns Async thunk
  */
-export const requestKeyUpdate = (newKeyRaw: string): AppThunk => async (dispatch, _getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
-    const uiService = container.get<UIService>(TYPES.UIService);
+export const requestKeyUpdate = (newKeyRaw: string): AppThunk => async (dispatch, getState, services: Services) => {
+    if (shouldAbort(services, getState)) return;
+    const plugin = services.plugin;
+    const uiService = services.uiService;
     const oldKey = plugin.settings.noteIdFrontmatterKey;
     const newKey = newKeyRaw.trim();
 
@@ -99,10 +95,10 @@ export const requestKeyUpdate = (newKeyRaw: string): AppThunk => async (dispatch
  * @param newVersionIdFormat - The new version ID format
  * @returns Thunk
  */
-export const requestUpdateIdFormats = (newNoteIdFormat: string, newVersionIdFormat: string): AppThunk => (dispatch, _getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
-    const uiService = container.get<UIService>(TYPES.UIService);
+export const requestUpdateIdFormats = (newNoteIdFormat: string, newVersionIdFormat: string): AppThunk => (dispatch, getState, services: Services) => {
+    if (shouldAbort(services, getState)) return;
+    const plugin = services.plugin;
+    const uiService = services.uiService;
 
     const oldNoteIdFormat = plugin.settings.noteIdFormat;
     const oldVersionIdFormat = plugin.settings.versionIdFormat;
@@ -135,8 +131,8 @@ export const requestUpdateIdFormats = (newNoteIdFormat: string, newVersionIdForm
  * @param newVersionIdFormat - The new version ID format
  * @returns Async thunk
  */
-const confirmUpdateIdFormats = (newNoteIdFormat: string, newVersionIdFormat: string): AppThunk => async (dispatch, _getState, container) => {
-    if (isPluginUnloading(container)) return;
+const confirmUpdateIdFormats = (newNoteIdFormat: string, newVersionIdFormat: string): AppThunk => async (dispatch, getState, services: Services) => {
+    if (shouldAbort(services, getState)) return;
     dispatch(appSlice.actions.closePanel());
     dispatch(updateGlobalSettings({
         noteIdFormat: newNoteIdFormat,
@@ -150,15 +146,15 @@ const confirmUpdateIdFormats = (newNoteIdFormat: string, newVersionIdFormat: str
  * @param newPathRaw - The new database path (will be normalized and trimmed)
  * @returns Async thunk
  */
-export const renameDatabasePath = (newPathRaw: string): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const app = container.get<App>(TYPES.App);
-    const uiService = container.get<UIService>(TYPES.UIService);
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
-    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
-    const storageService = container.get<StorageService>(TYPES.StorageService);
+export const renameDatabasePath = (newPathRaw: string): AppThunk => async (dispatch, getState, services: Services) => {
+    if (shouldAbort(services, getState)) return;
+    const app = services.app;
+    const uiService = services.uiService;
+    const manifestManager = services.manifestManager;
+    const plugin = services.plugin;
+    const storageService = services.storageService;
 
-    const state = getState();
+    const state = getState().app;
     if (state.isRenaming) {
         uiService.showNotice("A rename operation is already in progress.");
         return;
@@ -211,7 +207,7 @@ export const renameDatabasePath = (newPathRaw: string): AppThunk => async (dispa
 
         uiService.showNotice(`Database successfully moved to "${newPath}".`, 5000);
 
-        dispatch(initializeView());
+        dispatch(initializeView(undefined));
 
     } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
@@ -229,7 +225,7 @@ export const renameDatabasePath = (newPathRaw: string): AppThunk => async (dispa
             }
         }
     } finally {
-        if (!isPluginUnloading(container)) {
+        if (!shouldAbort(services, getState)) {
             dispatch(appSlice.actions.setRenaming(false));
         }
     }

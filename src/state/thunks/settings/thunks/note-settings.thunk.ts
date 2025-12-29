@@ -1,11 +1,7 @@
-import type { AppThunk } from '@/state';
+import type { AppThunk, Services } from '@/state';
 import { appSlice, AppStatus } from '@/state';
 import type { HistorySettings } from '@/types';
-import { UIService } from '@/services';
-import { ManifestManager, EditHistoryManager, BackgroundTaskManager } from '@/core';
-import { TYPES } from '@/types/inversify.types';
-import { isPluginUnloading } from '@/state/utils/settingsUtils';
-import type VersionControlPlugin from '@/main';
+import { shouldAbort } from '@/state/utils/guards';
 import { loadEffectiveSettingsForNote } from '@/state/thunks/core.thunks';
 import { validateHistorySettingsUpdate } from '@/state/thunks/settings/validation';
 import { updateGlobalSettings } from '@/state/thunks/settings/thunks/save-settings.thunk';
@@ -26,13 +22,13 @@ import {
  * @param applyGlobally - If true, note will follow global settings; if false, note will have independent settings
  * @returns Async thunk
  */
-export const toggleGlobalSettings = (applyGlobally: boolean): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const state = getState();
-    const uiService = container.get<UIService>(TYPES.UIService);
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
-    const editHistoryManager = container.get<EditHistoryManager>(TYPES.EditHistoryManager);
-    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
+export const toggleGlobalSettings = (applyGlobally: boolean): AppThunk => async (dispatch, getState, services: Services) => {
+    if (shouldAbort(services, getState)) return;
+    const state = getState().app;
+    const uiService = services.uiService;
+    const manifestManager = services.manifestManager;
+    const editHistoryManager = services.editHistoryManager;
+    const plugin = services.plugin;
 
     if (state.status !== AppStatus.READY || !state.noteId) {
         uiService.showNotice("A versioned note must be active to change this setting.", 4000);
@@ -79,12 +75,17 @@ export const toggleGlobalSettings = (applyGlobally: boolean): AppThunk => async 
             uiService.showNotice(`Note edits now ${applyGlobally ? 'follow global' : 'have independent'} settings.`, 3000);
         }
 
+        // Race Check: Verify context after async updates
+        if (shouldAbort(services, getState, { noteId, viewMode })) return;
+
         dispatch(loadEffectiveSettingsForNote(noteId));
 
     } catch (error) {
         console.error(`VC: Failed to toggle global settings for note ${noteId}.`, error);
         uiService.showNotice("Failed to update settings. Please try again.", 5000);
-        dispatch(loadEffectiveSettingsForNote(noteId));
+        if (!shouldAbort(services, getState, { noteId })) {
+            dispatch(loadEffectiveSettingsForNote(noteId));
+        }
     }
 };
 
@@ -96,19 +97,19 @@ export const toggleGlobalSettings = (applyGlobally: boolean): AppThunk => async 
  * @param settingsUpdate - Partial history settings to update
  * @returns Async thunk
  */
-export const updateSettings = (settingsUpdate: Partial<HistorySettings>): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const stateBeforeUpdate = getState();
-    const uiService = container.get<UIService>(TYPES.UIService);
+export const updateSettings = (settingsUpdate: Partial<HistorySettings>): AppThunk => async (dispatch, getState, services: Services) => {
+    if (shouldAbort(services, getState)) return;
+    const stateBeforeUpdate = getState().app;
+    const uiService = services.uiService;
     if (stateBeforeUpdate.isRenaming) {
         uiService.showNotice("Cannot change settings while database is being renamed.");
         return;
     }
 
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
-    const editHistoryManager = container.get<EditHistoryManager>(TYPES.EditHistoryManager);
-    const backgroundTaskManager = container.get<BackgroundTaskManager>(TYPES.BackgroundTaskManager);
-    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
+    const manifestManager = services.manifestManager;
+    const editHistoryManager = services.editHistoryManager;
+    const backgroundTaskManager = services.backgroundTaskManager;
+    const plugin = services.plugin;
 
     const { noteId, file, viewMode } = stateBeforeUpdate;
     const isUnderGlobalInfluence = stateBeforeUpdate.effectiveSettings.isGlobal;
@@ -163,7 +164,10 @@ export const updateSettings = (settingsUpdate: Partial<HistorySettings>): AppThu
                         if (!branch.settings) branch.settings = {};
                         branch.settings.isGlobal = false;
                         Object.assign(branch.settings, settingsUpdate);
-                        await editHistoryManager.saveEditManifest(noteId, editManifest);
+                        
+                        // Force persistence check if we are toggling disk persistence
+                        const forcePersistence = settingsUpdate.hasOwnProperty('enableDiskPersistence');
+                        await editHistoryManager.saveEditManifest(noteId, editManifest, forcePersistence);
                     }
                 }
             }
@@ -171,6 +175,8 @@ export const updateSettings = (settingsUpdate: Partial<HistorySettings>): AppThu
     } catch (error) {
         console.error(`VC: Failed to update settings. Reverting UI.`, error);
         uiService.showNotice("Failed to save settings. Reverting.", 5000);
-        dispatch(loadEffectiveSettingsForNote(noteId));
+        if (!shouldAbort(services, getState, { noteId: noteId || null })) {
+            dispatch(loadEffectiveSettingsForNote(noteId));
+        }
     }
 };

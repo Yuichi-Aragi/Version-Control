@@ -1,12 +1,8 @@
-import { App, TFolder } from 'obsidian';
-import type { AppThunk } from '@/state';
+import { TFolder } from 'obsidian';
+import type { AppThunk, Services } from '@/state';
 import { appSlice, AppStatus } from '@/state';
 import type { VersionHistoryEntry, VersionData } from '@/types';
-import { UIService } from '@/services';
-import { ManifestManager, EditHistoryManager, VersionManager } from '@/core';
-import { ExportManager } from '@/services';
-import { TYPES } from '@/types/inversify.types';
-import { isPluginUnloading } from '@/state/utils/settingsUtils';
+import { shouldAbort } from '@/state/utils/guards';
 import { customSanitizeFileName } from '@/utils/file';
 import type { ExportFormat, ExportFormatActionItem, FolderActionItem } from '@/state/thunks/settings/types';
 import { EXPORT_FORMATS, EXPORT_FORMAT_ICONS } from '@/state/thunks/settings/types';
@@ -20,10 +16,10 @@ import { EXPORT_FORMATS, EXPORT_FORMAT_ICONS } from '@/state/thunks/settings/typ
  *
  * @returns Thunk
  */
-export const requestExportAllVersions = (): AppThunk => (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const state = getState();
-    const uiService = container.get<UIService>(TYPES.UIService);
+export const requestExportAllVersions = (): AppThunk => (dispatch, getState, services: Services) => {
+    if (shouldAbort(services, getState)) return;
+    const state = getState().app;
+    const uiService = services.uiService;
     if (state.isRenaming) {
         uiService.showNotice("Cannot export while database is being renamed.");
         return;
@@ -65,17 +61,17 @@ export const requestExportAllVersions = (): AppThunk => (dispatch, getState, con
  * @param format - The export format
  * @returns Async thunk
  */
-export const exportAllVersions = (noteId: string, format: ExportFormat): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const initialState = getState();
-    const uiService = container.get<UIService>(TYPES.UIService);
+export const exportAllVersions = (noteId: string, format: ExportFormat): AppThunk => async (dispatch, getState, services: Services) => {
+    if (shouldAbort(services, getState)) return;
+    const initialState = getState().app;
+    const uiService = services.uiService;
     if (initialState.isRenaming) {
         uiService.showNotice("Cannot export while database is being renamed.");
         return;
     }
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
-    const exportManager = container.get<ExportManager>(TYPES.ExportManager);
-    const app = container.get<App>(TYPES.App);
+    const manifestManager = services.manifestManager;
+    const exportManager = services.exportManager;
+    const app = services.app;
 
     if (initialState.status !== AppStatus.READY || initialState.noteId !== noteId) {
         uiService.showNotice("VC: Export cancelled because the view context changed.", 3000);
@@ -94,6 +90,13 @@ export const exportAllVersions = (noteId: string, format: ExportFormat): AppThun
         uiService.showNotice(`Preparing to export all ${type}s for "${currentNoteName}"...`, 3000);
 
         const versionsData = await exportManager.getAllVersionsData(noteId, type);
+        
+        // Race Check: Verify context after async data fetch
+        if (shouldAbort(services, getState, { noteId })) {
+            uiService.showNotice("VC: Export cancelled because the note context changed.");
+            return;
+        }
+
         if (versionsData.length === 0) {
             uiService.showNotice(`No ${type}s found for "${currentNoteName}" to export.`, 3000);
             return;
@@ -111,8 +114,7 @@ export const exportAllVersions = (noteId: string, format: ExportFormat): AppThun
         const onChooseFolder = (selectedFolder: TFolder): AppThunk => async (dispatch, _getState) => {
             dispatch(appSlice.actions.closePanel()); // Close the folder selection panel immediately.
 
-            const latestState = getState();
-            if (isPluginUnloading(container) || latestState.status !== AppStatus.READY || latestState.noteId !== initialState.noteId) {
+            if (shouldAbort(services, getState, { noteId: initialState.noteId, status: AppStatus.READY })) {
                 uiService.showNotice("VC: Export cancelled because the note context changed during folder selection.");
                 return;
             }
@@ -135,9 +137,11 @@ export const exportAllVersions = (noteId: string, format: ExportFormat): AppThun
         console.error(`Version Control: Export failed for all versions of note ID ${noteId.substring(0, 8)}...`, error);
         uiService.showNotice(`Error: Failed to export all versions. ${errorMessage}.`, 7000);
     } finally {
-        const finalState = getState();
-        if (finalState.status === AppStatus.READY) {
-            dispatch(appSlice.actions.setProcessing(false));
+        if (!shouldAbort(services, getState)) {
+            const finalState = getState().app;
+            if (finalState.status === AppStatus.READY) {
+                dispatch(appSlice.actions.setProcessing(false));
+            }
         }
     }
 };
@@ -148,10 +152,10 @@ export const exportAllVersions = (noteId: string, format: ExportFormat): AppThun
  * @param version - The version to export
  * @returns Thunk
  */
-export const requestExportSingleVersion = (version: VersionHistoryEntry): AppThunk => (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const state = getState();
-    const uiService = container.get<UIService>(TYPES.UIService);
+export const requestExportSingleVersion = (version: VersionHistoryEntry): AppThunk => (dispatch, getState, services: Services) => {
+    if (shouldAbort(services, getState)) return;
+    const state = getState().app;
+    const uiService = services.uiService;
     if (state.isRenaming) {
         uiService.showNotice("Cannot export while database is being renamed.");
         return;
@@ -189,19 +193,19 @@ export const requestExportSingleVersion = (version: VersionHistoryEntry): AppThu
  * @param format - The export format
  * @returns Async thunk
  */
-export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: ExportFormat): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const initialState = getState();
-    const uiService = container.get<UIService>(TYPES.UIService);
+export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: ExportFormat): AppThunk => async (dispatch, getState, services: Services) => {
+    if (shouldAbort(services, getState)) return;
+    const initialState = getState().app;
+    const uiService = services.uiService;
     if (initialState.isRenaming) {
         uiService.showNotice("Cannot export while database is being renamed.");
         return;
     }
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
-    const versionManager = container.get<VersionManager>(TYPES.VersionManager);
-    const editHistoryManager = container.get<EditHistoryManager>(TYPES.EditHistoryManager);
-    const exportManager = container.get<ExportManager>(TYPES.ExportManager);
-    const app = container.get<App>(TYPES.App);
+    const manifestManager = services.manifestManager;
+    const versionManager = services.versionManager;
+    const editHistoryManager = services.editHistoryManager;
+    const exportManager = services.exportManager;
+    const app = services.app;
 
     if (initialState.status !== AppStatus.READY || initialState.noteId !== versionEntry.noteId) {
         uiService.showNotice("VC: Export cancelled because the view context changed.", 3000);
@@ -214,7 +218,7 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: E
             throw new Error(`Manifest for note ID ${versionEntry.noteId} not found.`);
         }
         const currentNoteName = noteManifest.notePath.split('/').pop()?.replace(/\.md$/, '') || 'Untitled';
-        const viewMode = getState().viewMode;
+        const viewMode = getState().app.viewMode;
 
         uiService.showNotice(`Preparing to export V${versionEntry.versionNumber} of "${currentNoteName}"...`, 3000);
 
@@ -227,6 +231,11 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: E
 
         if (content === null) {
             throw new Error(`Could not load content for ${viewMode === 'versions' ? 'version' : 'edit'}.`);
+        }
+
+        // Race Check: Verify context after content load
+        if (shouldAbort(services, getState, { noteId: versionEntry.noteId })) {
+            return;
         }
 
         const versionData: VersionData = {
@@ -253,8 +262,7 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: E
         const onChooseFolder = (selectedFolder: TFolder): AppThunk => async (dispatch, _getState) => {
             dispatch(appSlice.actions.closePanel()); // Close the folder selection panel immediately.
 
-            const latestState = getState();
-            if (isPluginUnloading(container) || latestState.status !== AppStatus.READY || latestState.noteId !== initialState.noteId) {
+            if (shouldAbort(services, getState, { noteId: initialState.noteId, status: AppStatus.READY })) {
                 uiService.showNotice("VC: Export cancelled because the note context changed during folder selection.");
                 return;
             }
@@ -286,9 +294,11 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: E
         console.error(`Version Control: Export failed for version V${versionEntry.versionNumber} of note ID ${versionEntry.noteId.substring(0, 8)}...`, error);
         uiService.showNotice(`Error: Failed to export version. ${errorMessage}.`, 7000);
     } finally {
-        const finalState = getState();
-        if (finalState.status === AppStatus.READY) {
-            dispatch(appSlice.actions.setProcessing(false));
+        if (!shouldAbort(services, getState)) {
+            const finalState = getState().app;
+            if (finalState.status === AppStatus.READY) {
+                dispatch(appSlice.actions.setProcessing(false));
+            }
         }
     }
 };
