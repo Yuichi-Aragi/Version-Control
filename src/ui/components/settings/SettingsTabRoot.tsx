@@ -13,8 +13,8 @@ export const SettingsTabRoot: FC = () => {
     const dispatch = useAppDispatch();
     const [activeTab, setActiveTab] = useState<SettingsTabId>('general');
     
-    const versionDefaults = useAppSelector(state => state.settings.versionHistorySettings);
-    const editDefaults = useAppSelector(state => state.settings.editHistorySettings);
+    const versionDefaults = useAppSelector(state => state.app.settings.versionHistorySettings);
+    const editDefaults = useAppSelector(state => state.app.settings.editHistorySettings);
 
     const handleTabChange = useCallback((tabId: SettingsTabId) => {
         setActiveTab(tabId);

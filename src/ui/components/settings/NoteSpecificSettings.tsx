@@ -11,11 +11,11 @@ interface NoteSpecificSettingsProps {
 
 export const NoteSpecificSettings: React.FC<NoteSpecificSettingsProps> = memo(({ headerAction }) => {
     const { status, file, noteId, isGlobal, viewMode } = useAppSelector(state => ({
-        status: state.status,
-        file: state.file,
-        noteId: state.noteId,
-        isGlobal: state.effectiveSettings.isGlobal,
-        viewMode: state.viewMode,
+        status: state.app.status,
+        file: state.app.file,
+        noteId: state.app.noteId,
+        isGlobal: state.app.effectiveSettings.isGlobal,
+        viewMode: state.app.viewMode,
     }), isEqual);
 
     if (status !== AppStatus.READY || !file) return null;

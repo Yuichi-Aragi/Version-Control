@@ -25,7 +25,7 @@ type DatabasePathFormValues = v.InferOutput<typeof DatabasePathFormSchema>;
 
 const DatabasePathSetting: React.FC = memo(() => {
     const dispatch = useAppDispatch();
-    const databasePath = useAppSelector(state => state.settings.databasePath);
+    const databasePath = useAppSelector(state => state.app.settings.databasePath);
 
     const { control, handleSubmit, reset, formState: { isValid, isDirty } } = useForm<DatabasePathFormValues>({
         mode: 'onChange',
@@ -33,7 +33,6 @@ const DatabasePathSetting: React.FC = memo(() => {
         defaultValues: { databasePath }
     });
 
-    // Sync external state changes
     useEffect(() => {
         reset({ databasePath });
     }, [databasePath, reset]);
@@ -81,7 +80,7 @@ type FrontmatterKeyFormValues = v.InferOutput<typeof FrontmatterKeyFormSchema>;
 
 const FrontmatterKeySetting: React.FC = memo(() => {
     const dispatch = useAppDispatch();
-    const frontmatterKey = useAppSelector(state => state.settings.noteIdFrontmatterKey);
+    const frontmatterKey = useAppSelector(state => state.app.settings.noteIdFrontmatterKey);
 
     const { control, handleSubmit, reset, formState: { isValid, isDirty } } = useForm<FrontmatterKeyFormValues>({
         mode: 'onChange',
@@ -130,7 +129,7 @@ FrontmatterKeySetting.displayName = 'FrontmatterKeySetting';
 
 const CompressionSetting: React.FC = memo(() => {
     const dispatch = useAppDispatch();
-    const enableCompression = useAppSelector(state => state.settings.enableCompression ?? true);
+    const enableCompression = useAppSelector(state => state.app.settings.enableCompression ?? true);
 
     const handleToggle = (checked: boolean) => {
         dispatch(thunks.updateGlobalSettings({ enableCompression: checked }));
@@ -163,8 +162,8 @@ type IdFormatFormValues = v.InferOutput<typeof IdFormatFormSchema>;
 
 const IdFormatSettings: React.FC = memo(() => {
     const dispatch = useAppDispatch();
-    const noteIdFormat = useAppSelector(state => state.settings.noteIdFormat);
-    const versionIdFormat = useAppSelector(state => state.settings.versionIdFormat);
+    const noteIdFormat = useAppSelector(state => state.app.settings.noteIdFormat);
+    const versionIdFormat = useAppSelector(state => state.app.settings.versionIdFormat);
     
     const { control, handleSubmit, reset, formState: { isValid, isDirty } } = useForm<IdFormatFormValues>({
         mode: 'onChange',
@@ -183,8 +182,8 @@ const IdFormatSettings: React.FC = memo(() => {
     return (
         <form onSubmit={handleSubmit(onSubmit)} style={{ width: '100%' }}>
             <SettingComponent
-                name="Note ID Format"
-                desc="Format for generating Note IDs. Available variables: {path}, {uuid}, {timestamp}. Default: {uuid}"
+                name="Note ID format"
+                desc="Format for generating note IDs. Available variables: {path}, {uuid}, {timestamp}. Default: {uuid}"
             >
                 <ValidatedInput
                     name="noteIdFormat"
@@ -195,8 +194,8 @@ const IdFormatSettings: React.FC = memo(() => {
             </SettingComponent>
             
             <SettingComponent
-                name="Version ID Format"
-                desc="Format for generating Version IDs. Available variables: {timestamp}, {version}, {name}. Default: {timestamp}_{version}"
+                name="Version ID format"
+                desc="Format for generating version IDs. Available variables: {timestamp}, {version}, {name}. Default: {timestamp}_{version}"
             >
                 <ValidatedInput
                     name="versionIdFormat"
@@ -214,7 +213,7 @@ const IdFormatSettings: React.FC = memo(() => {
                         className="mod-cta"
                         disabled={!isValid}
                     >
-                        Apply ID Format Changes
+                        Apply ID format changes
                     </button>
                 </div>
             )}
@@ -242,7 +241,7 @@ export const GlobalSettings: React.FC<GlobalSettingsProps> = memo(({
         <div className="v-settings-section" role="region" aria-labelledby="global-settings-title">
             {showTitle && (
                 <div className="v-settings-section-header-row">
-                    <h2 id="global-settings-title">Global Plugin Settings</h2>
+                    <h2 id="global-settings-title">Global plugin settings</h2>
                     {headerAction}
                 </div>
             )}
@@ -261,10 +260,10 @@ export const GlobalSettings: React.FC<GlobalSettingsProps> = memo(({
                     {(!activeViewMode || activeViewMode === 'versions') && (
                         <div style={{marginTop: '20px', borderTop: showPluginSettings ? '1px solid var(--background-modifier-border)' : 'none', paddingTop: '10px'}}>
                             <h3 id="global-version-defaults-title">
-                                Global Version History Defaults
+                                Global version history defaults
                             </h3>
                             <p className="setting-item-description">
-                                These settings apply to all notes using Version History unless overridden.
+                                These settings apply to all notes using version history unless overridden.
                             </p>
                             <AutoRegisterSettings settingKey="versionHistorySettings" />
                         </div>
@@ -273,10 +272,10 @@ export const GlobalSettings: React.FC<GlobalSettingsProps> = memo(({
                     {(!activeViewMode || activeViewMode === 'edits') && (
                         <div style={{marginTop: '20px', borderTop: (showPluginSettings || !activeViewMode) ? '1px solid var(--background-modifier-border)' : 'none', paddingTop: '10px'}}>
                             <h3 id="global-edit-defaults-title">
-                                Global Edit History Defaults
+                                Global edit history defaults
                             </h3>
                             <p className="setting-item-description">
-                                These settings apply to all notes using Edit History unless overridden.
+                                These settings apply to all notes using edit history unless overridden.
                             </p>
                             <AutoRegisterSettings settingKey="editHistorySettings" />
                         </div>
