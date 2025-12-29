@@ -1,4 +1,5 @@
 import { zip, unzip, strToU8, strFromU8, type Zippable } from 'fflate';
+import { produce } from 'immer';
 import { db } from '@/workers/edit-history/database';
 import { ManifestService } from '@/workers/edit-history/services/manifest-service';
 import { StateConsistencyError, ValidationError } from '@/workers/edit-history/errors';
@@ -17,9 +18,8 @@ export class ImportExportService {
             .equals([noteId, branchName])
             .toArray();
 
-        if (edits.length === 0) {
-            return new ArrayBuffer(0);
-        }
+        // NOTE: We do NOT return early if edits.length === 0.
+        // We must generate a valid ZIP file representing the empty state to persist deletions.
 
         if (edits.length > this.MAX_FILE_COUNT) {
             throw new ValidationError(
@@ -50,9 +50,12 @@ export class ImportExportService {
             }
         }
 
-        // Get current manifest for this branch to preserve version metadata
+        // Get current manifest for this branch to preserve version metadata AND settings
         const manifestRecord = await db.manifests.get(noteId);
         const branchManifest = manifestRecord?.manifest.branches[branchName];
+        
+        // Use the manifest's lastModified as the export timestamp to ensure consistency
+        const exportedAt = manifestRecord?.manifest.lastModified || new Date().toISOString();
 
         const metadataJson = JSON.stringify(metadataList);
         files['data.json'] = [strToU8(metadataJson), { level: 9 }];
@@ -64,8 +67,8 @@ export class ImportExportService {
             editCount: edits.length,
             totalSize,
             version: '1.0',
-            exportedAt: new Date().toISOString(),
-            branchMetadata: branchManifest // Include full branch manifest info
+            exportedAt: exportedAt,
+            branchMetadata: branchManifest // Include full branch manifest info (settings, versions, etc.)
         })), { level: 9 }];
 
         return new Promise<ArrayBuffer>((resolve, reject) => {
@@ -113,7 +116,6 @@ export class ImportExportService {
         });
 
         const metadataFile = unzipped['data.json'];
-        // Tolerant check for manifest.json
         const manifestFile = unzipped['manifest.json'];
 
         if (!metadataFile) {
@@ -158,6 +160,14 @@ export class ImportExportService {
                 storageType: meta.storageType || 'full', // Default to full for robustness
                 content: blobData.buffer as ArrayBuffer
             };
+
+            // Enforce invariant: Full edits must have chainLength 0
+            // This sanitizes potential corruption from imported data
+            if (edit.storageType === 'full' && edit.chainLength > 0) {
+                // @ts-ignore - modifying readonly for import sanitization
+                edit.chainLength = 0;
+            }
+
             edits.push(edit);
         }
 
@@ -191,12 +201,17 @@ export class ImportExportService {
 
             // Try to get branch metadata from manifest.json
             let branchManifest: any = null;
+            let exportedAt = new Date().toISOString();
+
             if (manifestFile) {
                 try {
                     const manifestJson = strFromU8(manifestFile as Uint8Array);
                     const parsed = JSON.parse(manifestJson);
                     if (parsed.branchMetadata) {
                         branchManifest = parsed.branchMetadata;
+                    }
+                    if (parsed.exportedAt) {
+                        exportedAt = parsed.exportedAt;
                     }
                 } catch (e) {
                     console.warn('Failed to parse manifest.json during import', e);
@@ -206,7 +221,6 @@ export class ImportExportService {
             // Fallback: Reconstruct branch manifest from edits if missing
             if (!branchManifest) {
                 const versions: Record<string, any> = {};
-                // Sort by createdAt to approximate version ordering
                 const sortedEdits = [...edits].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
                 
                 sortedEdits.forEach((edit, index) => {
@@ -226,8 +240,14 @@ export class ImportExportService {
             }
 
             // Update manifest with imported branch data
-            // Use setBranchData to handle immutability correctly
             manifest = ManifestService.setBranchData(manifest, branchName, branchManifest);
+
+            // CRITICAL: Override lastModified to match the export timestamp.
+            // This prevents the "Import -> Update DB -> DB Newer -> Export -> Loop" cycle.
+            // We set the DB state to exactly match the file state.
+            manifest = produce(manifest, (draft) => {
+                draft.lastModified = exportedAt;
+            });
 
             await db.manifests.put({
                 noteId,
@@ -279,6 +299,17 @@ export class ImportExportService {
                                     editCount: edits.length,
                                     version: '1.0',
                                     exportedAt: new Date(latest).toISOString(),
+                                    generatedFromData: true
+                                });
+                                return;
+                            } else if (Array.isArray(edits) && edits.length === 0) {
+                                // Handle empty data.json case
+                                resolve({
+                                    noteId: 'unknown',
+                                    branchName: 'unknown',
+                                    editCount: 0,
+                                    version: '1.0',
+                                    exportedAt: new Date().toISOString(),
                                     generatedFromData: true
                                 });
                                 return;

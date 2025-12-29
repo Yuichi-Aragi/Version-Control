@@ -400,6 +400,13 @@ export class EditStorageService {
 
             for (const descendant of descendants) {
                 if (!visited.has(descendant.editId)) {
+                    // FIX: Stop propagation at full edits.
+                    // Full edits start a new chain and establish a new base.
+                    // They shield their descendants from upstream base/chain changes.
+                    if (descendant.storageType === 'full') {
+                        continue;
+                    }
+
                     visited.add(descendant.editId);
                     queue.push(descendant.editId);
 
@@ -489,6 +496,11 @@ export class EditStorageService {
         baseEditId?: string;
         previousEditId?: string;
     }): CreateStoredEdit {
+        // Enforce invariant: Full edits must start a new chain (length 0).
+        // This prevents state corruption where 'full' edits carry non-zero chain lengths,
+        // which would otherwise break chain length calculations for subsequent edits.
+        const chainLength = params.storageType === 'full' ? 0 : params.chainLength;
+
         return freeze({
             noteId: params.noteId,
             branchName: params.branchName,
@@ -496,7 +508,7 @@ export class EditStorageService {
             content: params.content,
             contentHash: params.contentHash,
             storageType: params.storageType,
-            chainLength: params.chainLength,
+            chainLength: chainLength,
             createdAt: Date.now(),
             updatedAt: Date.now(),
             size: params.content.byteLength,
