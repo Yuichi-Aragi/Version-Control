@@ -1,5 +1,17 @@
 ***
 
+**Version: 1.9.39**
+
+#### ✨ New Features
+
+* **Disk Persistence Toggle:** Added a new setting that allows you to enable or disable the disk persistence of your edit history of any branch.
+
+#### 🎨 Improvements & UX
+
+* **Stability Improvements:** Implemented various fixes to enhance the overall stability of the plugin.
+
+***
+
 **Version: 1.9.37**
 
 #### ✨ New Features
