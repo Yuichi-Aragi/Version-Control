@@ -46,7 +46,7 @@ export function registerCommands(plugin: Plugin, store: AppStore): void {
             const activeFile = plugin.app.workspace.getActiveFile();
             if (activeFile && (activeFile.extension === 'md' || activeFile.extension === 'base')) {
                 if (!checking) {
-                    store.dispatch(thunks.saveNewVersion());
+                    store.dispatch(thunks.saveNewVersion({}));
                 }
                 return true;
             }
@@ -97,7 +97,8 @@ async function activateViewAndDispatch(plugin: Plugin, store: AppStore) {
     
     // Dispatch the initialization thunk. It will use the provided leaf as context,
     // or determine the context itself if the leaf is null.
-    store.dispatch(thunks.initializeView(contextLeaf));
+    // Explicitly pass undefined if contextLeaf is null, to satisfy strict call signature
+    store.dispatch(thunks.initializeView(contextLeaf || undefined));
 
     // Determine the target window (document) based on the currently active UI context.
     // This ensures that if the user is in a popout window, we target that window
