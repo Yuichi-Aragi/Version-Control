@@ -1,7 +1,9 @@
+import { produce } from 'immer';
 import type { VersionControlSettings, HistorySettings } from '@/types';
 
 /**
  * Settings merger utilities for combining global and per-note settings.
+ * Uses Immer to ensure immutability during merge operations.
  */
 
 /**
@@ -15,7 +17,9 @@ export function mergeGlobalSettings(
     globalSettings: VersionControlSettings,
     settingsUpdate: Partial<VersionControlSettings>
 ): VersionControlSettings {
-    return { ...globalSettings, ...settingsUpdate };
+    return produce(globalSettings, (draft) => {
+        Object.assign(draft, settingsUpdate);
+    });
 }
 
 /**
@@ -29,7 +33,9 @@ export function mergeVersionHistorySettings(
     versionSettings: HistorySettings,
     settingsUpdate: Partial<HistorySettings>
 ): HistorySettings {
-    return { ...versionSettings, ...settingsUpdate };
+    return produce(versionSettings, (draft) => {
+        Object.assign(draft, settingsUpdate);
+    });
 }
 
 /**
@@ -43,7 +49,9 @@ export function mergeEditHistorySettings(
     editSettings: HistorySettings,
     settingsUpdate: Partial<HistorySettings>
 ): HistorySettings {
-    return { ...editSettings, ...settingsUpdate };
+    return produce(editSettings, (draft) => {
+        Object.assign(draft, settingsUpdate);
+    });
 }
 
 /**
@@ -58,5 +66,6 @@ export function updateLegacyKeys(
     oldKey: string
 ): string[] {
     const legacyKeys = currentLegacyKeys || [];
+    // Using Set for uniqueness is cleaner than Immer here
     return Array.from(new Set([...legacyKeys, oldKey]));
 }
