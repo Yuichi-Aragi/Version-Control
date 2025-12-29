@@ -2,12 +2,7 @@ import type { AppThunk } from '@/state';
 import * as v from 'valibot';
 import { appSlice } from '@/state';
 import { AppStatus } from '@/state';
-import { TimelineManager } from '@/core';
-import { ManifestManager } from '@/core';
-import { EditHistoryManager } from '@/core';
-import { UIService } from '@/services';
-import { TYPES } from '@/types/inversify.types';
-import { isPluginUnloading } from '@/state/utils/settingsUtils';
+import { shouldAbort } from '@/state/utils/guards';
 import type { TimelineSettings } from '@/types';
 import { TimelineSettingsSchema } from '@/schemas';
 
@@ -15,12 +10,12 @@ import { TimelineSettingsSchema } from '@/schemas';
  * Thunks related to the Timeline feature.
  */
 
-export const openTimeline = (): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const state = getState();
-    const uiService = container.get<UIService>(TYPES.UIService);
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
-    const editHistoryManager = container.get<EditHistoryManager>(TYPES.EditHistoryManager);
+export const openTimeline = (): AppThunk => async (dispatch, getState, services) => {
+    if (shouldAbort(services, getState)) return;
+    const state = getState().app;
+    const uiService = services.uiService;
+    const manifestManager = services.manifestManager;
+    const editHistoryManager = services.editHistoryManager;
 
     if (state.status !== AppStatus.READY || !state.noteId || !state.currentBranch) {
         uiService.showNotice("Cannot open timeline: view context is not ready.");
@@ -54,19 +49,27 @@ export const openTimeline = (): AppThunk => async (dispatch, getState, container
         console.error("VC: Failed to load timeline settings", error);
     }
 
+    // Race Check: Verify context after async settings load
+    if (shouldAbort(services, getState, { noteId, branch: currentBranch, viewMode })) {
+        return;
+    }
+
     // Open the panel in loading state with settings
     dispatch(appSlice.actions.openPanel({ type: 'timeline', events: null, settings }));
 
-    const timelineManager = container.get<TimelineManager>(TYPES.TimelineManager);
+    const timelineManager = services.timelineManager;
 
     try {
         const events = await timelineManager.getOrGenerateTimeline(noteId, currentBranch, source);
         
-        // Verify state hasn't changed while we were awaiting
-        const currentState = getState();
-        if (currentState.status !== AppStatus.READY || currentState.noteId !== noteId || currentState.panel?.type !== 'timeline') {
+        // Race Check: Verify context after timeline generation
+        if (shouldAbort(services, getState, { noteId, branch: currentBranch, viewMode })) {
             return;
         }
+        
+        // Also ensure panel is still timeline
+        const currentState = getState().app;
+        if (currentState.panel?.type !== 'timeline') return;
 
         dispatch(appSlice.actions.setTimelineData(events));
     } catch (error) {
@@ -76,11 +79,11 @@ export const openTimeline = (): AppThunk => async (dispatch, getState, container
     }
 };
 
-export const updateTimelineSettings = (newSettings: Partial<TimelineSettings>): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const state = getState();
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
-    const editHistoryManager = container.get<EditHistoryManager>(TYPES.EditHistoryManager);
+export const updateTimelineSettings = (newSettings: Partial<TimelineSettings>): AppThunk => async (dispatch, getState, services) => {
+    if (shouldAbort(services, getState)) return;
+    const state = getState().app;
+    const manifestManager = services.manifestManager;
+    const editHistoryManager = services.editHistoryManager;
 
     if (state.status !== AppStatus.READY || !state.noteId || !state.currentBranch || state.panel?.type !== 'timeline') {
         return;

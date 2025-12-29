@@ -2,11 +2,8 @@ import { TFile, type CachedMetadata, debounce } from 'obsidian';
 import type { AppThunk } from '@/state';
 import { appSlice } from '@/state';
 import { AppStatus } from '@/state';
-import { NoteManager } from '@/core';
-import { ManifestManager } from '@/core';
-import { TYPES } from '@/types/inversify.types';
-import { isPluginUnloading, resolveSettings } from '@/state/utils/settingsUtils';
-import type VersionControlPlugin from '@/main';
+import { resolveSettings } from '@/state/utils/settingsUtils';
+import { shouldAbort } from '@/state/utils/guards';
 import { initializeView } from './core.thunks';
 import { performAutoSave } from '@/state/thunks/version';
 import { saveNewEdit } from '@/state/thunks/edit-history';
@@ -15,18 +12,18 @@ import { saveNewEdit } from '@/state/thunks/edit-history';
  * Thunks related to handling application and vault events.
  */
 
-export const handleMetadataChange = (file: TFile, cache: CachedMetadata): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
+export const handleMetadataChange = (file: TFile, cache: CachedMetadata): AppThunk => async (dispatch, getState, services) => {
+    if (shouldAbort(services, getState)) return;
     
     // Guard against processing files that are part of an in-progress deviation creation.
-    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
+    const noteManager = services.noteManager;
     if (noteManager.isPendingDeviation(file.path)) {
         return;
     }
 
     if (file.extension !== 'md') return;
 
-    const state = getState();
+    const state = getState().app;
     if (state.status === AppStatus.READY && state.isProcessing && state.file?.path === file.path) {
         return;
     }
@@ -34,14 +31,17 @@ export const handleMetadataChange = (file: TFile, cache: CachedMetadata): AppThu
         return;
     }
 
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
-    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
+    const manifestManager = services.manifestManager;
+    const plugin = services.plugin;
     const noteIdKey = plugin.settings.noteIdFrontmatterKey;
     const legacyKeys = plugin.settings.legacyNoteIdFrontmatterKeys;
 
     const fileCache = cache;
     const newNoteIdFromFrontmatter = fileCache?.frontmatter?.[noteIdKey] ?? null;
     const oldNoteIdInManifest = await manifestManager.getNoteIdByPath(file.path);
+    
+    // Race Check: Ensure context hasn't changed during async ID lookup
+    if (shouldAbort(services, getState)) return;
 
     let idChanged = false;
     
@@ -76,20 +76,20 @@ export const handleMetadataChange = (file: TFile, cache: CachedMetadata): AppThu
     if (idChanged) {
         manifestManager.invalidateCentralManifestCache();
 
-        const currentState = getState();
+        const currentState = getState().app;
         if ((currentState.status === AppStatus.READY || currentState.status === AppStatus.LOADING) && currentState.file?.path === file.path) {
-            dispatch(initializeView());
+            dispatch(initializeView(undefined));
         }
     }
 };
 
-export const handleFileRename = (file: TFile, oldPath: string): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
+export const handleFileRename = (file: TFile, oldPath: string): AppThunk => async (dispatch, getState, services) => {
+    if (shouldAbort(services, getState)) return;
     if (file.extension !== 'md' && file.extension !== 'base') return;
 
-    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
-    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const plugin = services.plugin;
+    const noteManager = services.noteManager;
+    const manifestManager = services.manifestManager;
     
     const debouncerInfo = plugin.autoSaveDebouncers.get(oldPath);
     if (debouncerInfo) {
@@ -102,20 +102,20 @@ export const handleFileRename = (file: TFile, oldPath: string): AppThunk => asyn
     // Handle the rename, which may involve updating the ID if it depends on the path
     await noteManager.handleNoteRename(file, oldPath);
     
-    const state = getState();
+    const state = getState().app;
     // Re-initialize view if the active file was the one renamed
     if (state.file?.path === oldPath || (oldNoteId && state.noteId === oldNoteId)) {
-        dispatch(initializeView());
+        dispatch(initializeView(undefined));
     }
 };
 
-export const handleFileDelete = (file: TFile): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
+export const handleFileDelete = (file: TFile): AppThunk => async (dispatch, getState, services) => {
+    if (shouldAbort(services, getState)) return;
     if (file.extension !== 'md' && file.extension !== 'base') return;
     
-    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
-    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
+    const plugin = services.plugin;
+    const noteManager = services.noteManager;
+    const manifestManager = services.manifestManager;
 
     const debouncerInfo = plugin.autoSaveDebouncers.get(file.path);
     if (debouncerInfo) {
@@ -128,14 +128,14 @@ export const handleFileDelete = (file: TFile): AppThunk => async (dispatch, getS
     noteManager.invalidateCentralManifestCache();
     manifestManager.invalidateCentralManifestCache();
 
-    const state = getState();
+    const state = getState().app;
     if (state.file?.path === file.path || (deletedNoteId && state.noteId === deletedNoteId)) {
         dispatch(appSlice.actions.clearActiveNote()); 
     }
 };
 
-export const handleVaultSave = (file: TFile): AppThunk => async (dispatch, _getState, container) => {
-    if (isPluginUnloading(container)) return;
+export const handleVaultSave = (file: TFile): AppThunk => async (dispatch, _getState, services) => {
+    if (shouldAbort(services, _getState)) return;
 
     // Filter: Only allow .md and .base files
     if (file.extension !== 'md' && file.extension !== 'base') return;
@@ -143,17 +143,17 @@ export const handleVaultSave = (file: TFile): AppThunk => async (dispatch, _getS
     // Filter: Ignore files in hidden folders (starting with .)
     if (file.path.split('/').some(part => part.startsWith('.'))) return;
 
-    const noteManager = container.get<NoteManager>(TYPES.NoteManager);
-    const manifestManager = container.get<ManifestManager>(TYPES.ManifestManager);
-    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
+    const noteManager = services.noteManager;
+    const manifestManager = services.manifestManager;
+    const plugin = services.plugin;
   
     const noteId = await noteManager.getNoteId(file) ?? await manifestManager.getNoteIdByPath(file.path);
     if (!noteId) return;
   
     // Check Version Settings
-    const versionSettings = await resolveSettings(noteId, 'version', container);
+    const versionSettings = await resolveSettings(noteId, 'version', services);
     // Check Edit Settings
-    const editSettings = await resolveSettings(noteId, 'edit', container);
+    const editSettings = await resolveSettings(noteId, 'edit', services);
     
     const debouncerInfo = plugin.autoSaveDebouncers.get(file.path);
 

@@ -1,20 +1,12 @@
-import { App, TFolder, TFile } from 'obsidian';
-import type { Container } from 'inversify';
-import type { AppThunk, AppStore } from '@/state';
+import { TFolder, TFile } from 'obsidian';
+import type { AppThunk, Services } from '@/state';
 import { appSlice } from '@/state';
 import type { VersionHistoryEntry, ViewMode } from '@/types';
 import { AppStatus, type ActionItem, type SortOrder, type SortProperty, type SortDirection } from '@/state';
-import { CHANGELOG_URL } from '@/constants';
 import { loadEffectiveSettingsForNote, loadHistoryForNoteId } from './core.thunks';
-import { UIService } from '@/services';
-import { VersionManager } from '@/core';
-import { EditHistoryManager } from '@/core';
-import { TYPES } from '@/types/inversify.types';
-import { isPluginUnloading } from '@/state/utils/settingsUtils';
+import { shouldAbort } from '@/state/utils/guards';
 import { versionActions } from '@/ui/VersionActions';
 import { editActions } from '@/ui/EditActions';
-import type VersionControlPlugin from '@/main';
-import { requestWithRetry } from '@/utils/network';
 import { loadEditHistory } from '@/state/thunks/edit-history';
 import { createBranch, switchBranch, requestDeleteBranch } from '@/state/thunks/version';
 
@@ -22,18 +14,9 @@ import { createBranch, switchBranch, requestDeleteBranch } from '@/state/thunks/
  * Thunks related to UI interactions, such as opening panels, tabs, and modals.
  */
 
-let changelogCache: string | null = null;
-let isFetchingChangelog = false; // Flag to prevent concurrent fetches
-
-/**
- * Updates the plugin version in settings to the current manifest version.
- * This is called after a changelog is successfully displayed to prevent it
- * from showing again on the next startup.
- * @param container The Inversify container.
- */
-const updateVersionInSettings = async (container: Container): Promise<void> => {
+const updateVersionInSettings = async (services: Services): Promise<void> => {
     try {
-        const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
+        const plugin = services.plugin;
         const currentPluginVersion = plugin.manifest.version;
         if (plugin.settings.version !== currentPluginVersion) {
             plugin.settings.version = currentPluginVersion;
@@ -41,174 +24,124 @@ const updateVersionInSettings = async (container: Container): Promise<void> => {
         }
     } catch (error) {
         console.error("Version Control: Failed to save updated version to settings.", error);
-        // This is a non-critical error, so we don't bother the user with a notice.
     }
 };
 
-export const toggleViewMode = (): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const state = getState();
-
+export const toggleViewMode = (): AppThunk => async (dispatch, getState, services) => {
+    if (shouldAbort(services, getState)) return;
+    
+    // Defensive check for settings availability
+    if (!services.plugin?.settings) {
+        console.warn("Version Control: Plugin settings not available in toggleViewMode");
+        return;
+    }
+    
+    const state = getState().app;
     const currentMode = state.viewMode;
     const newMode: ViewMode = currentMode === 'versions' ? 'edits' : 'versions';
     
     // 1. Pre-emptively reset effective settings to global defaults for the new mode
-    // This minimizes "bleed over" of specific settings from the previous mode during the async load
-    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
+    const plugin = services.plugin;
     const globalDefaults = newMode === 'versions' 
         ? plugin.settings.versionHistorySettings 
         : plugin.settings.editHistorySettings;
     
     dispatch(appSlice.actions.updateEffectiveSettings({ ...globalDefaults, isGlobal: true }));
 
-    // 2. Update State (This clears panel, diffRequest, etc.)
+    // 2. Update State (This clears panel, diffRequest, etc. and sets status to LOADING)
+    // This also increments contextVersion, invalidating previous loads.
     dispatch(appSlice.actions.setViewMode(newMode));
+    
+    // Capture the new context version
+    const contextVersion = getState().app.contextVersion;
 
     // 3. Load Data for New Mode
     const { noteId, file } = state;
+
+    // Handle Unregistered Note Case
+    if (file && !noteId) {
+        dispatch(appSlice.actions.historyLoadedSuccess({
+            file: file,
+            noteId: null,
+            history: [],
+            currentBranch: null,
+            availableBranches: [],
+            contextVersion
+        }));
+        return;
+    }
+
+    // Handle Registered Note Case
     if (noteId && file) {
-        dispatch(loadEffectiveSettingsForNote(noteId));
+        // STRICT SYNCHRONIZATION:
+        // We must await settings resolution BEFORE loading history.
+        await dispatch(loadEffectiveSettingsForNote(noteId));
         
+        // Race Check: Ensure context matches after settings load
+        if (shouldAbort(services, getState, { contextVersion })) return;
+
         if (newMode === 'edits') {
-            dispatch(loadEditHistory(noteId));
+            await dispatch(loadEditHistory(noteId));
         } else {
-            dispatch(loadHistoryForNoteId(file, noteId));
+            await dispatch(loadHistoryForNoteId({ file, noteId }));
+        }
+
+        // CRITICAL: Sync watch mode AFTER history is loaded.
+        if (!shouldAbort(services, getState, { contextVersion })) {
+            services.backgroundTaskManager.syncWatchMode();
         }
     }
 };
 
-export const showChangelogPanel = (options: { forceRefresh?: boolean; isManualRequest?: boolean } = {}): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
+export const showChangelogPanel = (options: { forceRefresh?: boolean; isManualRequest?: boolean } = {}): AppThunk => async (dispatch, getState, services) => {
+    if (shouldAbort(services, getState)) return;
     
-    const { forceRefresh = false, isManualRequest = true } = options;
-    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
-    const uiService = container.get<UIService>(TYPES.UIService);
-    const currentState = getState();
+    const { isManualRequest = true } = options;
+    const plugin = services.plugin;
+    const currentState = getState().app;
 
-    // --- Gatekeeper for Automatic Requests ---
-    // For an automatic request, if the view state isn't stable or another panel is open,
-    // we queue the request and wait for a better opportunity. This is the primary
-    // entry point into the queuing system.
     if (!isManualRequest) {
         const isViewStable = currentState.status === AppStatus.INITIALIZING || currentState.status === AppStatus.READY || currentState.status === AppStatus.PLACEHOLDER || currentState.status === AppStatus.LOADING;
         const isPanelAvailable = !currentState.panel || currentState.panel.type === 'changelog';
         if (!isViewStable || !isPanelAvailable) {
-            plugin.queuedChangelogRequest = { forceRefresh, isManualRequest: false };
-            return; // Queue and exit
+            plugin.queuedChangelogRequest = { forceRefresh: options.forceRefresh ?? false, isManualRequest: false };
+            return;
         }
     }
 
-    // --- Proceed for Manual or Ready Automatic Requests ---
-    
-    // We are now processing the request, so clear the queue to prevent re-processing.
     plugin.queuedChangelogRequest = null;
 
-    // For manual requests, forcefully close any existing panel to ensure the changelog is visible.
     if (isManualRequest && currentState.panel) {
         dispatch(appSlice.actions.closePanel());
     }
+
+    dispatch(appSlice.actions.openPanel({ type: 'changelog' }));
     
-    if (isFetchingChangelog) {
-        if (isManualRequest) {
-            uiService.showNotice("Already fetching changelog...", 2000);
-        }
-        return;
-    }
-
-    if (!forceRefresh && changelogCache) {
-        dispatch(appSlice.actions.openPanel({ type: 'changelog', content: changelogCache }));
-        // If showing from cache, it's a successful display, so update version.
-        await updateVersionInSettings(container);
-        return;
-    }
-
-    if (!navigator.onLine) {
-        if (isManualRequest) {
-            uiService.showNotice("No internet connection available.", 4000);
-        }
-        // For automatic requests, we fail silently and don't queue if offline.
-        return;
-    }
-
-    isFetchingChangelog = true;
-    dispatch(appSlice.actions.openPanel({ type: 'changelog', content: null })); // Show loading state
-    if (isManualRequest) {
-        uiService.showNotice("Fetching latest changelog...", 2000);
-    }
-
-    try {
-        const response = await requestWithRetry(CHANGELOG_URL);
-        changelogCache = response.text;
-        
-        const stateAfterFetch = getState();
-        // This is the final check before displaying the content and updating the version.
-        // For a manual request, we always show it.
-        // For a automatic request, we only show it if our loading panel is still the active one.
-        // This prevents showing the changelog if the user has navigated away or opened another panel
-        // during the fetch, which would be intrusive.
-        const canShowPanelNow = isManualRequest || stateAfterFetch.panel?.type === 'changelog';
-
-        if (canShowPanelNow) {
-            dispatch(appSlice.actions.openPanel({ type: 'changelog', content: changelogCache }));
-            // The version is updated ONLY after we have successfully committed to showing the panel.
-            // This is the key to preventing the "version updated but panel not shown" bug.
-            await updateVersionInSettings(container);
-        } else {
-            // Another panel opened during the fetch of an automatic request.
-            // We must re-queue the request to try again later.
-            // Crucially, we DO NOT update the version in this case.
-            plugin.queuedChangelogRequest = { forceRefresh, isManualRequest: false };
-        }
-
-    } catch (error) {
-        console.error("Version Control: Failed to fetch changelog.", error);
-        
-        let errorMessage = "Could not fetch changelog. Check console for details.";
-        if (!navigator.onLine) {
-            errorMessage = "Could not fetch changelog: No internet connection.";
-        } else if (error instanceof Error && (error.message.includes('status') || error.message.includes('Failed to fetch') || error.message.includes('No internet connection'))) {
-            errorMessage = "Could not fetch changelog: The server could not be reached.";
-        }
-
-        if (isManualRequest) {
-            uiService.showNotice(errorMessage, 5000);
-        }
-        
-        // If the loading panel is still open, close it on failure.
-        if (getState().panel?.type === 'changelog') {
-            dispatch(appSlice.actions.closePanel());
-        }
-    } finally {
-        if (!isPluginUnloading(container)) {
-            isFetchingChangelog = false;
-        }
-    }
+    await updateVersionInSettings(services);
 };
 
-export const processQueuedChangelogRequest = (): AppThunk => (dispatch, _getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const plugin = container.get<VersionControlPlugin>(TYPES.Plugin);
+export const processQueuedChangelogRequest = (): AppThunk => (dispatch, _getState, services) => {
+    if (shouldAbort(services, _getState)) return;
+    const plugin = services.plugin;
 
     const request = plugin.queuedChangelogRequest;
     if (request) {
-        // Clear the queue BEFORE dispatching to prevent potential infinite loops.
-        // The thunk itself will re-queue if necessary.
         plugin.queuedChangelogRequest = null; 
         dispatch(showChangelogPanel(request));
     }
 };
 
-export const createDeviation = (version: VersionHistoryEntry): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const uiService = container.get<UIService>(TYPES.UIService);
-    const app = container.get<App>(TYPES.App);
-    const initialState = getState();
+export const createDeviation = (version: VersionHistoryEntry): AppThunk => async (dispatch, getState, services) => {
+    if (shouldAbort(services, getState)) return;
+    const uiService = services.uiService;
+    const app = services.app;
+    const initialState = getState().app;
     if (initialState.isRenaming) {
         uiService.showNotice("Cannot create deviation while database is being renamed.");
         return;
     }
     if (initialState.status !== AppStatus.READY || !initialState.noteId || initialState.noteId !== version.noteId) {
-        uiService.showNotice("VC: Cannot create a deviation from this version because the note context changed.");
+        uiService.showNotice("VC: Cannot create a deviation from this version/edit because the note context changed.");
         return;
     }
     
@@ -219,22 +152,22 @@ export const createDeviation = (version: VersionHistoryEntry): AppThunk => async
         text: folder.isRoot() ? "/" : folder.path,
     }));
 
-    const onChooseAction = (selectedFolder: TFolder): AppThunk => async (dispatch, getState, container) => {
-        if (isPluginUnloading(container)) return;
-        const versionManager = container.get<VersionManager>(TYPES.VersionManager);
-        const editHistoryManager = container.get<EditHistoryManager>(TYPES.EditHistoryManager);
+    const onChooseAction = (selectedFolder: TFolder): AppThunk => async (dispatch, getState, services) => {
+        if (shouldAbort(services, getState)) return;
+        const versionManager = services.versionManager;
+        const editHistoryManager = services.editHistoryManager;
         
-        dispatch(appSlice.actions.closePanel()); // Close the folder selection panel immediately.
+        dispatch(appSlice.actions.closePanel());
 
-        const latestState = getState();
-        if (latestState.status !== AppStatus.READY || latestState.noteId !== version.noteId) {
+        // Race Check: Ensure context matches after panel close and before async ops
+        if (shouldAbort(services, getState, { noteId: version.noteId, status: AppStatus.READY })) {
             uiService.showNotice("VC: Deviation cancelled because the note context changed during folder selection.");
             return;
         }
         
         try {
             let newFile: TFile | null = null;
-            const viewMode = latestState.viewMode;
+            const viewMode = getState().app.viewMode;
 
             if (viewMode === 'versions') {
                 newFile = await versionManager.createDeviation(version.noteId, version.id, selectedFolder);
@@ -264,9 +197,9 @@ export const createDeviation = (version: VersionHistoryEntry): AppThunk => async
     }));
 };
 
-export const showVersionContextMenu = (version: VersionHistoryEntry): AppThunk => (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const state = getState();
+export const showVersionContextMenu = (version: VersionHistoryEntry): AppThunk => (dispatch, getState, services) => {
+    if (shouldAbort(services, getState)) return;
+    const state = getState().app;
 
     if (state.status !== AppStatus.READY || state.noteId !== version.noteId) {
         return;
@@ -284,11 +217,10 @@ export const showVersionContextMenu = (version: VersionHistoryEntry): AppThunk =
         icon: action.icon,
     }));
 
-    const onChooseAction = (actionId: string): AppThunk => (_dispatch, _getState, _container) => {
+    const onChooseAction = (actionId: string): AppThunk => (_dispatch, _getState, services) => {
         const action = actionsList.find(a => a.id === actionId);
         if (action) {
-            // We need to get the store from the container again inside this new thunk's scope
-            const store = container.get<AppStore>(TYPES.Store);
+            const store = services.store;
             action.actionHandler(version, store);
         }
     };
@@ -302,9 +234,9 @@ export const showVersionContextMenu = (version: VersionHistoryEntry): AppThunk =
     }));
 };
 
-export const showSortMenu = (): AppThunk => (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const state = getState();
+export const showSortMenu = (): AppThunk => (dispatch, getState, services) => {
+    if (shouldAbort(services, getState)) return;
+    const state = getState().app;
 
     if (state.status !== AppStatus.READY) return;
     
@@ -316,7 +248,7 @@ export const showSortMenu = (): AppThunk => (dispatch, getState, container) => {
         { label: 'Name (A to Z)', property: 'name', direction: 'asc' },
         { label: 'Name (Z to A)', property: 'name', direction: 'desc' },
         { label: 'Size (largest to smallest)', property: 'size', direction: 'desc' },
-        { label: 'Size (smallest to largest)', property: 'size', 'direction': 'asc' },
+        { label: 'Size (smallest to largest)', property: 'size', direction: 'asc' },
     ];
 
     const items: ActionItem<SortOrder>[] = sortOptions.map(opt => {
@@ -325,7 +257,7 @@ export const showSortMenu = (): AppThunk => (dispatch, getState, container) => {
             id: `${opt.property}-${opt.direction}`,
             data: { property: opt.property, direction: opt.direction },
             text: opt.label,
-            icon: 'blank', // Provide a placeholder for alignment; 'check' is handled by isSelected.
+            icon: 'blank',
             isSelected,
         };
     });
@@ -344,8 +276,9 @@ export const showSortMenu = (): AppThunk => (dispatch, getState, container) => {
     }));
 };
 
-export const showBranchSwitcher = (): AppThunk => (dispatch, getState) => {
-    const state = getState();
+export const showBranchSwitcher = (): AppThunk => (dispatch, getState, services) => {
+    if (shouldAbort(services, getState)) return;
+    const state = getState().app;
     if (state.status !== AppStatus.READY || !state.noteId) return;
 
     const { availableBranches, currentBranch } = state;
@@ -366,9 +299,7 @@ export const showBranchSwitcher = (): AppThunk => (dispatch, getState) => {
     };
 
     const contextActions = (item: ActionItem<string>): ActionItem<string>[] => {
-        // Prevent context menu on the special "Create new" item
         if (item.id === '__create__') return [];
-        
         return [
             { id: 'delete', data: 'delete', text: 'Delete Branch', icon: 'trash' }
         ];
@@ -392,22 +323,22 @@ export const showBranchSwitcher = (): AppThunk => (dispatch, getState) => {
     }));
 };
 
-export const showNotice = (message: string, duration?: number): AppThunk => (_dispatch, _getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const uiService = container.get<UIService>(TYPES.UIService);
+export const showNotice = (message: string, duration?: number): AppThunk => (_dispatch, _getState, services) => {
+    if (shouldAbort(services, _getState)) return;
+    const uiService = services.uiService;
     uiService.showNotice(message, duration);
 };
 
-export const closeSettingsPanelWithNotice = (message: string, duration?: number): AppThunk => (dispatch, _getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const uiService = container.get<UIService>(TYPES.UIService);
+export const closeSettingsPanelWithNotice = (message: string, duration?: number): AppThunk => (dispatch, _getState, services) => {
+    if (shouldAbort(services, _getState)) return;
+    const uiService = services.uiService;
     dispatch(appSlice.actions.closePanel());
     uiService.showNotice(message, duration);
 };
 
-export const openDashboard = (): AppThunk => (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const state = getState();
+export const openDashboard = (): AppThunk => (dispatch, getState, services) => {
+    if (shouldAbort(services, getState)) return;
+    const state = getState().app;
     if (state.status !== AppStatus.READY) return;
 
     dispatch(appSlice.actions.openPanel({ type: 'dashboard' }));

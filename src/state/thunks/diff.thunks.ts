@@ -1,22 +1,19 @@
-import { moment, App, MarkdownView } from 'obsidian';
+import { moment, MarkdownView } from 'obsidian';
 import type { AppThunk } from '@/state';
-import { appSlice } from '@/state';
+import { appSlice, selectAllHistory, selectAllEditHistory } from '@/state/appSlice';
 import type { VersionHistoryEntry, DiffTarget, DiffType } from '@/types';
 import { AppStatus, type ActionItem } from '@/state';
-import { UIService } from '@/services';
-import { DiffManager } from '@/services';
-import { EditHistoryManager } from '@/core';
-import { TYPES } from '@/types/inversify.types';
-import { isPluginUnloading } from '@/state/utils/settingsUtils';
+import { shouldAbort } from '@/state/utils/guards';
 
 /**
  * Thunks for generating and displaying diffs between versions.
  */
 
-export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const uiService = container.get<UIService>(TYPES.UIService);
-    const state = getState();
+export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (dispatch, getState, services) => {
+    if (shouldAbort(services, getState)) return;
+    const uiService = services.uiService;
+    const rootState = getState();
+    const state = rootState.app;
 
     if (state.status !== AppStatus.READY || !state.noteId || !state.file) {
         uiService.showNotice("Cannot start diff: view context has changed.", 3000);
@@ -24,7 +21,12 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
     }
 
     const { viewMode } = state;
-    const activeList = viewMode === 'versions' ? state.history : state.editHistory;
+    
+    // Use selectors to get the array from EntityState
+    const history = selectAllHistory(rootState);
+    const editHistory = selectAllEditHistory(rootState);
+    
+    const activeList = viewMode === 'versions' ? history : editHistory;
     const otherVersions = activeList.filter(v => v.id !== version1.id);
     
     const currentStateTarget: DiffTarget = {
@@ -68,16 +70,16 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
     }));
 };
 
-export const generateAndShowDiffInPanel = (version1: VersionHistoryEntry, version2: DiffTarget): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
+export const generateAndShowDiffInPanel = (version1: VersionHistoryEntry, version2: DiffTarget): AppThunk => async (dispatch, getState, services) => {
+    if (shouldAbort(services, getState)) return;
 
     dispatch(appSlice.actions.closePanel());
 
-    const uiService = container.get<UIService>(TYPES.UIService);
-    const diffManager = container.get<DiffManager>(TYPES.DiffManager);
-    const editHistoryManager = container.get<EditHistoryManager>(TYPES.EditHistoryManager);
+    const uiService = services.uiService;
+    const diffManager = services.diffManager;
+    const editHistoryManager = services.editHistoryManager;
     
-    const initialState = getState();
+    const initialState = getState().app;
     if (initialState.status !== AppStatus.READY || !initialState.noteId || !initialState.file) return;
     const { noteId, viewMode } = initialState;
 
@@ -105,8 +107,8 @@ export const generateAndShowDiffInPanel = (version1: VersionHistoryEntry, versio
         const rawContent1 = await fetchContent(version1);
         const rawContent2 = await fetchContent(version2);
         
-        const stateAfterContentFetch = getState();
-        if (isPluginUnloading(container) || stateAfterContentFetch.status !== AppStatus.READY || stateAfterContentFetch.noteId !== noteId || !stateAfterContentFetch.file) {
+        // Race Check: Verify context after content fetch
+        if (shouldAbort(services, getState, { noteId, status: AppStatus.READY })) {
             uiService.showNotice("View context changed while fetching content. Diff cancelled.", 4000);
             return;
         }
@@ -131,8 +133,8 @@ export const generateAndShowDiffInPanel = (version1: VersionHistoryEntry, versio
         // Manager handles cloning/transferring to worker.
         const diffChanges = await diffManager.computeDiff(noteId, version1.id, version2.id, rawContent1, rawContent2, 'lines');
         
-        const finalState = getState();
-        if (isPluginUnloading(container) || finalState.status !== AppStatus.READY || finalState.noteId !== noteId) {
+        // Race Check: Verify context after diff computation
+        if (shouldAbort(services, getState, { noteId, status: AppStatus.READY })) {
             uiService.showNotice("View context changed, diff cancelled.", 3000);
             dispatch(appSlice.actions.clearDiffRequest());
             return;
@@ -148,10 +150,10 @@ export const generateAndShowDiffInPanel = (version1: VersionHistoryEntry, versio
     }
 };
 
-export const viewReadyDiff = (renderMode: 'panel' | 'window' = 'panel'): AppThunk => (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const uiService = container.get<UIService>(TYPES.UIService);
-    const state = getState();
+export const viewReadyDiff = (renderMode: 'panel' | 'window' = 'panel'): AppThunk => (dispatch, getState, services) => {
+    if (shouldAbort(services, getState)) return;
+    const uiService = services.uiService;
+    const state = getState().app;
 
     if (state.status !== AppStatus.READY) return;
     
@@ -181,11 +183,11 @@ export const viewReadyDiff = (renderMode: 'panel' | 'window' = 'panel'): AppThun
     }));
 };
 
-export const recomputeDiff = (newDiffType: DiffType): AppThunk => async (dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const diffManager = container.get<DiffManager>(TYPES.DiffManager);
-    const uiService = container.get<UIService>(TYPES.UIService);
-    const state = getState();
+export const recomputeDiff = (newDiffType: DiffType): AppThunk => async (dispatch, getState, services) => {
+    if (shouldAbort(services, getState)) return;
+    const diffManager = services.diffManager;
+    const uiService = services.uiService;
+    const state = getState().app;
 
     if (state.panel?.type !== 'diff') return;
     const { version1, version2, content1, content2 } = state.panel;
@@ -197,6 +199,15 @@ export const recomputeDiff = (newDiffType: DiffType): AppThunk => async (dispatc
         // Here we only have strings in state.panel, so we pass strings.
         // The worker handles strings as well.
         const diffChanges = await diffManager.computeDiff(noteId, version1.id, version2.id, content1, content2, newDiffType);
+        
+        // Race Check: Ensure we are still looking at the same diff panel
+        if (shouldAbort(services, getState, { noteId })) {
+            return;
+        }
+        // Also check if panel type is still diff, though shouldAbort doesn't check panel type specifically.
+        const currentState = getState().app;
+        if (currentState.panel?.type !== 'diff') return;
+
         dispatch(appSlice.actions.reDiffingSucceeded({ diffChanges }));
     } catch (error) {
         console.error("Version Control: Failed to re-compute diff.", error);
@@ -210,11 +221,11 @@ export const recomputeDiff = (newDiffType: DiffType): AppThunk => async (dispatc
  * This is primarily used for navigating from the diff view to the editor.
  * @param line The 1-based line number to scroll to.
  */
-export const scrollToLineInEditor = (line: number): AppThunk => (_dispatch, getState, container) => {
-    if (isPluginUnloading(container)) return;
-    const state = getState();
-    const uiService = container.get<UIService>(TYPES.UIService);
-    const app = container.get<App>(TYPES.App);
+export const scrollToLineInEditor = (line: number): AppThunk => (_dispatch, getState, services) => {
+    if (shouldAbort(services, getState)) return;
+    const state = getState().app;
+    const uiService = services.uiService;
+    const app = services.app;
 
     if (state.status !== AppStatus.READY || !state.file) {
         uiService.showNotice("Cannot scroll: no active note in version control view.", 4000);
