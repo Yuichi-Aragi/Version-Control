@@ -1,12 +1,11 @@
+import { orderBy } from 'es-toolkit';
+import type { VersionHistoryEntry, NoteManifest } from '@/types';
+
 /**
  * Edit Aggregator Helper
  *
  * Utilities for aggregating and transforming edit history data
  */
-
-import { orderBy } from 'es-toolkit';
-import { map } from 'es-toolkit/compat';
-import type { VersionHistoryEntry, NoteManifest } from '@/types';
 
 /**
  * Builds sorted edit history entries from manifest data
@@ -27,7 +26,7 @@ export function buildEditHistory(
         return [];
     }
 
-    const history = map(currentBranchData.versions, (data: any, id: string) => ({
+    const history = Object.entries(currentBranchData.versions).map(([id, data]) => ({
         id,
         noteId,
         notePath: manifest.notePath,
@@ -47,6 +46,7 @@ export function buildEditHistory(
         lineCountWithoutMd: data.lineCountWithoutMd,
     }));
 
+    // Use es-toolkit orderBy for sorting
     return orderBy(history, ['versionNumber'], ['desc']);
 }
 
