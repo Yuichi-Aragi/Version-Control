@@ -1,4 +1,5 @@
 import { TFile } from 'obsidian';
+import type { EntityState } from '@reduxjs/toolkit';
 import type { VersionControlSettings, HistorySettings, VersionHistoryEntry, AppError, DiffTarget, DiffRequest, DiffType, Change, TimelineEvent, TimelineSettings, ViewMode } from '@/types';
 export type { TimelineEvent } from '@/types';
 import { DEFAULT_SETTINGS } from '@/constants';
@@ -48,7 +49,7 @@ export interface DiffPanel {
     content1: string;
     content2: string;
     isReDiffing?: boolean;
-    renderMode?: 'panel' | 'window'; // NEW: Determines where the diff is rendered
+    renderMode?: 'panel' | 'window';
 }
 
 export interface SettingsPanel {
@@ -57,7 +58,6 @@ export interface SettingsPanel {
 
 export interface ChangelogPanel {
     type: 'changelog';
-    content: string | null; // null while loading
 }
 
 export interface TimelinePanel {
@@ -122,6 +122,14 @@ export interface SortOrder {
 
 export interface AppState {
     status: AppStatus;
+    
+    /**
+     * Monotonically increasing counter that tracks the "version" of the current view context.
+     * Incremented whenever the active note, view mode, or branch changes.
+     * Used to invalidate stale async operations and prevent race conditions.
+     */
+    contextVersion: number;
+
     settings: VersionControlSettings & {
         enableMinLinesChangedCheck?: boolean;
         minLinesChanged?: number;
@@ -138,10 +146,10 @@ export interface AppState {
     file: TFile | null; 
     noteId: string | null;
     
-    // History Data
+    // History Data - Refactored to use EntityState for performance and normalization
     viewMode: ViewMode;
-    history: VersionHistoryEntry[]; // Used for Versions
-    editHistory: VersionHistoryEntry[]; // Used for Edits
+    history: EntityState<VersionHistoryEntry, string>; // Used for Versions
+    editHistory: EntityState<VersionHistoryEntry, string>; // Used for Edits
 
     currentBranch: string | null;
     availableBranches: string[];
@@ -167,18 +175,22 @@ export interface AppState {
     watchModeCountdown: number | null;
 }
 
+// Helper to create initial entity state
+const initialEntityState = { ids: [], entities: {} };
+
 export const getInitialState = (loadedSettings: VersionControlSettings): AppState => {
     const defaultSortOrder: SortOrder = { property: 'versionNumber', direction: 'desc' };
     return {
         status: AppStatus.INITIALIZING,
+        contextVersion: 0,
         settings: { ...DEFAULT_SETTINGS, ...loadedSettings },
         effectiveSettings: DEFAULT_SETTINGS.versionHistorySettings, // Default start
         error: null,
         file: null,
         noteId: null,
         viewMode: 'versions',
-        history: [],
-        editHistory: [],
+        history: initialEntityState,
+        editHistory: initialEntityState,
         currentBranch: null,
         availableBranches: [],
         isProcessing: false,
@@ -195,3 +207,12 @@ export const getInitialState = (loadedSettings: VersionControlSettings): AppStat
         watchModeCountdown: null,
     };
 };
+
+/**
+ * Root State Definition
+ * Explicitly defines the structure of the Redux store state.
+ */
+export interface RootState {
+    app: AppState;
+    [key: string]: any; // Allow for dynamic keys like changelogApi.reducerPath
+}

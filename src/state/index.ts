@@ -53,7 +53,7 @@ export { createAppStore } from './store';
 // TYPE EXPORTS
 // ============================================================================
 
-export type { AppStore, RootState, AppDispatch, AppThunk } from './store';
+export type { AppStore, RootState, AppDispatch, AppThunk, Services } from './store';
 
 // ============================================================================
 // SLICE EXPORTS

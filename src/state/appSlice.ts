@@ -1,12 +1,38 @@
-import { createSlice } from '@reduxjs/toolkit';
-import type { PayloadAction } from '@reduxjs/toolkit';
+import { createSlice, createEntityAdapter, createSelector } from '@reduxjs/toolkit';
+import type { PayloadAction, AnyAction } from '@reduxjs/toolkit';
 import { TFile } from 'obsidian';
+import { orderBy } from 'es-toolkit';
 import { AppStatus, getInitialState } from './state';
-import type { AppState, PanelState, SortOrder } from './state';
-import type { VersionControlSettings, HistorySettings, VersionHistoryEntry, AppError, DiffTarget, ActiveNoteInfo, DiffType, Change, TimelineEvent, TimelineSettings, ViewMode } from '@/types';
+import type { AppState, PanelState, SortOrder, RootState } from './state';
+import type { VersionControlSettings, HistorySettings, VersionHistoryEntry, AppError, DiffTarget, DiffType, Change, TimelineEvent, TimelineSettings, ViewMode, ActiveNoteInfo } from '@/types';
 import { DEFAULT_SETTINGS } from '@/constants';
 
+// Import Async Thunks for ExtraReducers
+import { loadHistory, loadHistoryForNoteId, loadEffectiveSettingsForNote } from './thunks/core.thunks';
+import { saveNewVersion } from './thunks/version/thunks/save-version.thunk';
+// CRITICAL FIX: Direct import to ensure consistency with ui.thunks.ts
+import { loadEditHistory } from './thunks/edit-history/thunks/load-edit-history.thunk';
+import { saveNewEdit } from './thunks/edit-history/thunks/save-edit.thunk';
+
+// ============================================================================
+// ENTITY ADAPTERS
+// ============================================================================
+
+export const historyAdapter = createEntityAdapter<VersionHistoryEntry, string>({
+    selectId: (entry) => entry.id,
+    sortComparer: (a, b) => b.versionNumber - a.versionNumber,
+});
+
+export const editHistoryAdapter = createEntityAdapter<VersionHistoryEntry, string>({
+    selectId: (entry) => entry.id,
+    sortComparer: (a, b) => b.versionNumber - a.versionNumber,
+});
+
 const initialState: AppState = getInitialState(DEFAULT_SETTINGS);
+
+// ============================================================================
+// SLICE DEFINITION
+// ============================================================================
 
 export const appSlice = createSlice({
     name: 'app',
@@ -22,13 +48,15 @@ export const appSlice = createSlice({
         reportError(state, action: PayloadAction<AppError>) {
             state.status = AppStatus.ERROR;
             state.error = action.payload;
+            state.isProcessing = false;
         },
 
         // --- State Machine Transition Actions ---
         resetToInitializing(state) {
             state.status = AppStatus.INITIALIZING;
-            state.history = [];
-            state.editHistory = [];
+            state.contextVersion += 1; // Invalidate pending operations
+            historyAdapter.removeAll(state.history);
+            editHistoryAdapter.removeAll(state.editHistory);
             state.currentBranch = null;
             state.availableBranches = [];
             state.panel = null;
@@ -44,21 +72,23 @@ export const appSlice = createSlice({
         initializeView(state, action: PayloadAction<ActiveNoteInfo>) {
             const { file, noteId } = action.payload;
             
-            // Detect context change: Different file path OR Different Note ID
-            // This ensures we catch cases where the file object reference changes but path is same,
-            // or where we switch to a different note entirely.
             const isContextChange = state.file?.path !== file?.path || (state.noteId && state.noteId !== noteId);
 
             if (isContextChange) {
-                 state.viewMode = 'versions'; // Reset view mode to default on context switch
+                 // STRICT: Reset view mode to versions on context change
+                 state.viewMode = 'versions';
+                 state.contextVersion += 1; // Invalidate pending operations
                  
-                 // STRICT: Close context-dependent panels on context change.
-                 // Only global panels like 'changelog' should persist across note switches.
+                 // STRICT: Reset effective settings to global defaults immediately.
+                 state.effectiveSettings = { ...DEFAULT_SETTINGS.versionHistorySettings, isGlobal: true };
+
                  if (state.panel?.type !== 'changelog') {
                      state.panel = null;
                  }
-                 
-                 // Reset context-specific UI state
+                 historyAdapter.removeAll(state.history);
+                 editHistoryAdapter.removeAll(state.editHistory);
+                 state.currentBranch = null;
+                 state.availableBranches = [];
                  state.diffRequest = null;
                  state.highlightedVersionId = null;
                  state.namingVersionId = null;
@@ -72,42 +102,48 @@ export const appSlice = createSlice({
                 state.status = AppStatus.PLACEHOLDER;
                 state.file = null;
                 state.noteId = null;
-                state.history = [];
-                state.editHistory = [];
+                historyAdapter.removeAll(state.history);
+                editHistoryAdapter.removeAll(state.editHistory);
                 state.currentBranch = null;
                 state.availableBranches = [];
                 if (state.panel?.type !== 'changelog') {
                     state.panel = null;
                 }
             } else {
-                // Avoid unnecessary loading states if the view is already correct and context hasn't changed
                 if (state.status === AppStatus.READY && !isContextChange && !state.isProcessing) {
                     if (state.noteId === noteId && action.payload.source !== 'manifest') {
-                        return; // No change needed
+                        return;
                     }
                 }
 
                 state.status = AppStatus.LOADING;
                 state.file = file;
-                // Reset data fields
-                state.noteId = null;
-                state.history = [];
-                state.editHistory = [];
+                state.noteId = noteId; 
+                
+                historyAdapter.removeAll(state.history);
+                editHistoryAdapter.removeAll(state.editHistory);
                 state.currentBranch = null;
                 state.availableBranches = [];
-                
-                // Note: We intentionally cleared panel above if context changed. 
-                // If context didn't change (e.g. reload or save), panel persists.
             }
         },
-        historyLoadedSuccess(state, action: PayloadAction<{ file: TFile; noteId: string | null; history: VersionHistoryEntry[], currentBranch: string, availableBranches: string[] }>) {
+        historyLoadedSuccess(
+            state, 
+            action: PayloadAction<{ 
+                file: TFile; 
+                noteId: string | null; 
+                history: VersionHistoryEntry[], 
+                currentBranch: string | null, 
+                availableBranches: string[],
+                contextVersion: number 
+            }>
+        ) {
+            // CRITICAL GUARD: Only apply if context version matches
+            if (action.payload.contextVersion !== state.contextVersion) return;
+
             if (state.file?.path === action.payload.file.path) {
-                // If we are just refreshing the same note (e.g. post-save), we DO preserve the timeline/panels.
-                // The strict clearing in initializeView handles the context switch case.
-                
                 state.status = AppStatus.READY;
                 state.noteId = action.payload.noteId;
-                state.history = action.payload.history;
+                historyAdapter.setAll(state.history, action.payload.history);
                 state.currentBranch = action.payload.currentBranch;
                 state.availableBranches = action.payload.availableBranches;
                 state.isProcessing = false;
@@ -118,34 +154,49 @@ export const appSlice = createSlice({
                 state.diffRequest = null;
             }
         },
-        editHistoryLoadedSuccess(state, action: PayloadAction<{ editHistory: VersionHistoryEntry[], currentBranch?: string | null, availableBranches?: string[] }>) {
-             if (state.status === AppStatus.LOADING || state.status === AppStatus.READY) {
-                 state.editHistory = action.payload.editHistory;
-                 
-                 if (action.payload.currentBranch !== undefined) {
-                     state.currentBranch = action.payload.currentBranch;
-                 }
-                 if (action.payload.availableBranches !== undefined) {
-                     state.availableBranches = action.payload.availableBranches;
-                 }
-                 
+        editHistoryLoadedSuccess(
+            state, 
+            action: PayloadAction<{ 
+                editHistory: VersionHistoryEntry[], 
+                currentBranch?: string | null, 
+                availableBranches?: string[],
+                contextVersion: number
+            }>
+        ) {
+             // CRITICAL GUARD: Only apply if context version matches
+             if (action.payload.contextVersion !== state.contextVersion) return;
+
+             if (state.status === AppStatus.LOADING || (state.status === AppStatus.READY && state.viewMode === 'edits')) {
+                 editHistoryAdapter.setAll(state.editHistory, action.payload.editHistory);
+                 if (action.payload.currentBranch !== undefined) state.currentBranch = action.payload.currentBranch;
+                 if (action.payload.availableBranches !== undefined) state.availableBranches = action.payload.availableBranches;
                  state.status = AppStatus.READY;
                  state.isProcessing = false;
              }
         },
         clearHistoryForBranchSwitch(state, action: PayloadAction<{ currentBranch: string, availableBranches: string[] }>) {
             state.status = AppStatus.LOADING;
-            state.history = [];
-            state.editHistory = [];
+            state.contextVersion += 1; // Invalidate pending operations
+            historyAdapter.removeAll(state.history);
+            editHistoryAdapter.removeAll(state.editHistory);
             state.currentBranch = action.payload.currentBranch;
             state.availableBranches = action.payload.availableBranches;
             state.isProcessing = false;
         },
         setViewMode(state, action: PayloadAction<ViewMode>) {
-            state.viewMode = action.payload;
-            state.status = AppStatus.LOADING; // Force loading state to prevent stale data rendering
+            const newMode = action.payload;
+            state.viewMode = newMode;
+            state.status = AppStatus.LOADING;
+            state.contextVersion += 1; // Invalidate pending operations
             
-            // STRICT CLEANUP: Prevent bleed over of state from previous mode
+            // STRICT: Reset effective settings to defaults for the new mode immediately.
+            const defaults = newMode === 'versions' 
+                ? DEFAULT_SETTINGS.versionHistorySettings 
+                : DEFAULT_SETTINGS.editHistorySettings;
+            state.effectiveSettings = { ...defaults, isGlobal: true };
+
+            historyAdapter.removeAll(state.history);
+            editHistoryAdapter.removeAll(state.editHistory);
             state.panel = null; 
             state.namingVersionId = null;
             state.isManualVersionEdit = false;
@@ -153,13 +204,15 @@ export const appSlice = createSlice({
             state.diffRequest = null;
             state.isSearchActive = false;
             state.searchQuery = '';
+            state.watchModeCountdown = null;
         },
         clearActiveNote(state) {
             state.status = AppStatus.PLACEHOLDER;
+            state.contextVersion += 1; // Invalidate pending operations
             state.file = null;
             state.noteId = null;
-            state.history = [];
-            state.editHistory = [];
+            historyAdapter.removeAll(state.history);
+            editHistoryAdapter.removeAll(state.editHistory);
             state.currentBranch = null;
             state.availableBranches = [];
             if (state.panel?.type !== 'changelog') {
@@ -168,6 +221,9 @@ export const appSlice = createSlice({
             state.error = null;
             state.isManualVersionEdit = false;
             state.viewMode = 'versions';
+            
+            // Reset settings to default versions
+            state.effectiveSettings = { ...DEFAULT_SETTINGS.versionHistorySettings, isGlobal: true };
         },
 
         // --- Actions specific to ReadyState ---
@@ -228,7 +284,7 @@ export const appSlice = createSlice({
         },
         addVersionSuccess(state, action: PayloadAction<{ newVersion: VersionHistoryEntry }>) {
             if (state.status === AppStatus.READY) {
-                state.history.unshift(action.payload.newVersion);
+                historyAdapter.addOne(state.history, action.payload.newVersion);
                 state.isProcessing = false;
                 const shouldPromptEdit = state.effectiveSettings.enableVersionNaming || state.effectiveSettings.enableVersionDescription;
                 state.namingVersionId = shouldPromptEdit ? action.payload.newVersion.id : null;
@@ -237,7 +293,7 @@ export const appSlice = createSlice({
         },
         addEditSuccess(state, action: PayloadAction<{ newEdit: VersionHistoryEntry }>) {
             if (state.status === AppStatus.READY) {
-                state.editHistory.unshift(action.payload.newEdit);
+                editHistoryAdapter.addOne(state.editHistory, action.payload.newEdit);
                 state.isProcessing = false;
                 const shouldPromptEdit = state.effectiveSettings.enableVersionNaming || state.effectiveSettings.enableVersionDescription;
                 state.namingVersionId = shouldPromptEdit ? action.payload.newEdit.id : null;
@@ -246,8 +302,7 @@ export const appSlice = createSlice({
         },
         removeEditsSuccess(state, action: PayloadAction<{ ids: string[] }>) {
             if (state.status === AppStatus.READY) {
-                const idsToRemove = new Set(action.payload.ids);
-                state.editHistory = state.editHistory.filter(edit => !idsToRemove.has(edit.id));
+                editHistoryAdapter.removeMany(state.editHistory, action.payload.ids);
             }
         },
         startVersionEditing(state, action: PayloadAction<{ versionId: string }>) {
@@ -264,29 +319,13 @@ export const appSlice = createSlice({
         },
         updateVersionDetailsInState(state, action: PayloadAction<{ versionId: string; name?: string; description?: string }>) {
             if (state.status === AppStatus.READY) {
-                const updateList = (list: VersionHistoryEntry[]) => {
-                    const versionIndex = list.findIndex(v => v.id === action.payload.versionId);
-                    if (versionIndex > -1) {
-                        const originalVersion = list[versionIndex];
-                        if (!originalVersion) return;
+                const { versionId, name, description } = action.payload;
+                const changes: Partial<VersionHistoryEntry> = {};
+                if (name !== undefined) changes.name = name || undefined;
+                if (description !== undefined) changes.description = description || undefined;
 
-                        const updatedVersion = { ...originalVersion };
-                        if (action.payload.name !== undefined) {
-                            const newName = action.payload.name;
-                            if (newName) updatedVersion.name = newName;
-                            else delete updatedVersion.name;
-                        }
-                        if (action.payload.description !== undefined) {
-                            const newDescription = action.payload.description;
-                            if (newDescription) updatedVersion.description = newDescription;
-                            else delete updatedVersion.description;
-                        }
-                        list[versionIndex] = updatedVersion;
-                    }
-                };
-
-                updateList(state.history);
-                updateList(state.editHistory);
+                historyAdapter.updateOne(state.history, { id: versionId, changes });
+                editHistoryAdapter.updateOne(state.editHistory, { id: versionId, changes });
             }
         },
 
@@ -381,13 +420,13 @@ export const appSlice = createSlice({
         },
         addTimelineEvent(state, action: PayloadAction<TimelineEvent>) {
             if (state.panel?.type === 'timeline' && state.panel.events) {
-                // Add to start of list (assuming desc sort)
                 state.panel.events.unshift(action.payload);
             }
         },
         removeTimelineEvent(state, action: PayloadAction<{ versionId: string }>) {
             if (state.panel?.type === 'timeline' && state.panel.events) {
-                state.panel.events = state.panel.events.filter(e => e.toVersionId !== action.payload.versionId);
+                const idToRemove = action.payload.versionId;
+                state.panel.events = state.panel.events.filter(e => e.toVersionId !== idToRemove);
             }
         },
         setTimelineSettings(state, action: PayloadAction<TimelineSettings>) {
@@ -397,23 +436,194 @@ export const appSlice = createSlice({
         },
         updateTimelineEventInState(state, action: PayloadAction<{ versionId: string; name?: string; description?: string }>) {
             if (state.panel?.type === 'timeline' && state.panel.events) {
-                state.panel.events.forEach(event => {
-                    if (event.toVersionId === action.payload.versionId) {
-                        if (action.payload.name !== undefined) event.toVersionName = action.payload.name;
-                        if (action.payload.description !== undefined) event.toVersionDescription = action.payload.description;
-                    }
-                });
+                const { versionId, name, description } = action.payload;
+                // Direct mutation is safe with Immer
+                const event = state.panel.events.find(e => e.toVersionId === versionId);
+                if (event) {
+                    if (name !== undefined) event.toVersionName = name;
+                    if (description !== undefined) event.toVersionDescription = description;
+                }
             }
         },
 
         // --- Watch Mode UI action ---
         setWatchModeCountdown(state, action: PayloadAction<number | null>) {
-            if (state.status === AppStatus.READY) {
+            // Allow updates during LOADING to capture initial sync from thunks before READY transition
+            if (state.status === AppStatus.READY || state.status === AppStatus.LOADING) {
                 state.watchModeCountdown = action.payload;
             }
         },
     },
+    extraReducers: (builder) => {
+        // --- Core Thunks ---
+        builder.addCase(loadEffectiveSettingsForNote.fulfilled, (state, action) => {
+            state.effectiveSettings = action.payload;
+        });
+
+        builder.addCase(loadHistory.fulfilled, (state, action) => {
+            // CRITICAL GUARD: Check context version
+            if (action.payload.contextVersion !== state.contextVersion) return;
+
+            if (state.file?.path === action.payload.file.path) {
+                state.status = AppStatus.READY;
+                state.noteId = action.payload.noteId;
+                historyAdapter.setAll(state.history, action.payload.history);
+                state.currentBranch = action.payload.currentBranch;
+                state.availableBranches = action.payload.availableBranches;
+                state.isProcessing = false;
+                
+                state.namingVersionId = null;
+                state.isManualVersionEdit = false;
+                state.highlightedVersionId = null;
+                state.diffRequest = null;
+            }
+        });
+
+        builder.addCase(loadHistoryForNoteId.fulfilled, (state, action) => {
+             // CRITICAL GUARD: Check context version
+             if (action.payload.contextVersion !== state.contextVersion) return;
+
+             if (state.file?.path === action.payload.file.path) {
+                state.status = AppStatus.READY;
+                state.noteId = action.payload.noteId;
+                historyAdapter.setAll(state.history, action.payload.history);
+                state.currentBranch = action.payload.currentBranch;
+                state.availableBranches = action.payload.availableBranches;
+                state.isProcessing = false;
+                
+                state.namingVersionId = null;
+                state.isManualVersionEdit = false;
+                state.highlightedVersionId = null;
+                state.diffRequest = null;
+            }
+        });
+
+        // --- Version Thunks ---
+        builder.addCase(saveNewVersion.fulfilled, (state, action) => {
+            state.isProcessing = false;
+            if (action.payload && action.payload.newVersionEntry) {
+                historyAdapter.addOne(state.history, action.payload.newVersionEntry);
+                if (action.payload.newNoteId && state.noteId !== action.payload.newNoteId) {
+                    state.noteId = action.payload.newNoteId;
+                }
+                const shouldPromptEdit = state.effectiveSettings.enableVersionNaming || state.effectiveSettings.enableVersionDescription;
+                state.namingVersionId = shouldPromptEdit ? action.payload.newVersionEntry.id : null;
+                state.isManualVersionEdit = false;
+            }
+        });
+
+        // --- Edit History Thunks ---
+        builder.addCase(loadEditHistory.fulfilled, (state, action) => {
+             // CRITICAL GUARD: Check context version
+             if (action.payload.contextVersion !== state.contextVersion) return;
+
+             if (state.status === AppStatus.LOADING || (state.status === AppStatus.READY && state.viewMode === 'edits')) {
+                 editHistoryAdapter.setAll(state.editHistory, action.payload.editHistory);
+                 if (action.payload.currentBranch !== null) state.currentBranch = action.payload.currentBranch;
+                 if (action.payload.availableBranches.length > 0) state.availableBranches = action.payload.availableBranches;
+                 state.status = AppStatus.READY;
+                 state.isProcessing = false;
+             }
+        });
+
+        builder.addCase(saveNewEdit.fulfilled, (state, action) => {
+            state.isProcessing = false;
+            if (action.payload) {
+                const { newEditEntry, deletedIds } = action.payload;
+                editHistoryAdapter.addOne(state.editHistory, newEditEntry);
+                
+                if (deletedIds.length > 0) {
+                    editHistoryAdapter.removeMany(state.editHistory, deletedIds);
+                }
+
+                const shouldPromptEdit = state.effectiveSettings.enableVersionNaming || state.effectiveSettings.enableVersionDescription;
+                state.namingVersionId = shouldPromptEdit ? newEditEntry.id : null;
+                state.isManualVersionEdit = false;
+            }
+        });
+
+        // --- Consolidated Matchers for Pending/Rejected ---
+        // This handles isProcessing and Error state for all thunks automatically
+        builder.addMatcher(
+            (action): action is AnyAction => action.type.endsWith('/pending'),
+            (state) => {
+                state.isProcessing = true;
+                state.error = null;
+            }
+        );
+
+        builder.addMatcher(
+            (action): action is AnyAction => action.type.endsWith('/rejected'),
+            (state, action: any) => {
+                // If context changed, we ignore the error completely.
+                // This prevents stale errors from clobbering the loading state of a new request.
+                if (action.payload === 'Context changed' || action.payload === 'Aborted') {
+                    return;
+                }
+                
+                state.isProcessing = false;
+                state.error = {
+                    title: "Operation Failed",
+                    message: typeof action.payload === 'string' ? action.payload : "An unexpected error occurred",
+                };
+                // CRITICAL FIX: Ensure status transitions to ERROR so UI doesn't get stuck in LOADING
+                state.status = AppStatus.ERROR;
+            }
+        );
+        
+        // We also need a matcher for fulfilled to ensure isProcessing is reset for thunks that didn't have specific handlers above
+        builder.addMatcher(
+            (action): action is AnyAction => action.type.endsWith('/fulfilled'),
+            (state) => {
+                state.isProcessing = false;
+            }
+        );
+    }
 });
+
+// ============================================================================
+// SELECTORS
+// ============================================================================
+
+const historySelectors = historyAdapter.getSelectors((state: RootState) => state.app.history);
+const editHistorySelectors = editHistoryAdapter.getSelectors((state: RootState) => state.app.editHistory);
+
+export const {
+    selectAll: selectAllHistory,
+    selectById: selectHistoryById,
+} = historySelectors;
+
+export const {
+    selectAll: selectAllEditHistory,
+    selectById: selectEditHistoryById,
+} = editHistorySelectors;
+
+// Memoized Sorted Selectors using es-toolkit
+export const selectSortedHistory = createSelector(
+    [selectAllHistory, (state: RootState) => state.app.sortOrder],
+    (history, sortOrder) => {
+        return orderBy(history, [sortOrder.property], [sortOrder.direction]);
+    }
+);
+
+export const selectSortedEditHistory = createSelector(
+    [selectAllEditHistory, (state: RootState) => state.app.sortOrder],
+    (history, sortOrder) => {
+        return orderBy(history, [sortOrder.property], [sortOrder.direction]);
+    }
+);
+
+// Helper to select the correct history based on view mode
+export const selectActiveHistory = createSelector(
+    [
+        (state: RootState) => state.app.viewMode,
+        selectSortedHistory,
+        selectSortedEditHistory
+    ],
+    (viewMode, history, editHistory) => {
+        return viewMode === 'versions' ? history : editHistory;
+    }
+);
 
 export const { actions } = appSlice;
 export default appSlice.reducer;
