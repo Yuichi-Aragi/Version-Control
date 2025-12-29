@@ -10,7 +10,7 @@ import { sortEvents } from '@/ui/components/panels/TimelinePanel/utils';
 
 export const TimelinePanel: FC<TimelinePanelProps> = ({ panelState }) => {
     const { events, settings } = panelState;
-    const viewMode = useAppSelector(state => state.viewMode);
+    const viewMode = useAppSelector(state => state.app.viewMode);
     const handleClose = usePanelClose();
     const handleBackdropClick = useBackdropClick(handleClose);
     const search = usePanelSearch();
