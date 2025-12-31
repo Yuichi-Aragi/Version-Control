@@ -3,7 +3,7 @@
 	"name": "Version Control",
 	"version": "1.9.39",
 	"minAppVersion": "1.7.1",
-	"description": "Fearlessly edit. Capture intentional, local snapshots of your notes at any point. Stop relying on background autosaves—take charge of your document's history and versions.",
+	"description": "Create intentional snapshots with meaningful names, in-file branching, side-by-side diffs, timeline search, writing stats, and optional auto-saves.",
 	"author": "Yuichi-Aragi",
 	"isDesktopOnly": false
 }
