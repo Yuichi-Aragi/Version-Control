@@ -59,8 +59,7 @@ No conflicts. No competition. Two complementary tools for different scales of ve
 As of now, this plugin provides version control for:
 
 - ✅ **Markdown files (`.md`)** – Your notes, your writing, your ideas
-- ✅ **Obsidian Bases (`.base`)** – Yes, these too!
-- 🔜 **Canvas files (`.canvas`)** – Planned for future releases
+- ✅ **Obsidian Bases (`.base`)** – Fully supported!
 
 ---
 
@@ -69,62 +68,47 @@ As of now, this plugin provides version control for:
 ### 💾 **Save Intentional Snapshots**
 Create meaningful version milestones with custom names and descriptions. Save "First complete thought," "After research," "Final before rewrite" – exactly when YOU decide it's worth preserving.
 
-### 👀 **Preview & Restore with Confidence**
-Quickly glance at any old version's content without leaving your current file. When you find something you want, restore it with a single click. The plugin automatically saves a backup of your current content before restoring, so you can experiment fearlessly.
-
 ### 🔍 **Advanced Comparison (Diff) Engine**
-See exactly what changed between any two versions with multiple comparison modes:
-- **Line Diff**: Traditional line-by-line comparison
-- **Word Diff**: See exactly which words changed
-- **Character Diff**: Catch even the smallest modifications
-- **Smart Diff**: Intelligent comparison that understands context
-- **Panel or Window View**: Choose how you want to review changes
+See exactly what changed between any two versions with multiple comparison modes.
+- **Side-by-Side View**: Compare versions left and right (like standard developer tools).
+- **Unified View**: See changes inline for a streamlined reading experience.
+- **Granular Diffs**: Choose between Line, Word, Character, or Smart Diff to catch even the smallest modifications.
+- **Panel or Window View**: Choose how you want to review changes.
 
-### 🌿 **Create Deviations (New Notes)**
-Turn any old version into a completely separate file. Perfect for major rewrites, spin-off ideas, or exploring completely different directions without losing your original work.
+### 🌿 **Branch Within Same Note**
+Need to try a different direction within the *same file*? You can create multiple branches to work on parallel ideas. 
 
-### 🌳 **Branch Within the Same Note**
-Need to try a different direction within the *same file*? Create branches to work on parallel ideas. Each branch has its own independent history, so you can experiment freely without affecting your main draft.
+Crucially, **every branch is a fully isolated environment**. When you switch branches, you aren't just changing the text; you are switching contexts. Each branch maintains its own independent:
+- **Timeline**: An isolated chronological view for both history types within that branch.
+- **Settings**: Unique configurations (retention, auto-save rules) specific to that branch.
+- **Edit History**: Automatic background snapshots unique to that branch.
+- **Version History**: Intentional milestones saved only within that branch.
 
-### ⏱️ **Dual History System**
-**Version History** (intentional snapshots you control) + **Edit History** (automatic background protection). Choose what works best for your workflow—or use both for maximum flexibility.
+### 🕰️ **Timeline & Search**
+Don't remember in which version you made a specific change?
+- **Global Search**: Search through the *content* of your history. The timeline lets you search diffs between all versions and edits to find that one paragraph you deleted three days ago.
+- **Visual Timeline**: See your note's evolution as a chronological list with expandable details.
 
-### 📊 **Timeline View**
-See your note's evolution as a chronological list with:
-- Event cards showing version history (intentional) vs edit history (automatic)
-- Expandable details showing exactly what changed between versions
-- Search functionality to find specific changes or time periods
-- Combined or separate views of Version and Edit history
+### 📊 **Deep Statistics**
+Get granular insights into your writing progress.
+- Track lines, words, and characters for every version and edit.
+- **Stats**: View counts with or without Markdown syntax included.
+- **Dashboard Heatmap**: Visualize your productivity with a contribution graph based on the number of versions/edits saved over time.
 
-### 🧹 **Smart Management**
-Keep your history tidy with intelligent cleanup, bulk operations, and customizable retention policies that preserve important milestones while managing storage efficiently.
+### ⚙️ **Customizability**
+We give you more flexibility that we think you'll likely need, because your workflow is unique.
+- **Global Settings**: Apply rules to all tracked notes.
+- **Per-Branch Overrides**: Set specific settings, retention policies, or auto-save rules for individual branches or histories.
+- **Auto-Registration**: Automatically start tracking any note based on criteria.
+- **Auto-Save Triggers**: Configure saves based on a timer, number of lines changed, or file modification events.
 
-### 📤 **Export Your History**
-Export your work in multiple formats:
-- **Markdown**: Human-readable format that works anywhere
-- **JSON**: Structured data for programmatic use
-- **NDJSON**: Streaming JSON format for large datasets
-- **Plain Text**: Simple text format
+### 📦 **Efficient Storage & Compression**
+Want to keep your history forever without bloating your hard drive?
+- **Compression**: Enable optional GZIP compression. Versions are compressed before saving to disk. (They remain accessible—just change the extension to `.gz` and open the archive).
+- **Sync-Friendly**: Edit history is stored as compressed diffs in `.vctrl` files, making them efficient to sync across devices.
 
-### 🎨 **Flexible Interface**
-Choose between viewing modes that fit your workflow:
-- **Card View**: Rich cards showing all version details at a glance
-- **List View**: Compact, minimal interface for focused work
-- **Dark/Light Mode**: Automatically adapts to your Obsidian theme
-- **Customizable Display**: Show/hide names, descriptions, timestamps, and statistics
-
-### ⚙️ **Granular Settings & Automation**
-Customize every aspect with global or per-note settings:
-- **Auto-save settings**: Save versions automatically on file save or at intervals
-- **Smart triggers**: Save only when significant changes occur (word count, line count, character count)
-- **Watch mode**: Background monitoring with customizable intervals
-- **Path filtering**: Automatically register or exclude notes based on file paths
-
-### 📱 **Mobile-First Design**
-Unlike Git, this plugin works seamlessly across all your devices with full feature parity, touch-optimized interface, and responsive design that adapts to any screen size.
-
-### 🔒 **Privacy & Data Control**
-Your data stays yours with local storage only, portable Markdown format, persistent data that survives plugin removal, and optional compression for space efficiency.
+### 📢 **Automatic Changelog**
+Stay in the loop without checking the repo. The plugin features an automatic changelog view that appears on new updates, detailing exactly what has improved.
 
 ---
 
@@ -165,32 +149,30 @@ Here's the key differences:
 |--------|---------------|-------------|
 | **Control** | Automatic snapshots only | Manual, intentional milestones + automatic protection |
 | **Naming** | No custom names | Meaningful names like "Brainstorming complete" |
-| **UI** | Hidden modal | Always-visible sidebar interface |
-| **Purpose** | Disaster recovery | Creative workflow enhancement |
-| **Features** | Basic restore | Branching, diffing, timeline, export, deviations |
+| **Search** | None | **Search text within diffs across history** |
+| **Storage** | Hidden internal DB | Accessible files (MD or compressed) |
+| **Features** | Basic restore | Branching, Side-by-Side Diff, Timeline, Heatmap |
 | **Visibility** | On-demand | Integrated into your daily workflow |
 
 ---
 
 ## Two Types of History
 
-This plugin offers two complementary approaches:
+This plugin offers two complementary approaches. Both are **opt-in**—you are in control.
 
 ### 🎯 **Version History** (Intentional Snapshots)
-- **When**: Only when you explicitly choose to save
-- **Purpose**: Creative milestones and meaningful drafts
-- **Storage**: `.versiondb` folder (in your vault)
-- **Format**: Full Markdown copies
-- **Best for**: Perfectionists and conscious creators
+- **When**: Only when you explicitly choose to save (or via specific auto-save rules).
+- **Purpose**: Creative milestones and meaningful drafts.
+- **Storage**: `.versiondb` folder (in your vault).
+- **Format**: Full Markdown copies (optionally compressed).
+- **Best for**: Perfectionists and conscious creators.
 
 ### ⏱️ **Edit History** (Automatic Snapshots)
-- **When**: Based on your settings (file save, intervals, change thresholds)
-- **Purpose**: Safety net and session recovery
-- **Storage**: `.versiondb` folder (in your vault)
-- **Format**: Compressed diffs (space-efficient)
-- **Best for**: "Oops" moments and seeing how you evolved
-
-**The key insight:** When you're writing, you don't want to version a folder—you want to version *a thought*. This plugin gives you that focused control.
+- **When**: Based on your settings (timer, lines changed, modification).
+- **Purpose**: Safety net and session recovery.
+- **Storage**: `.vctrl` files (in your vault).
+- **Format**: **Compressed diffs**. This is highly space-efficient and designed to be sync-friendly.
+- **Best for**: "Oops" moments and seeing how you evolved.
 
 ---
 
@@ -198,18 +180,29 @@ This plugin offers two complementary approaches:
 
 For immediate use:
 
-1. **Save your first version**: Click the `+` button in the bottom-right corner
-2. **Switch between histories**: Click "Version History" or "Edit History" in the header
-3. **Access settings**: Click the gear icon in the top-right corner
-4. **View timeline**: Click the menu button (☰) → "Timeline"
-5. **Create branches**: Click the menu button (☰) → "Branches"
+1.  **Save your first version**: Click the `+` button in the bottom-right corner.
+2.  **Switch between histories**: Click the menu button (☰) → "Edit/Version history".
+3.  **Access settings**: Click the gear icon in the top-right corner.
+4.  **View timeline**: Click the menu button (☰) → "Timeline".
+5.  **Create branches**: Click the menu button (☰) → "Branches".
 
 ---
 
 ## Platform Support
 
-* ✅ **Mobile** (iOS & Android)
-* ✅ **Desktop** (Windows, macOS, Linux)
+*   ✅ **Mobile** (iOS & Android)
+*   ✅ **Desktop** (Windows, macOS, Linux)
+
+---
+
+## Maintenance & Contributions
+
+**This project will live and die with us.**
+
+This plugin is a passion project maintained by **Yuichi Aragi** and **Lae Aragi**. We are dedicated to its development and stability.
+
+*   **Contributors:** We are **not** accepting code contributions or Pull Requests. We want to maintain a specific vision and code standard for this tool.
+*   **Feedback:** If you have Feature Requests, Issues, or Suggestions, please simply **tell us**. Open an issue on GitHub, and we will handle the implementation.
 
 ---
 
@@ -217,8 +210,8 @@ For immediate use:
 
 To jump straight to the Version Control plugin in Obsidian, try this:
 
-* **​Click the URI:** Copy and paste or click this [link](obsidian://show-plugin?id=version-control), which should launch the app: obsidian://show-plugin?id=version-control
-* **Alternatively (Search):** If the link doesn't work, go to your Obsidian Settings and search for 'Version-Control' in the Community Plugins list.
+*   **​Click the URI:** Copy and paste or click this [link](obsidian://show-plugin?id=version-control), which should launch the app: obsidian://show-plugin?id=version-control
+*   **Alternatively (Search):** If the link doesn't work, go to your Obsidian Settings and search for 'Version-Control' in the Community Plugins list.
 
 ---
 
