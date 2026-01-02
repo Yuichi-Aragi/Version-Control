@@ -1,16 +1,21 @@
 import { useCallback } from 'react';
 import { useAppDispatch, useAppSelector } from '@/ui/hooks';
 import { thunks } from '@/state';
+import { useGetVersionHistoryQuery, useGetEditHistoryQuery } from '@/state/apis/history.api';
 
 export const useNoteActions = () => {
     const dispatch = useAppDispatch();
-    const { file, noteId, historyCount, editHistoryCount, viewMode } = useAppSelector(state => ({
+    const { file, noteId, viewMode } = useAppSelector(state => ({
         file: state.app.file,
         noteId: state.app.noteId,
-        historyCount: state.app.history.ids.length,
-        editHistoryCount: state.app.editHistory.ids.length,
         viewMode: state.app.viewMode,
     }));
+
+    const { data: versionHistory } = useGetVersionHistoryQuery(noteId!, { skip: !noteId });
+    const { data: editHistory } = useGetEditHistoryQuery(noteId!, { skip: !noteId });
+
+    const historyCount = versionHistory?.length ?? 0;
+    const editHistoryCount = editHistory?.length ?? 0;
 
     const handleRefresh = useCallback(() => {
         if (!file) return;
