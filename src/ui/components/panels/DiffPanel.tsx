@@ -4,8 +4,8 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
 import type { VirtuosoHandle, ListRange } from 'react-virtuoso';
 import clsx from 'clsx';
-import { useAppDispatch } from '@/ui/hooks';
-import { thunks } from '@/state';
+import { useAppDispatch, useAppSelector } from '@/ui/hooks';
+import { thunks, appSlice } from '@/state';
 import type { DiffPanel as DiffPanelState } from '@/state';
 import type { Change, DiffType } from '@/types';
 import { Icon } from '@/ui/components';
@@ -14,6 +14,7 @@ import { processLineChanges, processSideBySideChanges, type DiffLineData } from 
 import { escapeRegExp } from '@/ui/utils/strings';
 import { usePanelClose } from '@/ui/hooks';
 import { usePanelSearch } from '@/ui/hooks';
+import { useGetDiffQuery } from '@/state/apis/history.api';
 
 interface DiffPanelProps {
     panelState: DiffPanelState;
@@ -88,7 +89,17 @@ const transformDiffChanges = (changes: any[]): Change[] => {
 
 export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
     const dispatch = useAppDispatch();
-    const { version1, version2, diffChanges, diffType, isReDiffing, renderMode } = panelState;
+    const { version1, version2, diffType, renderMode } = panelState;
+    const { noteId, viewMode } = useAppSelector(state => ({
+        noteId: state.app.noteId,
+        viewMode: state.app.viewMode,
+    }));
+
+    // Fetch diff using RTK Query
+    const { data: diffChanges, isLoading, isFetching, isError } = useGetDiffQuery(
+        { noteId: noteId!, v1: version1, v2: version2, diffType, viewMode },
+        { skip: !noteId }
+    );
 
     const virtuosoRef = useRef<VirtuosoHandle>(null);
     const virtuosoRangeRef = useRef<ListRange | null>(null);
@@ -258,12 +269,14 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
     const handleDiffTypeChange = useCallback((newType: DiffType) => {
         if (newType === diffType) return;
         isInitialLoadRef.current = false;
-        dispatch(thunks.recomputeDiff(newType));
+        dispatch(appSlice.actions.updateDiffPanelParams({ diffType: newType }));
     }, [dispatch, diffType]);
 
     const v1Label = version1.name ? `"${version1.name}" (V${version1.versionNumber})` : `Version ${version1.versionNumber}`;
     const v2Label = version2.id === 'current' ? 'Current note state' : `Version ${(version2 as any).versionNumber}`;
     const isWindowMode = renderMode === 'window';
+
+    const isBusy = isLoading || isFetching;
 
     return (
         <div className={clsx("v-panel-container is-active", { "v-panel-window-mode": isWindowMode })}>
@@ -281,7 +294,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                             )}
                         </div>
                         <div className="v-panel-header-actions">
-                            <button className="clickable-icon" onClick={search.handleToggleSearch}><Icon name="search" /></button>
+                            <button className="clickable-icon" onClick={search.handleToggleSearch} disabled={isBusy}><Icon name="search" /></button>
                             
                             <DiffOptionsDropdown 
                                 currentType={diffType} 
@@ -289,7 +302,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                                 onSelectType={handleDiffTypeChange}
                                 onSelectLayout={setViewLayout}
                             >
-                                <button className="clickable-icon v-diff-dropdown-trigger" onClick={e => e.stopPropagation()}>
+                                <button className="clickable-icon v-diff-dropdown-trigger" onClick={e => e.stopPropagation()} disabled={isBusy}>
                                     <Icon name="git-commit-horizontal" />
                                 </button>
                             </DiffOptionsDropdown>
@@ -325,8 +338,10 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                     </div>
                 </div>
                 <div className="v-diff-panel-content">
-                    {diffChanges === null ? (
-                        <div className="is-loading"><div className="loading-spinner" /><p>Loading diff...</p></div>
+                    {isBusy && !diffChanges ? (
+                        <div className="is-loading"><div className="loading-spinner" /><p>Calculating diff...</p></div>
+                    ) : isError ? (
+                        <div className="v-error-message">Failed to compute diff.</div>
                     ) : (
                         <>
                             <div className={clsx("v-diff-meta-container", { 'is-open': !isMetaCollapsed })}>
@@ -336,7 +351,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                                 </div>
                             </div>
                             <div className="v-diff-content-wrapper" ref={containerScrollerRef}>
-                                {isReDiffing && <div className="v-diff-progress-overlay"><p>Calculating...</p></div>}
+                                {isFetching && <div className="v-diff-progress-overlay"><p>Updating...</p></div>}
                                 <VirtualizedDiff
                                     lines={lines}
                                     diffType={diffType}

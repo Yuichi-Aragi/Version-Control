@@ -1,7 +1,8 @@
-import React, { useMemo, useRef, useEffect } from 'react';
+import React, { useMemo, useRef, useEffect, useLayoutEffect } from 'react';
 import HeatMap from '@uiw/react-heat-map';
 import { useAppDispatch, useAppSelector } from '@/ui/hooks';
-import { appSlice, selectAllHistory, selectAllEditHistory } from '@/state/appSlice';
+import { appSlice } from '@/state/appSlice';
+import { useGetVersionHistoryQuery, useGetEditHistoryQuery } from '@/state/apis/history.api';
 import { moment } from 'obsidian';
 
 // Define granular color scale for heatmap
@@ -22,26 +23,34 @@ const PANEL_COLORS = {
 export const DashboardPanel: React.FC = () => {
     const dispatch = useAppDispatch();
     
-    // Select state individually to prevent unnecessary re-renders while ensuring instant updates
-    const history = useAppSelector(selectAllHistory);
-    const editHistory = useAppSelector(selectAllEditHistory);
+    const noteId = useAppSelector(state => state.app.noteId);
     const viewMode = useAppSelector(state => state.app.viewMode);
+
+    // Fetch data using RTK Query hooks
+    // We conditionally skip fetching based on viewMode to optimize performance
+    const { data: versionHistory = [] } = useGetVersionHistoryQuery(noteId ?? '', {
+        skip: !noteId || viewMode !== 'versions'
+    });
+
+    const { data: editHistoryData = [] } = useGetEditHistoryQuery(noteId ?? '', {
+        skip: !noteId || viewMode !== 'edits'
+    });
 
     const contentRef = useRef<HTMLDivElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
 
     const data = useMemo(() => {
-        const source = viewMode === 'versions' ? history : editHistory;
+        const source = viewMode === 'versions' ? versionHistory : editHistoryData;
         const counts: Record<string, number> = {};
 
-        source.forEach((entry: any) => {
+        source.forEach((entry) => {
             // Cast moment to any to bypass TS call signature error common in Obsidian plugins
             const date = (moment as any)(entry.timestamp).format('YYYY/MM/DD');
             counts[date] = (counts[date] || 0) + 1;
         });
 
         return Object.entries(counts).map(([date, count]) => ({ date, count }));
-    }, [history, editHistory, viewMode]);
+    }, [versionHistory, editHistoryData, viewMode]);
 
     // Calculate start date (current month + previous 2 months = 3 months total)
     const startDate = useMemo(() => {
@@ -66,6 +75,14 @@ export const DashboardPanel: React.FC = () => {
             document.removeEventListener('mousedown', handleClickOutside);
         };
     }, [dispatch]);
+
+    // Scroll to end of heatmap on mount/update to ensure the latest dates (right side) are visible
+    // This fixes the issue where new cells might be cut off if the container is too narrow
+    useLayoutEffect(() => {
+        if (contentRef.current) {
+            contentRef.current.scrollLeft = contentRef.current.scrollWidth;
+        }
+    }, [data, viewMode]);
 
     const title = viewMode === 'versions' ? 'Version History Dashboard' : 'Edit History Dashboard';
 
@@ -117,7 +134,7 @@ export const DashboardPanel: React.FC = () => {
                         </div>
 
                         {/* Heatmap Area - No scrolling needed for 3 months */}
-                        <div className="v-dashboard-heatmap-wrapper" ref={contentRef} style={{ overflowX: 'hidden' }}>
+                        <div className="v-dashboard-heatmap-wrapper" ref={contentRef} style={{ overflowX: 'auto' }}>
                              <HeatMap
                                 value={data}
                                 startDate={startDate}

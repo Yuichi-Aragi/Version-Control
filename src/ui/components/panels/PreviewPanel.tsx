@@ -10,6 +10,7 @@ import clsx from 'clsx';
 import { escapeRegExp } from '@/ui/utils/strings';
 import { usePanelClose } from '@/ui/hooks';
 import { usePanelSearch } from '@/ui/hooks';
+import { useGetVersionContentQuery } from '@/state/apis/history.api';
 
 interface PreviewPanelProps {
     panelState: PreviewPanelState;
@@ -17,14 +18,22 @@ interface PreviewPanelProps {
 
 export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
     const app = useApp();
-    const { settings, notePath } = useAppSelector(state => ({
+    const { settings, notePath, noteId, viewMode } = useAppSelector(state => ({
         settings: state.app.effectiveSettings,
         notePath: state.app.file?.path ?? '',
+        noteId: state.app.noteId,
+        viewMode: state.app.viewMode,
     }));
     const [localRenderMarkdown, setLocalRenderMarkdown] = useState(false);
     const markdownRef = useRef<HTMLDivElement>(null);
     const virtuosoRef = useRef<VirtuosoHandle>(null);
-    const { version, content } = panelState;
+    const { version } = panelState;
+
+    // Fetch content using RTK Query
+    const { data: content, isLoading, isError } = useGetVersionContentQuery(
+        { noteId: noteId!, versionId: version.id, viewMode },
+        { skip: !noteId }
+    );
 
     // Initialize search hook
     const search = usePanelSearch();
@@ -76,7 +85,7 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
     const toggleRenderMode = useCallback((e: React.MouseEvent) => { e.stopPropagation(); setLocalRenderMarkdown(v => !v); }, []);
 
     useLayoutEffect(() => {
-        if (shouldRenderMarkdown && markdownRef.current) {
+        if (shouldRenderMarkdown && markdownRef.current && content) {
             const container = markdownRef.current;
             container.empty();
             try {
@@ -100,11 +109,11 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
                                 {versionLabel}
                             </h3>
                             <div className="v-panel-header-actions">
-                                <button className="clickable-icon" aria-label="Search content" onClick={search.handleToggleSearch}>
+                                <button className="clickable-icon" aria-label="Search content" onClick={search.handleToggleSearch} disabled={!content}>
                                     <Icon name="search" />
                                 </button>
                                 {notePath.endsWith('.md') && !settings.renderMarkdownInPreview && (
-                                    <button className="v-action-btn v-preview-toggle-btn" aria-label="Toggle markdown rendering" onClick={toggleRenderMode}>
+                                    <button className="v-action-btn v-preview-toggle-btn" aria-label="Toggle markdown rendering" onClick={toggleRenderMode} disabled={!content}>
                                         <Icon name={localRenderMarkdown ? "code" : "book-open"} />
                                     </button>
                                 )}
@@ -155,16 +164,24 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
                         </div>
                     </div>
                     <div className={clsx("v-version-content-preview", { 'is-plaintext': !shouldRenderMarkdown })}>
-                        {shouldRenderMarkdown ? (
-                            <div ref={markdownRef} />
-                        ) : (
-                            <VirtualizedPlaintext 
-                                content={content} 
-                                searchQuery={search.searchQuery} 
-                                isCaseSensitive={search.isCaseSensitive}
-                                scrollerRef={virtuosoRef}
-                                activeMatchInfo={matches[search.activeMatchIndex] ?? null}
-                            />
+                        {isLoading && (
+                            <div className="is-loading"><div className="loading-spinner" /><p>Loading content...</p></div>
+                        )}
+                        {isError && (
+                            <div className="v-error-message">Failed to load content.</div>
+                        )}
+                        {!isLoading && !isError && content && (
+                            shouldRenderMarkdown ? (
+                                <div ref={markdownRef} />
+                            ) : (
+                                <VirtualizedPlaintext 
+                                    content={content} 
+                                    searchQuery={search.searchQuery} 
+                                    isCaseSensitive={search.isCaseSensitive}
+                                    scrollerRef={virtuosoRef}
+                                    activeMatchInfo={matches[search.activeMatchIndex] ?? null}
+                                />
+                            )
                         )}
                     </div>
                 </div>
