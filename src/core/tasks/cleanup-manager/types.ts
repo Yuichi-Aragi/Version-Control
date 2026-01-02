@@ -3,6 +3,9 @@ import type { NoteManifest as CoreNoteManifest, CentralManifest as CoreCentralMa
 export interface CleanupResult {
   deletedNoteDirs: number;
   deletedVersionFiles: number;
+  deletedDuplicates: number;
+  deletedOrphans: number;
+  recoveredNotes: number;
   success: boolean;
   errors?: string[];
 }
