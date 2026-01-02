@@ -2,6 +2,7 @@ import { configureStore } from '@reduxjs/toolkit';
 import type { ThunkAction, UnknownAction } from '@reduxjs/toolkit';
 import { appSlice } from './appSlice';
 import { changelogApi } from './apis/changelog.api';
+import { historyApi } from './apis/history.api';
 import type { AppState } from './state';
 import type { ServiceRegistry } from '@/services-registry';
 
@@ -16,6 +17,7 @@ export const createAppStore = (preloadedAppState: AppState, services: ServiceReg
         reducer: {
             app: appSlice.reducer,
             [changelogApi.reducerPath]: changelogApi.reducer,
+            [historyApi.reducerPath]: historyApi.reducer,
         },
         preloadedState: {
             app: preloadedAppState,
@@ -28,7 +30,7 @@ export const createAppStore = (preloadedAppState: AppState, services: ServiceReg
                 thunk: {
                     extraArgument: services,
                 },
-            }).concat(changelogApi.middleware),
+            }).concat(changelogApi.middleware, historyApi.middleware),
     });
 };
 

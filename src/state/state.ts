@@ -1,6 +1,5 @@
 import { TFile } from 'obsidian';
-import type { EntityState } from '@reduxjs/toolkit';
-import type { VersionControlSettings, HistorySettings, VersionHistoryEntry, AppError, DiffTarget, DiffRequest, DiffType, Change, TimelineEvent, TimelineSettings, ViewMode } from '@/types';
+import type { VersionControlSettings, HistorySettings, VersionHistoryEntry, AppError, DiffTarget, DiffRequest, DiffType, TimelineEvent, TimelineSettings, ViewMode } from '@/types';
 export type { TimelineEvent } from '@/types';
 import { DEFAULT_SETTINGS } from '@/constants';
 import type { AppThunk } from './store';
@@ -33,7 +32,6 @@ export interface ConfirmationPanel {
 export interface PreviewPanel {
     type: 'preview';
     version: VersionHistoryEntry;
-    content: string;
 }
 
 export interface DescriptionPanel {
@@ -44,11 +42,7 @@ export interface DiffPanel {
     type: 'diff';
     version1: VersionHistoryEntry;
     version2: DiffTarget;
-    diffChanges: Change[] | null; // null while loading initial diff
     diffType: DiffType;
-    content1: string;
-    content2: string;
-    isReDiffing?: boolean;
     renderMode?: 'panel' | 'window';
 }
 
@@ -146,10 +140,20 @@ export interface AppState {
     file: TFile | null; 
     noteId: string | null;
     
-    // History Data - Refactored to use EntityState for performance and normalization
+    /**
+     * Tracks the last active note ID to preserve view mode and settings
+     * when the view is temporarily cleared (e.g. mobile sidebar toggle).
+     */
+    lastNoteId: string | null;
+
+    /**
+     * Tracks the last active file path to preserve view mode when the view
+     * is re-initialized before the note ID is resolved (e.g. unregistered notes).
+     */
+    lastFilePath: string | null;
+    
     viewMode: ViewMode;
-    history: EntityState<VersionHistoryEntry, string>; // Used for Versions
-    editHistory: EntityState<VersionHistoryEntry, string>; // Used for Edits
+    // History lists are now managed by RTK Query (historyApi)
 
     currentBranch: string | null;
     availableBranches: string[];
@@ -175,9 +179,6 @@ export interface AppState {
     watchModeCountdown: number | null;
 }
 
-// Helper to create initial entity state
-const initialEntityState = { ids: [], entities: {} };
-
 export const getInitialState = (loadedSettings: VersionControlSettings): AppState => {
     const defaultSortOrder: SortOrder = { property: 'versionNumber', direction: 'desc' };
     return {
@@ -188,9 +189,9 @@ export const getInitialState = (loadedSettings: VersionControlSettings): AppStat
         error: null,
         file: null,
         noteId: null,
+        lastNoteId: null,
+        lastFilePath: null,
         viewMode: 'versions',
-        history: initialEntityState,
-        editHistory: initialEntityState,
         currentBranch: null,
         availableBranches: [],
         isProcessing: false,
