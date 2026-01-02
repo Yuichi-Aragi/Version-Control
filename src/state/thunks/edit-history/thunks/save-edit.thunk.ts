@@ -1,11 +1,12 @@
 import { createAsyncThunk } from '@reduxjs/toolkit';
 import { TFile } from 'obsidian';
-import { appSlice, AppStatus } from '@/state';
+import { appSlice } from '@/state';
 import { resolveSettings } from '@/state/utils/settingsUtils';
 import { shouldAbort } from '@/state/utils/guards';
-import { loadHistoryForNoteId } from '@/state/thunks/core.thunks';
 import type { ThunkConfig } from '@/state/store';
 import type { VersionHistoryEntry } from '@/types';
+import { historyApi } from '@/state/apis/history.api';
+import { validateReadyState, validateFileExists } from '@/state/utils/thunk-validation';
 
 /**
  * Saves a new edit for the current note.
@@ -29,12 +30,14 @@ export const saveNewEdit = createAsyncThunk<
         const timelineManager = services.timelineManager;
         const eventBus = services.eventBus;
 
-        if (state.status !== AppStatus.READY && !isAuto) {
-            if (!state.file) return rejectWithValue('No file');
+        if (!validateReadyState(state, uiService, isAuto)) {
+             return rejectWithValue('Not ready');
         }
 
         const file = state.file;
-        if (!file) return rejectWithValue('No file');
+        if (!validateFileExists(file, uiService, isAuto)) {
+            return rejectWithValue('No file');
+        }
 
         try {
             const liveFile = app.vault.getAbstractFileByPath(file.path);
@@ -42,7 +45,6 @@ export const saveNewEdit = createAsyncThunk<
 
             let noteId = state.noteId;
 
-            // Initialization logic if noteId is missing (First Edit)
             if (!noteId) {
                 noteId = await noteManager.getOrCreateNoteId(liveFile);
                 if (!noteId) throw new Error('Could not generate Note ID');
@@ -56,7 +58,8 @@ export const saveNewEdit = createAsyncThunk<
                 }
 
                 dispatch(appSlice.actions.updateNoteIdInState({ noteId }));
-                dispatch(loadHistoryForNoteId({ file: liveFile, noteId }));
+                // Trigger refresh since noteId is new
+                dispatch(historyApi.util.invalidateTags([{ type: 'EditHistory', id: noteId }]));
             }
 
             const content = await app.vault.adapter.read(liveFile.path);
@@ -72,16 +75,13 @@ export const saveNewEdit = createAsyncThunk<
                 maxVersions
             );
 
-            // Race Check
             if (shouldAbort(services, getState, { noteId })) return rejectWithValue('Context changed');
 
             if (result) {
                 const { entry: newEditEntry, deletedIds } = result;
 
-                // Trigger Event Bus
                 eventBus.trigger('version-saved', noteId);
                 
-                // Instant Timeline Update
                 const currentState = getState().app;
                 if (currentState.panel?.type === 'timeline' && currentState.viewMode === 'edits') {
                     try {
@@ -103,6 +103,9 @@ export const saveNewEdit = createAsyncThunk<
                     uiService.showNotice(`Edit #${newEditEntry.versionNumber} saved.`);
                     backgroundTaskManager.resetTimer('edit');
                 }
+                
+                // Invalidate RTK Query tag to update list
+                dispatch(historyApi.util.invalidateTags([{ type: 'EditHistory', id: noteId }]));
 
                 return { newEditEntry, deletedIds };
             } else {

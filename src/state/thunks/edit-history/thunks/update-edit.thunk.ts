@@ -1,30 +1,20 @@
 import * as v from 'valibot';
 import type { AppThunk, Services } from '@/state';
-import { appSlice, AppStatus } from '@/state';
+import { appSlice } from '@/state';
 import { shouldAbort } from '@/state/utils/guards';
-import { loadEditHistory } from './load-edit-history.thunk';
 import type { EditDetails } from '../types';
 import { EditDetailsSchema } from '@/state/thunks/schemas';
-
-/**
- * Update Edit Thunk
- *
- * Handles updating edit metadata (name and description)
- */
+import { historyApi } from '@/state/apis/history.api';
+import { validateReadyState, validateNoteContext } from '@/state/utils/thunk-validation';
 
 /**
  * Updates the metadata (name and description) of an edit
- *
- * @param editId - The edit ID to update
- * @param details - The new name and description
- * @returns AppThunk that updates the edit details
  */
 export const updateEditDetails =
     (editId: string, details: EditDetails): AppThunk =>
     async (dispatch, getState, services: Services) => {
         if (shouldAbort(services, getState)) return;
 
-        // Aggressive Input Validation
         try {
             v.parse(EditDetailsSchema, details);
         } catch (validationError) {
@@ -37,18 +27,13 @@ export const updateEditDetails =
         const uiService = services.uiService;
         const eventBus = services.eventBus;
 
-        if (state.status !== AppStatus.READY || !state.noteId) return;
-        const { noteId } = state;
+        if (!validateReadyState(state, uiService)) return;
+        if (!validateNoteContext(state.noteId, state.file)) return;
+        
+        // validateNoteContext ensures noteId is not null, but we must assert it for TS
+        const noteId = state.noteId!;
 
-        // 1. Optimistic Update: History List
-        dispatch(
-            appSlice.actions.updateVersionDetailsInState({
-                versionId: editId,
-                ...details,
-            })
-        );
-
-        // 2. Optimistic Update: Timeline Panel
+        // 1. Optimistic Update: Timeline Panel
         dispatch(
             appSlice.actions.updateTimelineEventInState({
                 versionId: editId,
@@ -57,19 +42,16 @@ export const updateEditDetails =
         );
 
         try {
-            // Use high-level manager method for atomicity
             await editHistoryManager.updateEditMetadata(noteId, editId, details.name, details.description);
-
-            // 3. Sync with Timeline DB via EventBus
-            // This ensures the timeline worker DB is updated so future timeline loads are correct.
             eventBus.trigger('version-updated', noteId, editId, details);
+            
+            // Invalidate to refresh list
+            dispatch(historyApi.util.invalidateTags([{ type: 'EditHistory', id: noteId }]));
 
         } catch (error) {
             console.error('VC: Failed to update edit details', error);
             uiService.showNotice('Failed to update edit details.');
-            if (!shouldAbort(services, getState, { noteId })) {
-                dispatch(loadEditHistory(noteId)); // Revert
-            }
+            dispatch(historyApi.util.invalidateTags([{ type: 'EditHistory', id: noteId }]));
         } finally {
             if (!shouldAbort(services, getState)) {
                 dispatch(appSlice.actions.stopVersionEditing());

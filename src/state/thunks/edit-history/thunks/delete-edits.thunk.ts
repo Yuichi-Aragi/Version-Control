@@ -1,16 +1,11 @@
-/**
- * Delete Edits Thunk
- *
- * Handles deletion of edits and related confirmation dialogs
- */
-
 import { createAsyncThunk } from '@reduxjs/toolkit';
 import type { AppThunk } from '@/state';
-import { appSlice, AppStatus } from '@/state';
+import { appSlice } from '@/state';
 import type { VersionHistoryEntry } from '@/types';
 import { shouldAbort } from '@/state/utils/guards';
-import { loadEditHistory } from './load-edit-history.thunk';
 import type { ThunkConfig } from '@/state/store';
+import { historyApi } from '@/state/apis/history.api';
+import { validateReadyState, validateNoteContext } from '@/state/utils/thunk-validation';
 
 /**
  * Deletes an edit from the history
@@ -28,38 +23,34 @@ export const deleteEdit = createAsyncThunk<
         const editHistoryManager = services.editHistoryManager;
         const uiService = services.uiService;
 
-        if (state.status !== AppStatus.READY || !state.noteId) return rejectWithValue('Not ready');
-        const { noteId } = state;
+        if (!validateReadyState(state, uiService)) return rejectWithValue('Not ready');
+        if (!validateNoteContext(state.noteId, state.file)) return rejectWithValue('Invalid context');
+        
+        // validateNoteContext ensures noteId is not null, but we must assert it for TS
+        const noteId = state.noteId!;
 
         dispatch(appSlice.actions.closePanel());
-        // Ensure any pending diff involving this edit is cleared
         dispatch(appSlice.actions.clearDiffRequest());
 
         try {
-            // Use high-level manager method that handles manifest update and deletion atomically
             await editHistoryManager.deleteEditEntry(noteId, editId);
 
-            // Race Check: Verify context after async delete
             if (shouldAbort(services, getState, { noteId })) return rejectWithValue('Context changed');
 
-            // Optimistic update for Timeline
             if (state.panel?.type === 'timeline' && state.viewMode === 'edits') {
                 dispatch(appSlice.actions.removeTimelineEvent({ versionId: editId }));
             }
 
-            // INSTANT UI UPDATE: Remove from local state immediately
-            // We avoid calling loadEditHistory here to prevent UI lag/flicker from DB round-trip.
-            dispatch(appSlice.actions.removeEditsSuccess({ ids: [editId] }));
+            // Invalidate RTK Query tag
+            dispatch(historyApi.util.invalidateTags([{ type: 'EditHistory', id: noteId }]));
 
             uiService.showNotice('Edit deleted.');
             return;
         } catch (error) {
             console.error('VC: Failed to delete edit', error);
             uiService.showNotice('Failed to delete edit.');
-            // Only reload history if the operation failed, to ensure UI consistency
-            if (!shouldAbort(services, getState, { noteId })) {
-                dispatch(loadEditHistory(noteId));
-            }
+            // Force refresh on error
+            dispatch(historyApi.util.invalidateTags([{ type: 'EditHistory', id: noteId }]));
             return rejectWithValue(String(error));
         }
     }
@@ -81,8 +72,11 @@ export const deleteAllEdits = createAsyncThunk<
         const editHistoryManager = services.editHistoryManager;
         const uiService = services.uiService;
 
-        if (state.status !== AppStatus.READY || !state.noteId) return rejectWithValue('Not ready');
-        const { noteId } = state;
+        if (!validateReadyState(state, uiService)) return rejectWithValue('Not ready');
+        if (!validateNoteContext(state.noteId, state.file)) return rejectWithValue('Invalid context');
+        
+        // validateNoteContext ensures noteId is not null, but we must assert it for TS
+        const noteId = state.noteId!;
 
         dispatch(appSlice.actions.closePanel());
         dispatch(appSlice.actions.clearDiffRequest());
@@ -105,25 +99,15 @@ export const deleteAllEdits = createAsyncThunk<
                 return;
             }
 
-            // We iterate because EditHistoryManager doesn't expose a bulk delete for branch yet,
-            // and we want to be safe with manifest updates.
-            // Using deleteEditEntry ensures manifest is updated correctly for each removal.
             for (const editId of editIds) {
                 await editHistoryManager.deleteEditEntry(noteId, editId);
             }
 
-            // Race Check: Verify context after async deletes
             if (shouldAbort(services, getState, { noteId })) return rejectWithValue('Context changed');
 
-            // INSTANT UI UPDATE: Clear local list immediately
-            dispatch(appSlice.actions.editHistoryLoadedSuccess({ 
-                editHistory: [],
-                currentBranch: state.currentBranch,
-                availableBranches: state.availableBranches,
-                contextVersion: state.contextVersion
-            }));
+            // Invalidate RTK Query tag
+            dispatch(historyApi.util.invalidateTags([{ type: 'EditHistory', id: noteId }]));
             
-            // Clear timeline if open
             if (state.panel?.type === 'timeline' && state.viewMode === 'edits') {
                 dispatch(appSlice.actions.setTimelineData([]));
             }
@@ -134,10 +118,7 @@ export const deleteAllEdits = createAsyncThunk<
         } catch (error) {
             console.error('VC: Failed to delete all edits', error);
             uiService.showNotice('Failed to delete all edits.');
-            // Reload history on error to restore state
-            if (!shouldAbort(services, getState, { noteId })) {
-                dispatch(loadEditHistory(noteId));
-            }
+            dispatch(historyApi.util.invalidateTags([{ type: 'EditHistory', id: noteId }]));
             return rejectWithValue(String(error));
         }
     }
@@ -145,9 +126,6 @@ export const deleteAllEdits = createAsyncThunk<
 
 /**
  * Opens a confirmation dialog before deleting an edit
- *
- * @param edit - The edit entry to delete
- * @returns AppThunk that opens the confirmation dialog
  */
 export const requestDeleteEdit =
     (edit: VersionHistoryEntry): AppThunk =>

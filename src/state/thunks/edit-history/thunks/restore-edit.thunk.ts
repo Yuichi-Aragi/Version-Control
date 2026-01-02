@@ -7,10 +7,11 @@
 import { createAsyncThunk } from '@reduxjs/toolkit';
 import { TFile } from 'obsidian';
 import type { AppThunk } from '@/state';
-import { appSlice, AppStatus } from '@/state';
+import { appSlice } from '@/state';
 import type { VersionHistoryEntry } from '@/types';
 import { shouldAbort } from '@/state/utils/guards';
 import type { ThunkConfig } from '@/state/store';
+import { validateReadyState, validateNoteContext } from '@/state/utils/thunk-validation';
 
 /**
  * Restores an edit to the current note
@@ -30,9 +31,12 @@ export const restoreEdit = createAsyncThunk<
         const uiService = services.uiService;
         const app = services.app;
 
-        if (state.status !== AppStatus.READY || !state.noteId || !state.file)
-            return rejectWithValue('Not ready');
-        const { noteId, file, currentBranch } = state;
+        if (!validateReadyState(state, uiService)) return rejectWithValue('Not ready');
+        if (!validateNoteContext(state.noteId, state.file)) return rejectWithValue('Invalid context');
+
+        // validateNoteContext ensures noteId is not null, but we must assert it for TS
+        const noteId = state.noteId!;
+        const { file, currentBranch } = state;
 
         dispatch(appSlice.actions.closePanel());
 
