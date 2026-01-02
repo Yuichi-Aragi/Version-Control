@@ -13,6 +13,7 @@ import {
     validateDatabasePath,
 } from '@/state/thunks/settings/validation';
 import { mergeGlobalSettings, updateLegacyKeys } from '@/state/thunks/settings/helpers';
+import { historyApi } from '@/state/apis/history.api';
 
 /**
  * Thunks for saving and updating settings.
@@ -45,6 +46,10 @@ export const updateGlobalSettings = (settingsUpdate: Partial<VersionControlSetti
         // Dispatch to update the UI state for any open note that is following global settings.
         dispatch(appSlice.actions.updateSettings(settingsUpdate));
         backgroundTaskManager.syncWatchMode();
+        
+        // Invalidate settings cache to force refresh in UI for all notes using global settings
+        dispatch(historyApi.util.invalidateTags(['Settings']));
+        
     } catch (error) {
         console.error(`VC: Failed to update global settings.`, error);
         uiService.showNotice("Failed to save global settings due to validation error.", 5000);

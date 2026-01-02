@@ -12,6 +12,46 @@ import { EXPORT_FORMATS, EXPORT_FORMAT_ICONS } from '@/state/thunks/settings/typ
  */
 
 /**
+ * Helper to prompt for folder selection during export.
+ */
+const selectExportFolder = (
+    dispatch: any,
+    getState: any,
+    services: Services,
+    noteId: string,
+    onFolderSelected: (folder: TFolder) => Promise<void>
+) => {
+    const app = services.app;
+    const uiService = services.uiService;
+    
+    const folders = app.vault.getAllFolders();
+    const folderItems: FolderActionItem[] = folders.map(folder => ({
+        id: folder.path,
+        data: folder,
+        text: folder.isRoot() ? "/" : folder.path,
+    }));
+
+    const onChooseAction = (selectedFolder: TFolder): AppThunk => async (dispatch, _getState) => {
+        dispatch(appSlice.actions.closePanel());
+
+        if (shouldAbort(services, getState, { noteId, status: AppStatus.READY })) {
+            uiService.showNotice("VC: Export cancelled because the note context changed during folder selection.");
+            return;
+        }
+        
+        await onFolderSelected(selectedFolder);
+    };
+
+    dispatch(appSlice.actions.openPanel({
+        type: 'action',
+        title: 'Export to folder...',
+        items: folderItems,
+        onChooseAction,
+        showFilter: true,
+    }));
+}
+
+/**
  * Opens a panel to request export format for all versions.
  *
  * @returns Thunk
@@ -71,7 +111,6 @@ export const exportAllVersions = (noteId: string, format: ExportFormat): AppThun
     }
     const manifestManager = services.manifestManager;
     const exportManager = services.exportManager;
-    const app = services.app;
 
     if (initialState.status !== AppStatus.READY || initialState.noteId !== noteId) {
         uiService.showNotice("VC: Export cancelled because the view context changed.", 3000);
@@ -104,33 +143,12 @@ export const exportAllVersions = (noteId: string, format: ExportFormat): AppThun
 
         const exportContent = await exportManager.generateExport(versionsData, format);
         
-        const folders = app.vault.getAllFolders();
-        const folderItems: FolderActionItem[] = folders.map(folder => ({
-            id: folder.path,
-            data: folder,
-            text: folder.isRoot() ? "/" : folder.path,
-        }));
-
-        const onChooseFolder = (selectedFolder: TFolder): AppThunk => async (dispatch, _getState) => {
-            dispatch(appSlice.actions.closePanel()); // Close the folder selection panel immediately.
-
-            if (shouldAbort(services, getState, { noteId: initialState.noteId, status: AppStatus.READY })) {
-                uiService.showNotice("VC: Export cancelled because the note context changed during folder selection.");
-                return;
-            }
+        selectExportFolder(dispatch, getState, services, noteId, async (selectedFolder) => {
             const sanitizedNoteName = customSanitizeFileName(currentNoteName);
             const exportFileName = `History - ${sanitizedNoteName}.${format}`;
             const exportFilePath = await exportManager.writeFile(selectedFolder, exportFileName, exportContent);
             uiService.showNotice(`Successfully exported to ${exportFilePath}`, 7000);
-        };
-
-        dispatch(appSlice.actions.openPanel({
-            type: 'action',
-            title: 'Export to folder...',
-            items: folderItems,
-            onChooseAction: onChooseFolder,
-            showFilter: true,
-        }));
+        });
 
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Unknown error";
@@ -205,7 +223,6 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: E
     const versionManager = services.versionManager;
     const editHistoryManager = services.editHistoryManager;
     const exportManager = services.exportManager;
-    const app = services.app;
 
     if (initialState.status !== AppStatus.READY || initialState.noteId !== versionEntry.noteId) {
         uiService.showNotice("VC: Export cancelled because the view context changed.", 3000);
@@ -252,21 +269,7 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: E
 
         const exportContent = await exportManager.generateExport([versionData], format);
 
-        const folders = app.vault.getAllFolders();
-        const folderItems: FolderActionItem[] = folders.map(folder => ({
-            id: folder.path,
-            data: folder,
-            text: folder.isRoot() ? "/" : folder.path,
-        }));
-
-        const onChooseFolder = (selectedFolder: TFolder): AppThunk => async (dispatch, _getState) => {
-            dispatch(appSlice.actions.closePanel()); // Close the folder selection panel immediately.
-
-            if (shouldAbort(services, getState, { noteId: initialState.noteId, status: AppStatus.READY })) {
-                uiService.showNotice("VC: Export cancelled because the note context changed during folder selection.");
-                return;
-            }
-
+        selectExportFolder(dispatch, getState, services, versionEntry.noteId, async (selectedFolder) => {
             const sanitizedNoteName = customSanitizeFileName(currentNoteName);
             const typeLabel = viewMode === 'versions' ? 'Version' : 'Edit';
             const idLabel = viewMode === 'versions' ? `V${versionData.versionNumber}` : `Edit ${versionData.versionNumber}`;
@@ -279,15 +282,7 @@ export const exportSingleVersion = (versionEntry: VersionHistoryEntry, format: E
             const exportFilePath = await exportManager.writeFile(selectedFolder, exportFileName, exportContent);
 
             uiService.showNotice(`Successfully exported to ${exportFilePath}`, 7000);
-        };
-
-        dispatch(appSlice.actions.openPanel({
-            type: 'action',
-            title: 'Export to folder...',
-            items: folderItems,
-            onChooseAction: onChooseFolder,
-            showFilter: true,
-        }));
+        });
 
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Unknown error";

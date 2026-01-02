@@ -11,6 +11,7 @@ import {
     mergeVersionHistorySettings,
     mergeEditHistorySettings,
 } from '@/state/thunks/settings/helpers';
+import { historyApi } from '@/state/apis/history.api';
 
 /**
  * Thunks for managing note-specific settings.
@@ -77,7 +78,11 @@ export const toggleGlobalSettings = (applyGlobally: boolean): AppThunk => async 
 
         // Race Check: Verify context after async updates
         if (shouldAbort(services, getState, { noteId, viewMode })) return;
+        
+        // Invalidate settings cache to force refresh in UI
+        dispatch(historyApi.util.invalidateTags(['Settings']));
 
+        // Legacy fallback for thunks that haven't migrated
         dispatch(loadEffectiveSettingsForNote(noteId));
 
     } catch (error) {
@@ -172,6 +177,10 @@ export const updateSettings = (settingsUpdate: Partial<HistorySettings>): AppThu
                 }
             }
         }
+        
+        // Invalidate settings cache to ensure consistency
+        dispatch(historyApi.util.invalidateTags(['Settings']));
+
     } catch (error) {
         console.error(`VC: Failed to update settings. Reverting UI.`, error);
         uiService.showNotice("Failed to save settings. Reverting.", 5000);
