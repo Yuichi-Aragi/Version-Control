@@ -32,14 +32,12 @@ const DiffLineComponent: FC<DiffLineProps> = ({
     displayMode = 'unified',
     className
 }) => {
-    // Memoize click handler
     const handleClick = useCallback(() => {
         if (isNotNil(onClick) && data.type !== 'collapsed') {
             onClick(data);
         }
     }, [onClick, data]);
 
-    // Memoize regex for search
     const searchRegex = useMemo(() => {
         const trimmedQuery = isString(searchQuery) ? searchQuery.trim() : '';
         if (!trimmedQuery) return null;
@@ -50,14 +48,16 @@ const DiffLineComponent: FC<DiffLineProps> = ({
                 isCaseSensitive ? 'g' : 'gi'
             );
         } catch {
-            // Fallback to literal string matching if regex fails
             return null;
         }
     }, [searchQuery, isCaseSensitive]);
 
-    // Determine segment class based on diff type
     const getSegmentClass = useCallback((segType: 'add' | 'remove' | 'unchanged'): string => {
         if (segType === 'unchanged') return '';
+        
+        // Smart, Line, and Char modes all use character-level refinement in the worker,
+        // but 'chars' mode needs specific styling (no line background).
+        // 'words' mode uses word-level refinement.
         
         if (diffType === 'chars') {
             return segType === 'add' ? 'diff-char-add' : 'diff-char-remove';
@@ -67,10 +67,10 @@ const DiffLineComponent: FC<DiffLineProps> = ({
             return segType === 'add' ? 'diff-word-add' : 'diff-word-remove';
         }
         
+        // Default for Smart and Line modes (standard highlight)
         return segType === 'add' ? 'diff-segment-add' : 'diff-segment-remove';
     }, [diffType]);
 
-    // Calculate matches for segments with proper indexing
     const calculateSegmentMatches = useCallback((): ReactNode[] => {
         if (!Array.isArray(data.segments)) return [];
         
@@ -79,7 +79,6 @@ const DiffLineComponent: FC<DiffLineProps> = ({
         return data.segments.map((seg, i) => {
             let localActiveMatchIndex = -1;
             
-            // Calculate matches for this segment
             if (searchRegex && isString(seg.text)) {
                 const matches = seg.text.match(searchRegex);
                 const matchCount = Array.isArray(matches) ? matches.length : 0;
@@ -95,7 +94,6 @@ const DiffLineComponent: FC<DiffLineProps> = ({
                 globalMatchCounter += matchCount;
             }
 
-            // Determine if segment should be rendered based on display mode
             const shouldRender = displayMode === 'unified' || 
                                  (displayMode === 'left' && seg.type !== 'add') || 
                                  (displayMode === 'right' && seg.type !== 'remove');
@@ -131,7 +129,6 @@ const DiffLineComponent: FC<DiffLineProps> = ({
         getSegmentClass
     ]);
 
-    // Collapsed line renderer - Early return MUST happen after all hooks
     if (data.type === 'collapsed') {
         return (
             <div 
@@ -141,6 +138,7 @@ const DiffLineComponent: FC<DiffLineProps> = ({
                 )}
                 role="row"
                 aria-label="Collapsed context lines"
+                data-display-mode={displayMode}
             >
                 <div className="diff-line-gutter" aria-hidden="true" />
                 <div className="diff-line-content">
@@ -152,11 +150,9 @@ const DiffLineComponent: FC<DiffLineProps> = ({
 
     const segmentElements = Array.isArray(data.segments) ? calculateSegmentMatches() : null;
     
-    // Line number display
     const oldLineNum = typeof data.oldLineNum === 'number' ? data.oldLineNum.toString() : '';
     const newLineNum = typeof data.newLineNum === 'number' ? data.newLineNum.toString() : '';
     
-    // Line marker character
     const lineMarker = data.type === 'add' ? '+' : 
                         data.type === 'remove' ? '-' : 
                         '';
@@ -176,6 +172,7 @@ const DiffLineComponent: FC<DiffLineProps> = ({
             onClick={handleClick}
             role="row"
             aria-label={`${data.type} line${oldLineNum ? `, old line ${oldLineNum}` : ''}${newLineNum ? `, new line ${newLineNum}` : ''}`}
+            data-display-mode={displayMode}
         >
             <div className="diff-line-gutter" aria-hidden="true">
                 <span className="diff-line-num old" aria-label={`Old line number: ${oldLineNum || 'Not applicable'}`}>
@@ -206,6 +203,5 @@ const DiffLineComponent: FC<DiffLineProps> = ({
     );
 };
 
-// Memoize DiffLine to prevent unnecessary re-renders
 export const DiffLine = memo(DiffLineComponent);
 DiffLine.displayName = 'DiffLine';

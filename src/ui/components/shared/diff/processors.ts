@@ -10,11 +10,6 @@ import type {
 import { CONTEXT_SIZE } from './constants';
 import { validateChange, validateChanges, validateDiffType, invariant } from './utils';
 
-/**
- * Simple, strictly typed memoization helper.
- * Used to avoid signature mismatches with external libraries and ensure
- * correct caching behavior for multi-argument functions.
- */
 function memoize<T extends (...args: any[]) => any>(
     fn: T,
     resolver: (...args: Parameters<T>) => string
@@ -31,9 +26,6 @@ function memoize<T extends (...args: any[]) => any>(
     }) as T;
 }
 
-/**
- * Splits a list of Change parts into line segments for intra-line highlighting.
- */
 export const splitPartsToLines = memoize(
     (
         parts: readonly Change[],
@@ -47,7 +39,6 @@ export const splitPartsToLines = memoize(
         for (const part of parts) {
             validateChange(part);
             
-            // Skip parts that don't match target type
             if (targetType === 'add' && part.removed) continue;
             if (targetType === 'remove' && part.added) continue;
 
@@ -57,12 +48,10 @@ export const splitPartsToLines = memoize(
             for (let i = 0; i < values.length; i++) {
                 const val = values[i];
                 
-                // Empty strings from split are only added for non-empty content
                 if (isString(val) && val !== '') {
                     currentLineSegments.push({ text: val, type });
                 }
                 
-                // If we hit a newline (except the last split), finalize current line
                 if (i < values.length - 1) {
                     if (currentLineSegments.length > 0) {
                         lines.push(currentLineSegments);
@@ -72,7 +61,6 @@ export const splitPartsToLines = memoize(
             }
         }
         
-        // Flush remaining segments
         if (currentLineSegments.length > 0) {
             lines.push(currentLineSegments);
         }
@@ -83,9 +71,6 @@ export const splitPartsToLines = memoize(
         `${JSON.stringify(parts)}-${targetType}`
 );
 
-/**
- * Processes raw Change objects into a linear list of lines (Unified view structure).
- */
 export const processLineChanges = memoize(
     (
         changes: readonly Change[],
@@ -100,9 +85,6 @@ export const processLineChanges = memoize(
         let keyCounter = 0;
         let linearIndex = 0;
 
-        /**
-         * Helper to push a line with proper type safety and line numbering
-         */
         const pushLine = (
             content: string,
             type: DiffLineType,
@@ -114,7 +96,6 @@ export const processLineChanges = memoize(
             let currentOldLineNum: number | undefined;
             let currentNewLineNum: number | undefined;
 
-            // Calculate line numbers before object creation to satisfy readonly
             switch (type) {
                 case 'add':
                     currentNewLineNum = newLineNum++;
@@ -127,7 +108,6 @@ export const processLineChanges = memoize(
                     currentNewLineNum = newLineNum++;
                     break;
                 case 'collapsed':
-                    // Collapsed lines don't affect line numbers
                     break;
             }
 
@@ -138,7 +118,6 @@ export const processLineChanges = memoize(
                 content,
                 originalChangeIndex,
                 segments,
-                // Use conditional spread to satisfy exactOptionalPropertyTypes
                 ...(isModified ? { isModified: true } : {}),
                 oldLineNum: currentOldLineNum,
                 newLineNum: currentNewLineNum,
@@ -147,95 +126,12 @@ export const processLineChanges = memoize(
             lines.push(lineData);
         };
 
-        // Handle word/char diffs (stream processing)
-        if (diffType === 'words' || diffType === 'chars') {
-            let currentSegments: DiffLineSegment[] = [];
-            let hasAdd = false;
-            let hasRemove = false;
-
-            for (const [changeIndex, part] of changes.entries()) {
-                const type = part.added ? 'add' : part.removed ? 'remove' : 'unchanged';
-                const values = part.value.split('\n');
-
-                for (let i = 0; i < values.length; i++) {
-                    const val = values[i];
-                    
-                    if (isString(val) && val !== '') {
-                        currentSegments.push({ text: val, type });
-                        
-                        // Track what types we have in this line
-                        if (type === 'add') hasAdd = true;
-                        else if (type === 'remove') hasRemove = true;
-                    }
-
-                    // Handle newline (end of line)
-                    if (i < values.length - 1) {
-                        // Determine line type based on segment composition
-                        let lineType: DiffLineType;
-                        if (hasAdd && hasRemove) {
-                            lineType = 'context';
-                        } else if (hasAdd && !hasRemove) {
-                            lineType = 'add';
-                        } else if (hasRemove && !hasAdd) {
-                            lineType = 'remove';
-                        } else {
-                            lineType = 'context';
-                        }
-
-                        const content = currentSegments.map(s => s.text).join('');
-                        const isModified = hasAdd && hasRemove;
-                        
-                        pushLine(
-                            content,
-                            lineType,
-                            changeIndex,
-                            [...currentSegments],
-                            isModified
-                        );
-                        
-                        // Reset for next line
-                        currentSegments = [];
-                        hasAdd = false;
-                        hasRemove = false;
-                    }
-                }
-            }
-
-            // Process any remaining segments
-            if (currentSegments.length > 0) {
-                let lineType: DiffLineType;
-                if (hasAdd && hasRemove) {
-                    lineType = 'context';
-                } else if (hasAdd && !hasRemove) {
-                    lineType = 'add';
-                } else if (hasRemove && !hasAdd) {
-                    lineType = 'remove';
-                } else {
-                    lineType = 'context';
-                }
-
-                const content = currentSegments.map(s => s.text).join('');
-                const isModified = hasAdd && hasRemove;
-                
-                pushLine(
-                    content,
-                    lineType,
-                    changes.length - 1,
-                    [...currentSegments],
-                    isModified
-                );
-            }
-
-            return lines;
-        }
-
-        // Handle line and smart diffs
         for (const [changeIndex, part] of changes.entries()) {
             const type = part.added ? 'add' as const : 
                         part.removed ? 'remove' as const : 
                         'context' as const;
 
-            // Handle collapsed context for Smart diff
+            // Handle collapsed context ONLY for Smart diff
             if (
                 diffType === 'smart' && 
                 type === 'context' && 
@@ -251,20 +147,16 @@ export const processLineChanges = memoize(
                 const topContext = allLines.slice(0, CONTEXT_SIZE);
                 const bottomContext = allLines.slice(-CONTEXT_SIZE);
                 
-                // Add top context lines
                 topContext.forEach(line => {
                     pushLine(line, 'context', changeIndex);
                 });
                 
-                // Add collapsed line marker
                 pushLine('', 'collapsed', changeIndex);
                 
-                // Adjust line numbers for skipped lines
                 const skippedCount = allLines.length - (CONTEXT_SIZE * 2);
                 oldLineNum += clamp(skippedCount, 0, Infinity);
                 newLineNum += clamp(skippedCount, 0, Infinity);
 
-                // Add bottom context lines
                 bottomContext.forEach(line => {
                     pushLine(line, 'context', changeIndex);
                 });
@@ -272,12 +164,11 @@ export const processLineChanges = memoize(
                 continue;
             }
 
-            // Handle smart diff with intra-line segments
+            // Handle intra-line segments for all modes if present
             let segmentLines: readonly (readonly DiffLineSegment[])[] | null = null;
             const smartPart = part as Change & { parts?: readonly Change[] };
             
             if (
-                diffType === 'smart' && 
                 Array.isArray(smartPart.parts) && 
                 (type === 'add' || type === 'remove')
             ) {
@@ -288,12 +179,10 @@ export const processLineChanges = memoize(
             const lastIndex = partLines.length - 1;
 
             partLines.forEach((line, i) => {
-                // Skip empty last line that comes from trailing newline
                 if (i === lastIndex && line === '' && partLines.length > 1) return;
 
                 const segments = segmentLines && segmentLines[i] ? segmentLines[i] : undefined;
                 
-                // For smart diff with segments, determine if line is modified
                 let isModified = false;
                 if (Array.isArray(segments)) {
                     const hasAdd = segments.some(s => s.type === 'add');
@@ -313,14 +202,10 @@ export const processLineChanges = memoize(
 
         return lines;
     },
-    // Fix: Allow diffType to be optional/undefined in resolver to match function signature
     (changes: readonly Change[], diffType?: string) => 
         `${JSON.stringify(changes)}-${diffType ?? 'lines'}`
 );
 
-/**
- * Processes linear lines into side-by-side rows with perfect alignment.
- */
 export const processSideBySideChanges = memoize(
     (
         linearLines: readonly DiffLineData[]
@@ -334,9 +219,6 @@ export const processSideBySideChanges = memoize(
         let removeBuffer: DiffLineData[] = [];
         let addBuffer: DiffLineData[] = [];
 
-        /**
-         * Flush buffers by pairing remove and add lines
-         */
         const flushBuffers = (): void => {
             if (removeBuffer.length === 0 && addBuffer.length === 0) return;
 
@@ -374,7 +256,6 @@ export const processSideBySideChanges = memoize(
             } else if (line.type === 'add') {
                 addBuffer.push(line);
             } else {
-                // Safety fallback: treat as context
                 flushBuffers();
                 rows.push({
                     key: `sbs-${keyCounter++}`,
@@ -385,7 +266,6 @@ export const processSideBySideChanges = memoize(
             }
         }
         
-        // Flush any remaining buffers
         flushBuffers();
 
         return rows;
@@ -393,16 +273,12 @@ export const processSideBySideChanges = memoize(
     (linearLines: readonly DiffLineData[]) => JSON.stringify(linearLines)
 );
 
-/**
- * Processes all diff data with memoization support
- */
 export const processDiffData = (
     changes: readonly Change[] | undefined,
     lines: readonly DiffLineData[] | undefined,
     diffType: DiffType,
     viewLayout: 'split' | 'unified'
 ): ProcessedDiffData => {
-    // Validate inputs
     invariant(
         !(isNotNil(changes) && isNotNil(lines)),
         'Cannot provide both changes and lines. Use one or the other.'
@@ -413,14 +289,12 @@ export const processDiffData = (
         'Must provide either changes or lines'
     );
 
-    // Process linear lines
     const linearLines = Array.isArray(lines) 
         ? lines
         : Array.isArray(changes)
         ? processLineChanges(changes, diffType)
         : [];
 
-    // Process side-by-side rows if needed
     const splitRows = viewLayout === 'split'
         ? processSideBySideChanges(linearLines)
         : [];
