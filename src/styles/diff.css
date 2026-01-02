@@ -214,6 +214,12 @@ body .version-control-view.version-control-view .v-diff-content-wrapper div[data
     display: flex;
 }
 
+/* Split View: Wrap Content */
+.v-diff-split-view .diff-line-content {
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
 /* Marker (+/-) */
 .diff-line-marker {
     display: inline-block;
@@ -301,26 +307,29 @@ body .version-control-view.version-control-view .v-diff-content-wrapper div[data
     opacity: 0.5;
 }
 
-/* Word-level highlights */
-.diff-word-add {
+/* Segment Highlights */
+/* Common highlight styles */
+.diff-segment-add,
+.diff-word-add,
+.diff-char-add {
     background-color: rgba(var(--color-green-rgb), 0.3);
     border-radius: 2px;
 }
-.diff-word-remove {
+
+.diff-segment-remove,
+.diff-word-remove,
+.diff-char-remove {
     background-color: rgba(var(--color-red-rgb), 0.3);
     border-radius: 2px;
     text-decoration: line-through;
 }
 
-/* Char-level highlights */
+/* Specific intensity adjustments if needed */
 .diff-char-add {
     background-color: rgba(var(--color-green-rgb), 0.4);
-    border-radius: 1px;
 }
 .diff-char-remove {
     background-color: rgba(var(--color-red-rgb), 0.4);
-    border-radius: 1px;
-    text-decoration: line-through;
 }
 
 
@@ -330,10 +339,10 @@ body .version-control-view.version-control-view .v-diff-content-wrapper div[data
     overflow-x: auto !important; /* Force override virtuoso defaults if needed */
 }
 
-/* Ensure the scroller inner div allows width expansion */
+/* Ensure the scroller inner div allows width expansion but enforces wrapping */
 .v-virtuoso-container.v-diff-split-view > div[data-virtuoso-scroller="true"] > div[data-virtuoso-item-list="true"] {
-    min-width: 100%;
-    width: fit-content;
+    min-width: max(100%, 700px); /* Ensure space for 2x350px columns */
+    width: auto;
 }
 
 .diff-split-row {
@@ -356,6 +365,19 @@ body .version-control-view.version-control-view .v-diff-content-wrapper div[data
 
 .diff-split-cell .diff-line {
     border-left-width: 0; /* Remove left border in split view to save space */
+    flex-grow: 1; /* Ensure background fills cell height */
+}
+
+/* Split View Gutter Optimizations */
+.diff-line[data-display-mode="left"] .diff-line-num.new,
+.diff-line[data-display-mode="right"] .diff-line-num.old {
+    display: none;
+}
+
+.diff-line[data-display-mode="left"] .diff-line-gutter,
+.diff-line[data-display-mode="right"] .diff-line-gutter {
+    min-width: 3rem; /* Reduced width for single number */
+    padding-right: var(--size-4-2);
 }
 
 /* Empty cell placeholder */
