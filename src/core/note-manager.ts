@@ -5,6 +5,7 @@ import { generateNoteId, extractUuidFromId, extractTimestampFromId } from "@/uti
 import type VersionControlPlugin from "@/main";
 import { EditHistoryManager } from "@/core";
 import { updateFrontmatter, getFrontmatterKey, DELETE } from "@/utils/frontmatter";
+import { PluginEvents } from "@/core/plugin-events";
 
 export class NoteManager {
     // A temporary exclusion list to prevent event handlers from processing files
@@ -15,7 +16,8 @@ export class NoteManager {
         private plugin: VersionControlPlugin,
         private app: App, 
         private manifestManager: ManifestManager,
-        private editHistoryManager: EditHistoryManager
+        private editHistoryManager: EditHistoryManager,
+        private eventBus: PluginEvents
     ) {}
 
     private get noteIdKey(): string {
@@ -90,9 +92,22 @@ export class NoteManager {
 
         // 1. Priority: Check Central Manifest for existing ID associated with this path.
         // This includes consolidation logic to ensure only one ID exists per path.
-        const canonicalId = await this.manifestManager.getConsolidatedNoteIdForPath(file.path);
+        const { winnerId, loserIds } = await this.manifestManager.resolveDuplicatesForPath(file.path);
 
-        if (canonicalId) {
+        // Handle cleanup of losers (Edit History & Timeline)
+        if (loserIds.length > 0) {
+            console.log(`VC: Cleaning up external data for duplicate IDs: ${loserIds.join(', ')}`);
+            for (const loserId of loserIds) {
+                // Delete Edit History (IDB)
+                await this.editHistoryManager.deleteNoteHistory(loserId).catch(e => 
+                    console.error(`VC: Failed to delete edit history for duplicate ${loserId}`, e)
+                );
+                // Clear Timeline
+                this.eventBus.trigger('history-deleted', loserId);
+            }
+        }
+
+        if (winnerId) {
             // If we found a canonical ID for this path, we enforce it.
             if (file.extension === 'md') {
                 const fileCache = this.app.metadataCache.getFileCache(file);
@@ -105,11 +120,11 @@ export class NoteManager {
                 
                 // If frontmatter ID doesn't match canonical ID OR legacy keys exist, update/clean.
                 // This handles cases where file content might have been overwritten, is stale, or contains deprecated keys.
-                if (currentFmId !== canonicalId || hasLegacyKeys) {
-                    await this.writeNoteIdToFrontmatter(file, canonicalId);
+                if (currentFmId !== winnerId || hasLegacyKeys) {
+                    await this.writeNoteIdToFrontmatter(file, winnerId);
                 }
             }
-            return canonicalId;
+            return winnerId;
         }
 
         // 2. Fallback: If no canonical ID in manifest, check frontmatter/generation logic.

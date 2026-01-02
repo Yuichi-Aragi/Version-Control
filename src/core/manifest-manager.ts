@@ -31,11 +31,14 @@ export class ManifestManager {
     }
 
     /**
-     * Checks if any noteId already exists for a specific path in the central manifest.
-     * If multiple exist, it consolidates them by keeping the oldest one and removing others.
-     * Returns the single valid noteId for the path, or null if none exist.
+     * Checks if multiple noteIds exist for a specific path.
+     * If duplicates found:
+     * 1. Identifies winner (oldest) and losers.
+     * 2. Removes losers from Central Manifest.
+     * 3. Deletes physical version history folders for losers.
+     * 4. Returns the winner ID and the list of loser IDs.
      */
-    public async getConsolidatedNoteIdForPath(path: string): Promise<string | null> {
+    public async resolveDuplicatesForPath(path: string): Promise<{ winnerId: string | null; loserIds: string[] }> {
         const centralManifest = await this.centralManifestRepo.load();
         const matches: { id: string; createdAt: string }[] = [];
 
@@ -46,9 +49,9 @@ export class ManifestManager {
             }
         }
 
-        if (matches.length === 0) return null;
+        if (matches.length === 0) return { winnerId: null, loserIds: [] };
 
-        if (matches.length === 1) return matches[0]!.id;
+        if (matches.length === 1) return { winnerId: matches[0]!.id, loserIds: [] };
 
         // Multiple matches found. Sort by createdAt ascending (oldest first).
         // If createdAt is invalid or same, fallback to ID string comparison for determinism.
@@ -61,15 +64,24 @@ export class ManifestManager {
 
         const winner = matches[0]!;
         const losers = matches.slice(1);
+        const loserIds = losers.map(l => l.id);
 
-        console.log(`VC: Consolidated IDs for "${path}". Winner: ${winner.id}. Removing: ${losers.map(l => l.id).join(', ')}`);
+        console.log(`VC: Resolving duplicates for "${path}". Winner: ${winner.id}. Removing: ${loserIds.join(', ')}`);
 
-        // Remove losers from central manifest
-        for (const loser of losers) {
-            await this.centralManifestRepo.removeNoteEntry(loser.id);
+        // Remove losers from central manifest AND delete physical folders
+        for (const loserId of loserIds) {
+            await this.centralManifestRepo.removeNoteEntry(loserId);
+            
+            // Delete physical folder
+            const noteDbPath = this.pathService.getNoteDbPath(loserId);
+            await this.storageService.permanentlyDeleteFolder(noteDbPath).catch(err => {
+                console.error(`VC: Failed to delete physical folder for duplicate note ${loserId}`, err);
+            });
+            
+            this.noteManifestRepo.invalidateCache(loserId);
         }
 
-        return winner.id;
+        return { winnerId: winner.id, loserIds };
     }
 
     public async createNoteEntry(noteId: string, notePath: string): Promise<NoteManifest> {
