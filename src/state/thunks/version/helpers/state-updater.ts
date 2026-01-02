@@ -1,6 +1,7 @@
 import type { Dispatch } from '@reduxjs/toolkit';
 import { appSlice } from '@/state';
 import type { VersionHistoryEntry } from '@/types';
+import { historyApi } from '@/state/apis/history.api';
 
 /**
  * State update helpers for version thunks.
@@ -10,20 +11,25 @@ import type { VersionHistoryEntry } from '@/types';
  * Updates the state with a newly saved version entry.
  *
  * @param dispatch - Redux dispatch function.
- * @param newVersionEntry - The new version entry to add.
+ * @param _newVersionEntry - The new version entry (unused as we invalidate tags).
  * @param noteId - The note ID for the version.
  * @param currentNoteId - The current note ID in state.
  */
 export function updateStateWithNewVersion(
     dispatch: Dispatch,
-    newVersionEntry: VersionHistoryEntry,
+    _newVersionEntry: VersionHistoryEntry,
     noteId: string,
     currentNoteId: string | null
 ): void {
     if (currentNoteId !== noteId) {
         dispatch(appSlice.actions.updateNoteIdInState({ noteId }));
     }
-    dispatch(appSlice.actions.addVersionSuccess({ newVersion: newVersionEntry }));
+    
+    // Invalidate tags to trigger RTK Query refetch
+    dispatch(historyApi.util.invalidateTags([
+        { type: 'VersionHistory', id: noteId },
+        { type: 'Branches', id: noteId }
+    ]));
 }
 
 /**
@@ -42,9 +48,6 @@ export function updateVersionDetailsInState(
 ): void {
     const updatePayload = { name, description };
 
-    // Update in history panel
-    dispatch(appSlice.actions.updateVersionDetailsInState({ versionId, ...updatePayload }));
-
-    // Update in timeline panel
+    // Update in timeline panel (optimistic)
     dispatch(appSlice.actions.updateTimelineEventInState({ versionId, ...updatePayload }));
 }
