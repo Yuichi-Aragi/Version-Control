@@ -6,11 +6,11 @@ import { Virtuoso } from 'react-virtuoso';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppSelector } from '@/ui/hooks';
 import { AppStatus } from '@/state';
-import { selectAllHistory, selectAllEditHistory } from '@/state/appSlice';
 import type { VersionHistoryEntry as VersionHistoryEntryType } from '@/types';
 import { formatFileSize } from '@/ui/utils/dom';
 import { HistoryEntry } from '@/ui/components';
 import { Icon } from '@/ui/components';
+import { useGetVersionHistoryQuery, useGetEditHistoryQuery } from '@/state/apis/history.api';
 
 const SkeletonEntry: FC<{ isListView: boolean }> = memo(({ isListView }) => (
     <motion.div 
@@ -86,38 +86,46 @@ interface HistoryListProps {
 
 /** Main list component */
 export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
-    const { 
-        status, 
-        history, 
-        editHistory,
-        viewMode,
-        searchQuery, 
-        isSearchCaseSensitive, 
-        sortOrder, 
-        panel, 
-        settings, // Effective settings
-    } = useAppSelector(state => ({
-        status: state.app.status,
-        history: selectAllHistory(state),
-        editHistory: selectAllEditHistory(state),
-        viewMode: state.app.viewMode,
-        searchQuery: state.app.searchQuery ?? '',
-        isSearchCaseSensitive: state.app.isSearchCaseSensitive,
-        sortOrder: state.app.sortOrder ?? { property: 'versionNumber', direction: 'desc' },
-        panel: state.app.panel,
-        settings: state.app.effectiveSettings,
-    }));
+    // Use individual selectors to prevent unnecessary re-renders when unrelated state changes
+    const status = useAppSelector(state => state.app.status);
+    const noteId = useAppSelector(state => state.app.noteId);
+    const viewMode = useAppSelector(state => state.app.viewMode);
+    const searchQuery = useAppSelector(state => state.app.searchQuery ?? '');
+    const isSearchCaseSensitive = useAppSelector(state => state.app.isSearchCaseSensitive);
+    const sortOrder = useAppSelector(state => state.app.sortOrder ?? { property: 'versionNumber', direction: 'desc' });
+    const settings = useAppSelector(state => state.app.effectiveSettings);
+    
+    // Optimization: Only subscribe to whether a panel is open (boolean), not the panel object itself.
+    // This prevents re-renders when switching between different panel types (e.g. diff -> settings)
+    // if the visual layout of the list (shrunk vs full width) remains the same.
+    const isPanelOpen = useAppSelector(state => state.app.panel !== null);
 
-    // Determine active list based on mode
-    const activeList = viewMode === 'versions' ? history : editHistory;
+    // RTK Query Hooks
+    // We conditionally skip queries if noteId is missing
+    const skipQuery = !noteId;
+    
+    // Pass noteId! because skipQuery handles the null case, but TS needs a string.
+    const versionHistoryQuery = useGetVersionHistoryQuery(noteId!, { 
+        skip: skipQuery || viewMode !== 'versions' 
+    });
+    
+    const editHistoryQuery = useGetEditHistoryQuery(noteId!, { 
+        skip: skipQuery || viewMode !== 'edits' 
+    });
+
+    const { data: queryData, isFetching, isLoading } = viewMode === 'versions' ? versionHistoryQuery : editHistoryQuery;
+
+    // Defensive: If noteId is null, force activeList to be undefined/empty to prevent "ghost data"
+    // from previous queries persisting when switching to an unregistered note.
+    const activeList = noteId ? queryData : undefined;
+
     // Use isListView from effective settings
     const isListView = settings.isListView;
 
     // Memoize the processed history to ensure synchronous updates with state changes.
-    // This replaces the previous async useEffect/useState logic which caused stale data issues.
     const processedHistory = useMemo(() => {
         // If loading, we don't process anything, the render logic will show skeletons.
-        if (status !== AppStatus.READY) return [];
+        if (isLoading || isFetching || !activeList) return [];
 
         const src = Array.isArray(activeList) ? activeList : [];
         const trimmedQuery = String(searchQuery ?? '').trim();
@@ -200,7 +208,7 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
         const sortedByScore = orderBy(filteredScored, ['score'], ['desc']);
         return sortedByScore.map(item => item.version);
 
-    }, [activeList, status, searchQuery, isSearchCaseSensitive, sortOrder, settings]);
+    }, [activeList, isLoading, isFetching, searchQuery, isSearchCaseSensitive, sortOrder, settings]);
 
     // Notify parent of count changes
     useEffect(() => {
@@ -215,7 +223,7 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
 
     const renderContent = () => {
         // STRICT: If loading, show skeletons.
-        if (status === AppStatus.LOADING) {
+        if (isLoading || isFetching || status === AppStatus.LOADING) {
             return (
                 <motion.div 
                     key="loading"
@@ -223,7 +231,6 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.15 }}
-                    // Use a separate scrollable container for manual loading state to avoid nesting .v-history-list
                     className={clsx('v-history-manual-scroll', { 'is-list-view': isListView })}
                 >
                     {Array.from({ length: 8 }).map((_, i) => (
@@ -278,14 +285,26 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
                     itemContent={(_index, version) => {
                         if (!version) return null;
                         return (
-                            <div className={isListView ? 'v-history-item-list-wrapper' : 'v-history-item-card-wrapper'} data-version-id={String(version.id)}>
+                            <motion.div 
+                                className={isListView ? 'v-history-item-list-wrapper' : 'v-history-item-card-wrapper'} 
+                                data-version-id={String(version.id)}
+                                initial={{ opacity: 0, y: 10, scale: 0.98 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                transition={{ 
+                                    type: "spring", 
+                                    stiffness: 500, 
+                                    damping: 30,
+                                    mass: 1
+                                }}
+                                style={{ transformOrigin: 'center center' }}
+                            >
                                 <HistoryEntry 
                                     version={version} 
                                     searchQuery={searchQuery}
                                     isSearchCaseSensitive={isSearchCaseSensitive}
                                     viewMode={viewMode}
                                 />
-                            </div>
+                            </motion.div>
                         );
                     }}
                     components={{
@@ -299,7 +318,7 @@ export const HistoryList: FC<HistoryListProps> = ({ onCountChange }) => {
     };
 
     return (
-        <div className={clsx('v-history-list-container', { 'is-panel-active': panel !== null })}>
+        <div className={clsx('v-history-list-container', { 'is-panel-active': isPanelOpen })}>
             <div 
                 className={clsx('v-history-list', { 'is-list-view': isListView })}
                 style={{ height: '100%', position: 'relative' }}

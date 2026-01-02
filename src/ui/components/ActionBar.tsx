@@ -7,11 +7,13 @@ import { AppStatus } from '@/state';
 import { appSlice } from '@/state';
 import { thunks } from '@/state';
 import { Icon } from '@/ui/components';
+import { useGetBranchesQuery, useGetVersionHistoryQuery, useGetEditHistoryQuery } from '@/state/apis/history.api';
 
 export const ActionBar: FC = () => {
     const dispatch = useAppDispatch();
     const { 
         status, 
+        noteId,
         isSearchActive, 
         searchQuery: globalSearchQuery, 
         isSearchCaseSensitive, 
@@ -20,14 +22,11 @@ export const ActionBar: FC = () => {
         diffRequest, 
         settings, // Effective settings
         watchModeCountdown, 
-        historyCount, 
-        editHistoryCount,
         viewMode,
         panel,
-        currentBranch,
-        availableBranches,
     } = useAppSelector(state => ({
         status: state.app.status,
+        noteId: state.app.noteId,
         isSearchActive: state.app.isSearchActive,
         searchQuery: state.app.searchQuery,
         isSearchCaseSensitive: state.app.isSearchCaseSensitive,
@@ -36,13 +35,24 @@ export const ActionBar: FC = () => {
         diffRequest: state.app.diffRequest,
         settings: state.app.effectiveSettings,
         watchModeCountdown: state.app.watchModeCountdown,
-        historyCount: state.app.history.ids.length,
-        editHistoryCount: state.app.editHistory.ids.length,
         viewMode: state.app.viewMode,
         panel: state.app.panel,
-        currentBranch: state.app.currentBranch,
-        availableBranches: state.app.availableBranches,
     }));
+
+    // RTK Query hooks for data
+    const skipQuery = !noteId;
+    const { data: branchesData } = useGetBranchesQuery(noteId!, { skip: skipQuery });
+    const { data: versionHistory } = useGetVersionHistoryQuery(noteId!, { skip: skipQuery });
+    const { data: editHistory } = useGetEditHistoryQuery(noteId!, { skip: skipQuery });
+
+    // Defensive: Ensure we only use data if noteId is present
+    const currentBranch = (noteId && branchesData?.currentBranch) ?? '';
+    const availableBranches = (noteId && branchesData?.availableBranches) ?? [];
+    
+    // Fix: Use ternary to ensure return type is always number. 
+    // (noteId && number) returns string if noteId is "" (falsy string), causing TS error.
+    const historyCount = noteId ? (versionHistory?.length ?? 0) : 0;
+    const editHistoryCount = noteId ? (editHistory?.length ?? 0) : 0;
 
     const [localQuery, setLocalQuery] = useState(globalSearchQuery);
     const searchInputRef = useRef<HTMLInputElement>(null);
@@ -51,17 +61,29 @@ export const ActionBar: FC = () => {
         setLocalQuery(globalSearchQuery);
     }, [globalSearchQuery]);
 
-    const isBusy = isProcessing || isRenaming || status === AppStatus.LOADING; // STRICT: Disable when loading
+    // Sync branch info to state for other consumers if needed, though local hooks are preferred
+    useEffect(() => {
+        if (noteId && branchesData) {
+            dispatch(appSlice.actions.setCurrentBranch(branchesData.currentBranch));
+            dispatch(appSlice.actions.setAvailableBranches(branchesData.availableBranches));
+        }
+    }, [branchesData, dispatch, noteId]);
+
+    const isBusy = isProcessing || isRenaming || status === AppStatus.LOADING;
 
     const handleOpenDiffPanel = useCallback(() => {
         if (diffRequest?.status === 'ready') {
             dispatch(thunks.viewReadyDiff('panel'));
+            // Clear the request so the indicator hides immediately after selection
+            dispatch(appSlice.actions.clearDiffRequest());
         }
     }, [dispatch, diffRequest]);
 
     const handleOpenDiffWindow = useCallback(() => {
         if (diffRequest?.status === 'ready') {
             dispatch(thunks.viewReadyDiff('window'));
+            // Clear the request so the indicator hides immediately after selection
+            dispatch(appSlice.actions.clearDiffRequest());
         }
     }, [dispatch, diffRequest]);
 
@@ -136,6 +158,12 @@ export const ActionBar: FC = () => {
         dispatch(thunks.toggleViewMode());
     }, [dispatch, status, isBusy]);
 
+    const handleMenuClickUnregistered = useCallback((e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dispatch(thunks.showNotice("Please save a version or edit to access advanced features.", 6000));
+    }, [dispatch]);
+
     useEffect(() => {
         if (isSearchActive) {
             if (document.activeElement !== searchInputRef.current) {
@@ -147,7 +175,7 @@ export const ActionBar: FC = () => {
                 searchInputRef.current?.blur();
             }
         }
-        return; // Explicitly return for all code paths.
+        return;
     }, [isSearchActive]);
 
     if (status !== AppStatus.READY && status !== AppStatus.LOADING) {
@@ -171,38 +199,49 @@ export const ActionBar: FC = () => {
         <div className={clsx('v-actions-container', { 'is-searching': isSearchActive })}>
             <div className="v-top-actions">
                 <div className="v-top-actions-left-group">
-                    <DropdownMenu.Root>
-                        <DropdownMenu.Trigger asChild>
-                            <button
-                                className="clickable-icon"
-                                aria-label="More options"
-                                disabled={isBusy}
-                            >
-                                <Icon name="menu" />
-                            </button>
-                        </DropdownMenu.Trigger>
-                        <DropdownMenu.Portal>
-                            <DropdownMenu.Content className="v-actionbar-dropdown-content" sideOffset={5} collisionPadding={10}>
-                                <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleToggleViewMode}>
-                                    <span>{switchViewLabel}</span>
-                                    <Icon name={viewMode === 'versions' ? 'file-edit' : 'history'} />
-                                </DropdownMenu.Item>
-                                <div className="v-diff-separator" />
-                                <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenBranchDrawer}>
-                                    <span>Branches</span>
-                                    <Icon name="git-branch" />
-                                </DropdownMenu.Item>
-                                <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenTimeline}>
-                                    <span>Timeline</span>
-                                    <Icon name="history" />
-                                </DropdownMenu.Item>
-                                <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenDashboard}>
-                                    <span>Dashboard</span>
-                                    <Icon name="layout-dashboard" />
-                                </DropdownMenu.Item>
-                            </DropdownMenu.Content>
-                        </DropdownMenu.Portal>
-                    </DropdownMenu.Root>
+                    {noteId ? (
+                        <DropdownMenu.Root>
+                            <DropdownMenu.Trigger asChild>
+                                <button
+                                    className="clickable-icon"
+                                    aria-label="More options"
+                                    disabled={isBusy}
+                                >
+                                    <Icon name="menu" />
+                                </button>
+                            </DropdownMenu.Trigger>
+                            <DropdownMenu.Portal>
+                                <DropdownMenu.Content className="v-actionbar-dropdown-content" sideOffset={5} collisionPadding={10}>
+                                    <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleToggleViewMode}>
+                                        <span>{switchViewLabel}</span>
+                                        <Icon name={viewMode === 'versions' ? 'file-edit' : 'history'} />
+                                    </DropdownMenu.Item>
+                                    <div className="v-diff-separator" />
+                                    <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenBranchDrawer}>
+                                        <span>Branches</span>
+                                        <Icon name="git-branch" />
+                                    </DropdownMenu.Item>
+                                    <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenTimeline}>
+                                        <span>Timeline</span>
+                                        <Icon name="history" />
+                                    </DropdownMenu.Item>
+                                    <DropdownMenu.Item className="v-actionbar-dropdown-item" onSelect={handleOpenDashboard}>
+                                        <span>Dashboard</span>
+                                        <Icon name="layout-dashboard" />
+                                    </DropdownMenu.Item>
+                                </DropdownMenu.Content>
+                            </DropdownMenu.Portal>
+                        </DropdownMenu.Root>
+                    ) : (
+                        <button
+                            className="clickable-icon"
+                            aria-label="More options (Disabled)"
+                            onClick={handleMenuClickUnregistered}
+                            disabled={isBusy}
+                        >
+                            <Icon name="menu" />
+                        </button>
+                    )}
                     
                     <div className="v-branch-switcher-container">
                         {availableBranches.length > 1 && (
@@ -211,11 +250,6 @@ export const ActionBar: FC = () => {
                                 <span>{currentBranch}</span>
                             </button>
                         )}
-                        {/* 
-                            Watch Mode Timer
-                            Now directly reactive to state changes. When status is LOADING (during context switch),
-                            watchModeCountdown is reset in state, causing this to unmount instantly.
-                        */}
                         {settings.enableWatchMode && watchModeCountdown !== null && !isProcessing && status === AppStatus.READY && (
                             <div className="v-watch-mode-timer" title="Time until next auto-save">({watchModeCountdown}s)</div>
                         )}

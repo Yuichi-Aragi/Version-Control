@@ -1,7 +1,7 @@
 import clsx from 'clsx';
-import { type FC, useCallback, useState, useRef, useLayoutEffect } from 'react';
+import { type FC, useCallback, useState, useRef, useLayoutEffect, useEffect } from 'react';
 import { useAppDispatch, useAppSelector } from '@/ui/hooks';
-import { AppStatus } from '@/state';
+import { AppStatus, appSlice } from '@/state';
 import { Placeholder } from '@/ui/components';
 import { ErrorDisplay } from './ErrorDisplay';
 import { ActionBar } from './ActionBar';
@@ -12,16 +12,19 @@ import { DiffWindow } from './panels/DiffWindow';
 import { thunks } from '@/state';
 import { Icon } from '@/ui/components';
 import { HistoryListHeader } from '@/ui/components';
+import { useGetEffectiveSettingsQuery, useGetBranchesQuery } from '@/state/apis/history.api';
 
 export const VersionControlRoot: FC = () => {
     const dispatch = useAppDispatch();
-    const { status, error, panel, isProcessing, isRenaming, viewMode } = useAppSelector(state => ({
+    const { status, error, panel, isProcessing, isRenaming, viewMode, noteId, currentBranch } = useAppSelector(state => ({
         status: state.app.status,
         error: state.app.error,
         panel: state.app.panel,
         isProcessing: state.app.isProcessing,
         isRenaming: state.app.isRenaming,
         viewMode: state.app.viewMode,
+        noteId: state.app.noteId,
+        currentBranch: state.app.currentBranch,
     }));
 
     const [historyCounts, setHistoryCounts] = useState({ filtered: 0, total: 0 });
@@ -29,14 +32,71 @@ export const VersionControlRoot: FC = () => {
     const headerRef = useRef<HTMLDivElement>(null);
     const mainRef = useRef<HTMLDivElement>(null);
 
+    // --- RTK Query: Fetch Branches & Settings ---
+    // We only fetch if we have a noteId and status suggests we are ready/loading
+    const shouldFetch = !!noteId && (status === AppStatus.READY || status === AppStatus.LOADING);
+
+    // 1. Fetch Branches to determine current branch
+    const { data: queryBranchData, isLoading: isBranchesLoading } = useGetBranchesQuery(noteId!, { 
+        skip: !shouldFetch 
+    });
+    // Defensive: If noteId is null, force undefined to prevent ghost data
+    const branchData = noteId ? queryBranchData : undefined;
+
+    // 2. Fetch Effective Settings based on resolved branch
+    const branchToUse = (noteId && branchData?.currentBranch) || currentBranch || 'main'; // Fallback to main
+    const { 
+        data: settingsData, 
+        isLoading: isSettingsLoading, 
+        isError: isSettingsError 
+    } = useGetEffectiveSettingsQuery({
+        noteId: noteId,
+        viewMode: viewMode,
+        branchName: branchToUse
+    }, {
+        skip: !shouldFetch
+    });
+
+    // 3. Sync Settings to Redux Slice
+    // This ensures legacy thunks and selectors that rely on state.app.effectiveSettings still work
+    useEffect(() => {
+        if (settingsData) {
+            dispatch(appSlice.actions.updateEffectiveSettings(settingsData));
+        } else if (isSettingsError) {
+            // Fallback: If settings fetch fails, we still need to transition to READY to avoid getting stuck.
+            // We use the current effective settings (which are defaults from initialization)
+            // by dispatching an update with the current state's settings, which triggers the status update in the reducer.
+            // Note: We can't easily access current state here without selector, but we can dispatch a no-op update
+            // or just set status directly if we exposed that action.
+            // Cleaner: Dispatch defaults.
+            // However, since we don't have defaults handy here without importing constants,
+            // let's rely on the fact that appSlice initializes with defaults.
+            // We just need to trigger the status transition.
+            // We'll dispatch a dummy update to effective settings to trigger the reducer logic.
+            // Actually, better to just let the user interact even if settings failed to load specifically.
+            // But we need to unblock the UI.
+            // Let's assume defaults are better than being stuck.
+            // We will rely on the error handling in the API to return defaults if possible,
+            // but if it's a hard error, we must proceed.
+            // For now, if error, we don't dispatch updateEffectiveSettings, so status remains LOADING.
+            // We must force it.
+            dispatch(appSlice.actions.setStatus(AppStatus.READY));
+        }
+    }, [settingsData, isSettingsError, dispatch]);
+
+    // 4. Determine if we are in a "Loading Settings" state
+    // We block rendering of the main content until settings are applied to prevent UI jumps
+    // CRITICAL FIX: If isSettingsError is true, we stop blocking to allow the UI to render (likely with defaults or error state)
+    const isInitializingSettings = shouldFetch && (isBranchesLoading || isSettingsLoading || (!settingsData && !isSettingsError));
+
     const handleSaveClick = useCallback(() => {
-        if (status !== AppStatus.READY || isProcessing || isRenaming) return;
+        if (status !== AppStatus.READY || isProcessing || isRenaming || isInitializingSettings) return;
         if (viewMode === 'versions') {
             dispatch(thunks.saveNewVersion({}));
         } else {
             dispatch(thunks.saveNewEdit());
         }
-    }, [dispatch, status, isProcessing, isRenaming, viewMode]);
+    }, [dispatch, status, isProcessing, isRenaming, viewMode, isInitializingSettings]);
 
     const handleCountChange = useCallback((filteredCount: number, totalCount: number) => {
         setHistoryCounts({ filtered: filteredCount, total: totalCount });
@@ -55,11 +115,8 @@ export const VersionControlRoot: FC = () => {
             return () => resizeObserver.disconnect();
         }
         return () => {};
-    }, [status]);
+    }, [status, isInitializingSettings]);
 
-    // Determine if an overlay is active to disable background interactions.
-    // Note: Settings panel is treated as an overlay here to prevent click-through issues
-    // to the ActionBar underneath it.
     const isOverlayActive = panel !== null && !(panel.type === 'diff' && panel.renderMode === 'window');
     
     const rootClassName = clsx(
@@ -80,6 +137,9 @@ export const VersionControlRoot: FC = () => {
                 return error ? <ErrorDisplay error={error} /> : <Placeholder title="An unknown error occurred." iconName="alert-circle" />;
             case AppStatus.LOADING:
             case AppStatus.READY:
+                if (isInitializingSettings) {
+                    return <Placeholder title="Loading settings..." iconName="loader" />;
+                }
                 return (
                     <>
                         <div ref={headerRef} className="v-header-wrapper">
@@ -106,12 +166,6 @@ export const VersionControlRoot: FC = () => {
                                 <Icon name="plus" />
                             </button>
                         </div>
-                        {/* 
-                            MOVED: SettingsPanel is now a direct child of the content wrapper, 
-                            placing it later in the DOM than the header. This ensures its z-index (40) 
-                            correctly stacks above the header (10), preventing click-through issues 
-                            regardless of the stacking context of .v-main.
-                        */}
                         <SettingsPanel />
                     </>
                 );
