@@ -1,6 +1,10 @@
 /**
  * DiffManager - Lean orchestrator for diff operations
  * Uses WorkerManager for centralized worker lifecycle management.
+ * 
+ * Key Improvements:
+ * - Robust content fetching with fallback strategies.
+ * - Strict error handling and typed safety.
  */
 
 import { App, TFile, Component, MarkdownView } from 'obsidian';
@@ -86,6 +90,9 @@ export class DiffManager extends Component {
         this.invalidateCacheForNote(noteId);
     }
 
+    /**
+     * Retrieves content robustly, preferring binary transfer where possible.
+     */
     public async getContent(noteId: string, target: DiffTarget): Promise<string | ArrayBuffer> {
         if (typeof noteId !== 'string' || noteId.trim() === '') {
             throw new DiffManagerError("Invalid noteId: must be a non-empty string", 'INVALID_NOTE_ID');
@@ -104,24 +111,34 @@ export class DiffManager extends Component {
                 throw new DiffManagerError(`Could not find current note file at path "${target.notePath}"`, 'FILE_NOT_FOUND');
             }
 
+            // Attempt to read from the active editor to capture unsaved changes (Live Preview compatibility)
             const activeMarkdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-            if (activeMarkdownView?.file?.path === file.path && activeMarkdownView.getMode() === 'source') {
+            if (activeMarkdownView?.file?.path === file.path) {
+                // Use editor value if available (Source or Live Preview)
+                // Note: In Live Preview, getValue returns the raw Markdown text, which is correct for diffing
                 return activeMarkdownView.editor.getValue();
-            } else {
-                // Optimize reading file on disk.
-                // For .base files, use adapter.read() to get string content.
-                if (file.extension === 'base') {
-                    return await this.app.vault.adapter.read(file.path);
-                }
-                // For other files (presumably binary or large), use readBinary
+            }
+            
+            // Fallback to reading from disk
+            // For .base files (metadata), use adapter.read()
+            if (file.extension === 'base') {
+                return await this.app.vault.adapter.read(file.path);
+            }
+            
+            // For regular notes, readBinary is faster and more memory efficient for transfer to worker
+            try {
                 return await this.app.vault.adapter.readBinary(file.path);
+            } catch (e) {
+                // Fallback to string read if binary fails (some filesystems/encodings)
+                return await this.app.vault.adapter.read(file.path);
             }
         } else {
-            // Try reading binary first for optimization
+            // Historical Version
+            // Try reading binary first for performance
             const buffer = await this.contentRepo.readBinary(noteId, target.id);
             if (buffer) return buffer;
 
-            // Fallback to string read via VersionManager if binary fails (e.g. legacy logic)
+            // Fallback to string read via VersionManager
             const content = await this.versionManager.getVersionContent(noteId, target.id);
             if (content === null) {
                 throw new DiffManagerError(`Could not retrieve content for version ${target.id}`, 'VERSION_CONTENT_NOT_FOUND');
@@ -143,11 +160,13 @@ export class DiffManager extends Component {
 
         const cacheKey = CacheKeyGenerator.generate(noteId, version1Id, version2Id, diffType);
 
+        // Fast Path: Cache Hit
         if (version2Id !== 'current' && await this.diffCache.has(cacheKey)) {
             const cachedResult = await this.diffCache.get(cacheKey);
             if (cachedResult) return cachedResult;
         }
 
+        // Ensure Worker is Ready
         if (!this.workerManager.isActive()) {
             await this.initializeWorker();
         }
@@ -163,6 +182,7 @@ export class DiffManager extends Component {
             }
         }
 
+        // Timeout protection
         const timeoutPromise = new Promise<never>((_, reject) => {
             setTimeout(() => reject(new DiffManagerError('Diff operation timed out', 'OPERATION_TIMEOUT')), WORKER_TIMEOUT);
         });
