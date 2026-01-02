@@ -93,7 +93,7 @@ export interface DiffWorkerApi {
     /**
      * Computes diff between two contents.
      * Accepts string or ArrayBuffer.
-     * Returns ArrayBuffer (serialized Change[]) via transfer.
+     * Returns ArrayBuffer (serialized Change[] or HTML string for visual diff) via transfer.
      */
     computeDiff(type: DiffType, content1: string | ArrayBuffer, content2: string | ArrayBuffer): Promise<ArrayBuffer>;
 }
@@ -249,7 +249,10 @@ export type DiffManagerErrorCode =
     | 'FILE_NOT_FOUND'
     | 'VERSION_CONTENT_NOT_FOUND'
     | 'OPERATION_TIMEOUT'
-    | 'INIT_FAILED';
+    | 'INIT_FAILED'
+    | 'CONTENT_TOO_LARGE'
+    | 'DIFF_OPERATION_FAILED'
+    | 'WORKER_RESTART_FAILED';
 
 /**
  * Error class for DiffManager operations.

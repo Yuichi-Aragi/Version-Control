@@ -109,7 +109,8 @@ export class ServiceRegistry {
             plugin,
             this.app,
             this.manifestManager,
-            this.editHistoryManager
+            this.editHistoryManager,
+            this.eventBus
         );
 
         this.versionManager = new VersionManager(
