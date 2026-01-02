@@ -21,5 +21,6 @@ export {
     compressDiffData,
     decompressDiffData,
     serializeAndTransfer,
+    fastSerializeTimelineEvents,
     getLockKey,
 } from './data-transformer';
