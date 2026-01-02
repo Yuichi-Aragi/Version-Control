@@ -1,4 +1,4 @@
-import { TFile, type CachedMetadata, debounce } from 'obsidian';
+import { TFile, TFolder, TAbstractFile, type CachedMetadata, debounce } from 'obsidian';
 import type { AppThunk } from '@/state';
 import { appSlice } from '@/state';
 import { AppStatus } from '@/state';
@@ -109,28 +109,108 @@ export const handleFileRename = (file: TFile, oldPath: string): AppThunk => asyn
     }
 };
 
-export const handleFileDelete = (file: TFile): AppThunk => async (dispatch, getState, services) => {
+export const handleFileDelete = (file: TAbstractFile): AppThunk => async (dispatch, getState, services) => {
     if (shouldAbort(services, getState)) return;
-    if (file.extension !== 'md' && file.extension !== 'base') return;
     
-    const plugin = services.plugin;
-    const noteManager = services.noteManager;
-    const manifestManager = services.manifestManager;
+    // 1. Ignore hidden files and folders (dotfiles)
+    if (file.path.split('/').some(part => part.startsWith('.'))) return;
 
-    const debouncerInfo = plugin.autoSaveDebouncers.get(file.path);
-    if (debouncerInfo) {
-        debouncerInfo.debouncer.cancel();
-        plugin.autoSaveDebouncers.delete(file.path);
+    const manifestManager = services.manifestManager;
+    const editHistoryManager = services.editHistoryManager;
+    const uiService = services.uiService;
+    const plugin = services.plugin;
+    const eventBus = services.eventBus;
+
+    // Helper to delete all data for a specific note ID
+    const deleteDataForNote = async (noteId: string, notePath: string) => {
+        try {
+            // 1. Delete Version History (Physical Folder + Central Manifest Entry)
+            // This removes the note from central manifest and deletes the .versiondb/{noteId} folder
+            await manifestManager.deleteNoteEntry(noteId);
+            
+            // 2. Delete Edit History (IndexedDB)
+            // This removes all edit entries and the branch data from IDB
+            await editHistoryManager.deleteNoteHistory(noteId);
+            
+            // 3. Clear Timeline (IndexedDB) via Event Bus
+            // TimelineManager listens to 'history-deleted' and clears the timeline for the note
+            eventBus.trigger('history-deleted', noteId);
+            
+            console.log(`VC: Deleted version control data for "${notePath}" (ID: ${noteId})`);
+        } catch (error) {
+            console.error(`VC: Failed to delete data for "${notePath}"`, error);
+        }
+    };
+
+    let deletedCount = 0;
+
+    if (file instanceof TFile) {
+        // Single File Deletion
+        // Ignore files that are not .md or .base
+        if (file.extension !== 'md' && file.extension !== 'base') return;
+
+        // Cancel auto-save if active
+        const debouncerInfo = plugin.autoSaveDebouncers.get(file.path);
+        if (debouncerInfo) {
+            debouncerInfo.debouncer.cancel();
+            plugin.autoSaveDebouncers.delete(file.path);
+        }
+
+        const noteId = await manifestManager.getNoteIdByPath(file.path);
+        if (noteId) {
+            await deleteDataForNote(noteId, file.path);
+            deletedCount++;
+        }
+
+    } else if (file instanceof TFolder) {
+        // Folder Deletion
+        // Check all tracked notes to see if they were inside this folder
+        const centralManifest = await manifestManager.loadCentralManifest();
+        const folderPathPrefix = file.path + '/';
+        
+        const notesToDelete = Object.entries(centralManifest.notes).filter(([_, entry]) => 
+            entry.notePath.startsWith(folderPathPrefix)
+        );
+
+        if (notesToDelete.length > 0) {
+            console.log(`VC: Folder "${file.path}" deleted. Cleaning up ${notesToDelete.length} affected notes.`);
+            
+            for (const [noteId, entry] of notesToDelete) {
+                // Cancel auto-save if active
+                const debouncerInfo = plugin.autoSaveDebouncers.get(entry.notePath);
+                if (debouncerInfo) {
+                    debouncerInfo.debouncer.cancel();
+                    plugin.autoSaveDebouncers.delete(entry.notePath);
+                }
+
+                await deleteDataForNote(noteId, entry.notePath);
+                deletedCount++;
+            }
+        }
     }
 
-    const deletedNoteId = await manifestManager.getNoteIdByPath(file.path); 
-    
-    noteManager.invalidateCentralManifestCache();
-    manifestManager.invalidateCentralManifestCache();
-
-    const state = getState().app;
-    if (state.file?.path === file.path || (deletedNoteId && state.noteId === deletedNoteId)) {
-        dispatch(appSlice.actions.clearActiveNote()); 
+    // Feedback and State Update
+    if (deletedCount > 0) {
+        // Show Notice
+        if (deletedCount === 1) {
+            uiService.showNotice(`Version control data deleted for "${file.name}".`);
+        } else {
+            uiService.showNotice(`Version control data deleted for ${deletedCount} notes in "${file.name}".`);
+        }
+        
+        // Clear active note if it was deleted or inside deleted folder
+        const state = getState().app;
+        const activePath = state.file?.path;
+        
+        if (activePath) {
+            const isAffected = file.path === activePath || activePath.startsWith(file.path + '/');
+            if (isAffected) {
+                dispatch(appSlice.actions.clearActiveNote());
+            }
+        }
+        
+        // Ensure cache is fresh
+        manifestManager.invalidateCentralManifestCache();
     }
 };
 

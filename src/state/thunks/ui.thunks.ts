@@ -3,12 +3,12 @@ import type { AppThunk, Services } from '@/state';
 import { appSlice } from '@/state';
 import type { VersionHistoryEntry, ViewMode } from '@/types';
 import { AppStatus, type ActionItem, type SortOrder, type SortProperty, type SortDirection } from '@/state';
-import { loadEffectiveSettingsForNote, loadHistoryForNoteId } from './core.thunks';
+import { loadEffectiveSettingsForNote } from './core.thunks';
 import { shouldAbort } from '@/state/utils/guards';
 import { versionActions } from '@/ui/VersionActions';
 import { editActions } from '@/ui/EditActions';
-import { loadEditHistory } from '@/state/thunks/edit-history';
 import { createBranch, switchBranch, requestDeleteBranch } from '@/state/thunks/version';
+import { historyApi } from '@/state/apis/history.api';
 
 /**
  * Thunks related to UI interactions, such as opening panels, tabs, and modals.
@@ -27,7 +27,14 @@ const updateVersionInSettings = async (services: Services): Promise<void> => {
     }
 };
 
+let lastToggleTime = 0;
+
 export const toggleViewMode = (): AppThunk => async (dispatch, getState, services) => {
+    // Throttle rapid switching to prevent UI instability
+    const now = Date.now();
+    if (now - lastToggleTime < 500) return;
+    lastToggleTime = now;
+
     if (shouldAbort(services, getState)) return;
     
     // Defensive check for settings availability
@@ -39,6 +46,21 @@ export const toggleViewMode = (): AppThunk => async (dispatch, getState, service
     const state = getState().app;
     const currentMode = state.viewMode;
     const newMode: ViewMode = currentMode === 'versions' ? 'edits' : 'versions';
+
+    // Block access to Edit History for .base files if no versions exist
+    if (state.file?.extension === 'base' && currentMode === 'versions') {
+        const noteId = state.noteId;
+        let versionCount = 0;
+        if (noteId) {
+             const historyResult = historyApi.endpoints.getVersionHistory.select(noteId)(getState());
+             versionCount = historyResult.data?.length ?? 0;
+        }
+        
+        if (versionCount === 0) {
+            services.uiService.showNotice("Cannot access Edit History for base files until a version is saved.", 5000);
+            return;
+        }
+    }
     
     // 1. Pre-emptively reset effective settings to global defaults for the new mode
     const plugin = services.plugin;
@@ -60,14 +82,7 @@ export const toggleViewMode = (): AppThunk => async (dispatch, getState, service
 
     // Handle Unregistered Note Case
     if (file && !noteId) {
-        dispatch(appSlice.actions.historyLoadedSuccess({
-            file: file,
-            noteId: null,
-            history: [],
-            currentBranch: null,
-            availableBranches: [],
-            contextVersion
-        }));
+        // No history to load, state is already set by setViewMode
         return;
     }
 
@@ -80,13 +95,10 @@ export const toggleViewMode = (): AppThunk => async (dispatch, getState, service
         // Race Check: Ensure context matches after settings load
         if (shouldAbort(services, getState, { contextVersion })) return;
 
-        if (newMode === 'edits') {
-            await dispatch(loadEditHistory(noteId));
-        } else {
-            await dispatch(loadHistoryForNoteId({ file, noteId }));
-        }
+        // Data loading is handled by RTK Query hooks in the UI components.
+        // We don't need to manually dispatch load actions here.
 
-        // CRITICAL: Sync watch mode AFTER history is loaded.
+        // CRITICAL: Sync watch mode AFTER settings are loaded.
         if (!shouldAbort(services, getState, { contextVersion })) {
             services.backgroundTaskManager.syncWatchMode();
         }
@@ -342,4 +354,13 @@ export const openDashboard = (): AppThunk => (dispatch, getState, services) => {
     if (state.status !== AppStatus.READY) return;
 
     dispatch(appSlice.actions.openPanel({ type: 'dashboard' }));
+};
+
+export const openPreview = (version: VersionHistoryEntry): AppThunk => (dispatch, getState, services) => {
+    if (shouldAbort(services, getState)) return;
+    
+    dispatch(appSlice.actions.openPanel({
+        type: 'preview',
+        version
+    }));
 };

@@ -2,7 +2,7 @@ import { createAsyncThunk } from '@reduxjs/toolkit';
 import { TFile, type WorkspaceLeaf, FileView } from 'obsidian';
 import * as v from 'valibot';
 import { appSlice } from '@/state/appSlice';
-import type { AppError, HistorySettings, VersionHistoryEntry } from '@/types';
+import type { AppError, HistorySettings } from '@/types';
 import { DEFAULT_SETTINGS } from '@/constants';
 import { resolveSettings } from '@/state/utils/settingsUtils';
 import { saveNewEdit } from '@/state/thunks/edit-history/thunks/save-edit.thunk';
@@ -11,9 +11,10 @@ import { shouldAbort } from '@/state/utils/guards';
 import type { ThunkConfig } from '@/state/store';
 import { saveNewVersion } from '@/state/thunks/version/thunks/save-version.thunk';
 import { NoteIdSchema } from '@/state/thunks/schemas';
+import { historyApi } from '@/state/apis/history.api';
 
 /**
- * Thunks related to the core application lifecycle, such as view initialization and history loading.
+ * Thunks related to the core application lifecycle, such as view initialization.
  */
 
 export const loadEffectiveSettingsForNote = createAsyncThunk<
@@ -25,7 +26,6 @@ export const loadEffectiveSettingsForNote = createAsyncThunk<
     async (noteId, { getState, extra: services, rejectWithValue }) => {
         if (shouldAbort(services, getState)) return rejectWithValue('Aborted');
 
-        // Validation
         if (noteId) {
             try {
                 v.parse(NoteIdSchema, noteId);
@@ -35,7 +35,6 @@ export const loadEffectiveSettingsForNote = createAsyncThunk<
             }
         }
 
-        // Defensive check for settings availability
         if (!services.plugin?.settings) {
             console.warn("Version Control: Plugin settings not available in loadEffectiveSettingsForNote");
             return rejectWithValue("Settings unavailable");
@@ -45,7 +44,6 @@ export const loadEffectiveSettingsForNote = createAsyncThunk<
         const state = getState().app;
         const viewMode = state.viewMode;
 
-        // Determine type based on viewMode
         const type = viewMode === 'versions' ? 'version' : 'edit';
 
         let effectiveSettings: HistorySettings;
@@ -53,7 +51,6 @@ export const loadEffectiveSettingsForNote = createAsyncThunk<
         if (noteId) {
             effectiveSettings = await resolveSettings(noteId, type, services);
         } else {
-            // No note context, use global defaults directly
             const versionSettings = plugin.settings?.versionHistorySettings;
             const editSettings = plugin.settings?.editHistorySettings;
             effectiveSettings = type === 'version'
@@ -61,7 +58,6 @@ export const loadEffectiveSettingsForNote = createAsyncThunk<
                 : { ...(editSettings || DEFAULT_SETTINGS.editHistorySettings), isGlobal: true };
         }
 
-        // Race Check
         if (shouldAbort(services, getState, noteId ? { noteId } : undefined)) return rejectWithValue('Context changed');
 
         return effectiveSettings;
@@ -80,15 +76,13 @@ export const autoRegisterNote = createAsyncThunk<
         const uiService = services.uiService;
         const backgroundTaskManager = services.backgroundTaskManager;
 
-        // Set a loading state for the file
         dispatch(appSlice.actions.initializeView({ file, noteId: null, source: 'none' }));
 
         try {
-            // We use the thunk here to ensure consistency
             const resultAction = await dispatch(saveNewVersion({
                 name: 'Initial Version',
                 isAuto: true,
-                force: true, // Save even if empty
+                force: true,
                 settings: getState().app.settings,
             }));
 
@@ -98,17 +92,16 @@ export const autoRegisterNote = createAsyncThunk<
             
             const result = resultAction.payload;
 
-            // Race Check
             if (shouldAbort(services, getState, { filePath: file.path })) return rejectWithValue('Context changed');
 
             if (result && result.status === 'saved' && result.newNoteId) {
                 uiService.showNotice(`"${file.basename}" is now under version control.`);
-                // After saving, we have a noteId and history, so we can load it directly.
-                // STRICT: Await the load so the finally block runs after state is READY
-                await dispatch(loadHistoryForNoteId({ file, noteId: result.newNoteId }));
-            } else {
-                // Fallback normal load
-                await dispatch(loadHistory(file));
+                // Invalidate tags to force reload of history and branches
+                dispatch(historyApi.util.invalidateTags([
+                    { type: 'VersionHistory', id: result.newNoteId },
+                    { type: 'Branches', id: result.newNoteId },
+                    'Settings' // Invalidate settings as well since we have a new note context
+                ]));
             }
             return;
         } catch (error) {
@@ -142,16 +135,25 @@ export const initializeView = createAsyncThunk<
         const backgroundTaskManager = services.backgroundTaskManager;
 
         try {
-            let targetLeaf: WorkspaceLeaf | null;
+            let targetLeaf: WorkspaceLeaf | null = null;
+            
             if (leaf !== undefined) {
                 targetLeaf = leaf;
             } else {
+                // Priority 1: The leaf of the currently active FileView (if focused)
                 const activeView = app.workspace.getActiveViewOfType(FileView);
-                targetLeaf = activeView ? activeView.leaf : null;
+                if (activeView) {
+                    targetLeaf = activeView.leaf;
+                } else {
+                    // Priority 2: The most recent leaf (if sidebar is focused)
+                    // This is critical for sidebar plugins to maintain context of the last active note
+                    const recentLeaf = (app.workspace as any).getMostRecentLeaf?.() as WorkspaceLeaf | null;
+                    if (recentLeaf?.view instanceof FileView) {
+                        targetLeaf = recentLeaf;
+                    }
+                }
             }
 
-            // --- IMMEDIATE FEEDBACK: Set Loading State Synchronously ---
-            // We extract the file immediately to trigger the UI loading state.
             let initialFile: TFile | null = null;
             if (targetLeaf?.view instanceof FileView && targetLeaf.view.file) {
                 initialFile = targetLeaf.view.file;
@@ -164,59 +166,44 @@ export const initializeView = createAsyncThunk<
                     source: 'none' 
                 }));
             } else {
-                // If no file is active, clear immediately
                 dispatch(appSlice.actions.clearActiveNote());
             }
             
-            // Capture context version AFTER the initial synchronous dispatch
-            // This is the version we must respect throughout the rest of this thunk
             const contextVersion = getState().app.contextVersion;
 
-            // --- Async State Resolution ---
             const activeNoteInfo = await noteManager.getActiveNoteState(targetLeaf);
             
-            // GUARD: Check for pending deviation to prevent race conditions during file creation
             if (activeNoteInfo.file && noteManager.isPendingDeviation(activeNoteInfo.file.path)) {
                 return rejectWithValue('Pending deviation creation');
             }
             
-            // Race Check: Ensure we are still in the same context version
             if (shouldAbort(services, getState, { contextVersion })) return rejectWithValue('Context changed');
 
-            // --- Context Change Check: Verify ID matches Path if required ---
             if (activeNoteInfo.file && activeNoteInfo.noteId) {
                 await noteManager.verifyNoteIdMatchesPath(activeNoteInfo.file, activeNoteInfo.noteId);
-                // Re-fetch state in case ID was updated
                 const updatedInfo = await noteManager.getActiveNoteState(targetLeaf);
                 if (updatedInfo.noteId) activeNoteInfo.noteId = updatedInfo.noteId;
             }
 
             if (shouldAbort(services, getState, { contextVersion })) return rejectWithValue('Context changed');
 
-            // --- Auto Registration Logic ---
             if (activeNoteInfo.file && !activeNoteInfo.noteId) {
                 const versionSettings = plugin.settings?.versionHistorySettings || DEFAULT_SETTINGS.versionHistorySettings;
                 const editSettings = plugin.settings?.editHistorySettings || DEFAULT_SETTINGS.editHistorySettings;
 
-                // Check Version History Auto-Reg
                 if (versionSettings.autoRegisterNotes && isPathAllowed(activeNoteInfo.file.path, { pathFilters: versionSettings.pathFilters })) {
                     dispatch(appSlice.actions.setViewMode('versions'));
                     dispatch(autoRegisterNote(activeNoteInfo.file));
                     return;
                 }
 
-                // Check Edit History Auto-Reg
                 if (editSettings.autoRegisterNotes && isPathAllowed(activeNoteInfo.file.path, { pathFilters: editSettings.pathFilters })) {
                     dispatch(appSlice.actions.setViewMode('edits'));
-                    dispatch(saveNewEdit(true)); // Auto-save first edit
+                    dispatch(saveNewEdit(true));
                     return;
                 }
             }
 
-            // Sync Dispatch to update state with resolved ID
-            // NOTE: This dispatch might increment contextVersion if noteId changed.
-            // But since we are inside the flow that owns this change, it is acceptable.
-            // However, to be strictly safe, we should check guards before dispatching.
             if (shouldAbort(services, getState, { contextVersion })) return rejectWithValue('Context changed');
             
             dispatch(appSlice.actions.initializeView(activeNoteInfo));
@@ -225,29 +212,12 @@ export const initializeView = createAsyncThunk<
                 dispatch(reconcileNoteId({ file: activeNoteInfo.file, noteId: activeNoteInfo.noteId }));
             }
 
-            // STRICT: Wait for settings before loading history
-            if (activeNoteInfo.noteId) {
-                await dispatch(loadEffectiveSettingsForNote(activeNoteInfo.noteId));
-            }
-
-            // Race Check: Use file path + context version
-            // Note: contextVersion might have incremented if initializeView(activeNoteInfo) changed the ID.
-            // We should use the *latest* context version for the loadHistory call.
             const currentContextVersion = getState().app.contextVersion;
             
-            // Verify file path matches
             if (activeNoteInfo.file && getState().app.file?.path !== activeNoteInfo.file.path) {
                 return rejectWithValue('Context changed');
             }
 
-            if (activeNoteInfo.file) {
-                // Default to loading versions history since viewMode is reset to 'versions' in initializeView reducer
-                await dispatch(loadHistory(activeNoteInfo.file));
-            }
-            
-            // CRITICAL: Sync watch mode AFTER history is loaded and state is READY.
-            // This ensures the timer reappears correctly after a context switch.
-            // We check the context version one last time to ensure we don't sync for a stale context.
             if (!shouldAbort(services, getState, { contextVersion: currentContextVersion })) {
                 backgroundTaskManager.syncWatchMode();
             }
@@ -261,7 +231,6 @@ export const initializeView = createAsyncThunk<
                 details: error instanceof Error ? error.message : String(error),
             };
             
-            // Only report error if context hasn't changed
             if (!shouldAbort(services, getState)) {
                 dispatch(appSlice.actions.reportError(appError));
             }
@@ -279,7 +248,6 @@ export const reconcileNoteId = createAsyncThunk<
     async ({ file, noteId }, { getState, extra: services, rejectWithValue }) => {
         if (shouldAbort(services, getState)) return rejectWithValue('Aborted');
 
-        // Skip for .base files as they don't support frontmatter
         if (file.extension === 'base') return;
 
         const noteManager = services.noteManager;
@@ -295,107 +263,6 @@ export const reconcileNoteId = createAsyncThunk<
             console.error(`Version Control: Error during vc-id reconciliation for "${file.path}".`, error);
             uiService.showNotice(`VC: Failed to restore vc-id for "${file.basename}". Check the console for details.`, 5000);
             return;
-        }
-    }
-);
-
-export const loadHistory = createAsyncThunk<
-    { file: TFile; noteId: string | null; history: VersionHistoryEntry[]; currentBranch: string | null; availableBranches: string[]; contextVersion: number },
-    TFile,
-    ThunkConfig
->(
-    'core/loadHistory',
-    async (file, { dispatch, getState, extra: services, rejectWithValue }) => {
-        // Capture context version immediately
-        const contextVersion = getState().app.contextVersion;
-        
-        if (shouldAbort(services, getState, { contextVersion })) return rejectWithValue('Context changed');
-
-        const noteManager = services.noteManager;
-        const manifestManager = services.manifestManager;
-        const versionManager = services.versionManager;
-
-        try {
-            let noteId = await noteManager.getNoteId(file);
-            if (!noteId) {
-                noteId = await manifestManager.getNoteIdByPath(file.path);
-            }
-
-            // Race Check
-            if (shouldAbort(services, getState, { contextVersion })) return rejectWithValue('Context changed');
-
-            const history = noteId ? await versionManager.getVersionHistory(noteId) : [];
-            const noteManifest = noteId ? await manifestManager.loadNoteManifest(noteId) : null;
-            const currentBranch = noteManifest?.currentBranch ?? '';
-            const availableBranches = noteManifest ? Object.keys(noteManifest.branches) : [];
-
-            // Race Check
-            if (shouldAbort(services, getState, { contextVersion })) return rejectWithValue('Context changed');
-
-            return { file, noteId, history, currentBranch, availableBranches, contextVersion };
-
-        } catch (error) {
-            // Check context before reporting error
-            if (shouldAbort(services, getState, { contextVersion })) return rejectWithValue('Context changed');
-
-            console.error(`Version Control: Failed to load version history for "${file.path}".`, error);
-            const appError: AppError = {
-                title: "History load failed",
-                message: `Could not load version history for "${file.basename}".`,
-                details: error instanceof Error ? error.message : String(error),
-            };
-            dispatch(appSlice.actions.reportError(appError));
-            return rejectWithValue(appError.message);
-        }
-    }
-);
-
-export const loadHistoryForNoteId = createAsyncThunk<
-    { file: TFile; noteId: string | null; history: VersionHistoryEntry[]; currentBranch: string | null; availableBranches: string[]; contextVersion: number },
-    { file: TFile; noteId: string },
-    ThunkConfig
->(
-    'core/loadHistoryForNoteId',
-    async ({ file, noteId }, { dispatch, getState, extra: services, rejectWithValue }) => {
-        // Capture context version immediately
-        const contextVersion = getState().app.contextVersion;
-        
-        if (shouldAbort(services, getState, { contextVersion })) return rejectWithValue('Context changed');
-        
-        const versionManager = services.versionManager;
-        const manifestManager = services.manifestManager;
-
-        try {
-            // Validation
-            v.parse(NoteIdSchema, noteId);
-
-            // Ensure settings are loaded before history
-            await dispatch(loadEffectiveSettingsForNote(noteId));
-
-            // Race Check
-            if (shouldAbort(services, getState, { contextVersion })) return rejectWithValue('Context changed');
-
-            const history = await versionManager.getVersionHistory(noteId);
-            const noteManifest = await manifestManager.loadNoteManifest(noteId);
-            const currentBranch = noteManifest?.currentBranch ?? '';
-            const availableBranches = noteManifest ? Object.keys(noteManifest.branches) : [];
-
-            // Race Check
-            if (shouldAbort(services, getState, { contextVersion })) return rejectWithValue('Context changed');
-
-            return { file, noteId, history, currentBranch, availableBranches, contextVersion };
-        } catch (error) {
-            // Check context before reporting error
-            if (shouldAbort(services, getState, { contextVersion })) return rejectWithValue('Context changed');
-
-            console.error(`Version Control: Failed to load version history for note ID "${noteId}" ("${file.path}").`, error);
-            const appError: AppError = {
-                title: "History load failed",
-                message: `Could not load version history for "${file.basename}".`,
-                details: error instanceof Error ? error.message : String(error),
-            };
-            dispatch(appSlice.actions.reportError(appError));
-            return rejectWithValue(appError.message);
         }
     }
 );
@@ -418,34 +285,62 @@ export const cleanupOrphanedVersions = createAsyncThunk<
         const cleanupManager = services.cleanupManager;
 
         try {
+            uiService.showNotice("Starting deep cleanup... this may take a moment.");
             const result = await cleanupManager.cleanupOrphanedVersions();
 
             if (shouldAbort(services, getState)) return rejectWithValue('Aborted');
 
             if (result.success) {
-                const { deletedNoteDirs, deletedVersionFiles } = result;
-                const totalCleaned = deletedNoteDirs + deletedVersionFiles;
+                const { deletedNoteDirs, deletedVersionFiles, deletedDuplicates, deletedOrphans, recoveredNotes } = result;
+                const totalCleaned = deletedNoteDirs + deletedVersionFiles + deletedDuplicates + deletedOrphans;
 
-                if (totalCleaned > 0) {
-                    const messages: string[] = [];
-                    if (deletedNoteDirs > 0) {
-                        messages.push(`${deletedNoteDirs} orphaned note director${deletedNoteDirs > 1 ? 'ies' : 'y'}`);
-                    }
-                    if (deletedVersionFiles > 0) {
-                        messages.push(`${deletedVersionFiles} orphaned version file${deletedVersionFiles > 1 ? 's' : ''}`);
-                    }
-                    uiService.showNotice(`Cleanup complete. Removed ${messages.join(' and ')}.`, 7000);
+                const messages: string[] = [];
+                if (deletedDuplicates > 0) messages.push(`${deletedDuplicates} duplicate IDs resolved`);
+                if (recoveredNotes > 0) messages.push(`${recoveredNotes} missing notes recovered`);
+                if (deletedOrphans > 0) messages.push(`${deletedOrphans} orphaned notes deleted`);
+                if (deletedNoteDirs > 0) messages.push(`${deletedNoteDirs} orphaned folders removed`);
+                if (deletedVersionFiles > 0) messages.push(`${deletedVersionFiles} orphaned version files removed`);
+
+                if (totalCleaned > 0 || recoveredNotes > 0) {
+                    uiService.showNotice(`Cleanup complete: ${messages.join(', ')}.`, 10000);
                 } else {
-                    uiService.showNotice("No orphaned version data found to clean up.", 5000);
+                    uiService.showNotice("Cleanup complete. No issues found.", 5000);
                 }
             } else {
-                uiService.showNotice("Orphaned data cleanup failed. Check the console for details.", 7000);
+                uiService.showNotice("Cleanup finished with errors. Check console.", 7000);
             }
             return;
         } catch (err) {
             console.error("Version Control: Error during orphan cleanup thunk:", err);
-            uiService.showNotice("An unexpected error occurred during orphan cleanup. Check the console for details.", 7000);
+            uiService.showNotice("An unexpected error occurred during cleanup. Check the console for details.", 7000);
             return rejectWithValue(String(err));
+        }
+    }
+);
+
+export const loadHistory = createAsyncThunk<
+    void,
+    TFile,
+    ThunkConfig
+>(
+    'core/loadHistory',
+    async (file, { dispatch, extra: services, rejectWithValue }) => {
+        try {
+            const noteManager = services.noteManager;
+            const noteId = await noteManager.getNoteId(file);
+            
+            if (noteId) {
+                dispatch(historyApi.util.invalidateTags([
+                    { type: 'VersionHistory', id: noteId },
+                    { type: 'EditHistory', id: noteId },
+                    { type: 'Branches', id: noteId },
+                    'Settings'
+                ]));
+            }
+            return;
+        } catch (e) {
+            console.error("Failed to reload history", e);
+            return rejectWithValue(String(e));
         }
     }
 );

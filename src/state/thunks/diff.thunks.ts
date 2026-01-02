@@ -1,9 +1,10 @@
-import { moment, MarkdownView } from 'obsidian';
+import { moment, MarkdownView, WorkspaceLeaf, FileView } from 'obsidian';
 import type { AppThunk } from '@/state';
-import { appSlice, selectAllHistory, selectAllEditHistory } from '@/state/appSlice';
+import { appSlice } from '@/state/appSlice';
 import type { VersionHistoryEntry, DiffTarget, DiffType } from '@/types';
 import { AppStatus, type ActionItem } from '@/state';
 import { shouldAbort } from '@/state/utils/guards';
+import { historyApi } from '@/state/apis/history.api';
 
 /**
  * Thunks for generating and displaying diffs between versions.
@@ -20,14 +21,20 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
         return;
     }
 
-    const { viewMode } = state;
+    const { viewMode, noteId } = state;
     
-    // Use selectors to get the array from EntityState
-    const history = selectAllHistory(rootState);
-    const editHistory = selectAllEditHistory(rootState);
+    // Retrieve history from RTK Query cache selectors
+    let history: VersionHistoryEntry[] = [];
     
-    const activeList = viewMode === 'versions' ? history : editHistory;
-    const otherVersions = activeList.filter(v => v.id !== version1.id);
+    if (viewMode === 'versions') {
+        const result = historyApi.endpoints.getVersionHistory.select(noteId)(rootState);
+        history = result.data || [];
+    } else {
+        const result = historyApi.endpoints.getEditHistory.select(noteId)(rootState);
+        history = result.data || [];
+    }
+    
+    const otherVersions = history.filter((v: VersionHistoryEntry) => v.id !== version1.id);
     
     const currentStateTarget: DiffTarget = {
         id: 'current',
@@ -58,7 +65,7 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
     });
 
     const onChooseAction = (selectedTarget: DiffTarget): AppThunk => (dispatch) => {
-        dispatch(generateAndShowDiffInPanel(version1, selectedTarget));
+        dispatch(generateDiffBackground(version1, selectedTarget));
     };
 
     dispatch(appSlice.actions.openPanel({
@@ -70,149 +77,98 @@ export const requestDiff = (version1: VersionHistoryEntry): AppThunk => async (d
     }));
 };
 
-export const generateAndShowDiffInPanel = (version1: VersionHistoryEntry, version2: DiffTarget): AppThunk => async (dispatch, getState, services) => {
+/**
+ * Initiates diff generation in the background.
+ * Updates the state to 'generating' and then 'ready' without opening the panel.
+ * The UI (ActionBar) will show an indicator when ready.
+ */
+export const generateDiffBackground = (version1: VersionHistoryEntry, version2: DiffTarget): AppThunk => async (dispatch, getState, services) => {
     if (shouldAbort(services, getState)) return;
 
     dispatch(appSlice.actions.closePanel());
-
-    const uiService = services.uiService;
-    const diffManager = services.diffManager;
-    const editHistoryManager = services.editHistoryManager;
     
-    const initialState = getState().app;
-    if (initialState.status !== AppStatus.READY || !initialState.noteId || !initialState.file) return;
-    const { noteId, viewMode } = initialState;
+    const state = getState().app;
+    if (state.status !== AppStatus.READY || !state.noteId) return;
 
-    uiService.showNotice("Generating diff...", 2000);
-    const decoder = new TextDecoder('utf-8');
+    const { noteId, viewMode } = state;
 
-    // Helper to fetch content based on view mode
-    const fetchContent = async (target: DiffTarget): Promise<string | ArrayBuffer | null> => {
-        if (target.id === 'current') {
-            // For current state, we delegate to diffManager which usually reads from file or editor
-            return diffManager.getContent(noteId, target);
-        }
-        
-        // For history entries
-        if (viewMode === 'versions') {
-            return diffManager.getContent(noteId, target as VersionHistoryEntry);
-        } else {
-            // For edits, fetch from IndexedDB
-            return editHistoryManager.getEditContent(noteId, target.id);
-        }
+    // 1. Set state to generating
+    dispatch(appSlice.actions.updateDiffPanelParams({
+        version1,
+        version2,
+        diffType: 'lines' // Default
+    }));
+    
+    const diffRequest = {
+        status: 'generating' as const,
+        version1,
+        version2,
+        diffType: 'lines' as const,
+        diffChanges: null,
+        content1: '',
+        content2: ''
     };
+    
+    dispatch(appSlice.actions.setDiffRequest(diffRequest));
 
     try {
-        // Fetch content (potentially ArrayBuffer)
-        const rawContent1 = await fetchContent(version1);
-        const rawContent2 = await fetchContent(version2);
-        
-        // Race Check: Verify context after content fetch
-        if (shouldAbort(services, getState, { noteId, status: AppStatus.READY })) {
-            uiService.showNotice("View context changed while fetching content. Diff cancelled.", 4000);
-            return;
-        }
+        // Trigger the fetch
+        const result = await dispatch(historyApi.endpoints.getDiff.initiate({
+            noteId,
+            v1: version1,
+            v2: version2,
+            diffType: 'lines',
+            viewMode
+        })).unwrap();
 
-        if (rawContent1 === null || rawContent2 === null) {
-             throw new Error("Failed to retrieve content for diff.");
-        }
+        if (shouldAbort(services, getState, { noteId })) return;
 
-        // Decode contents for UI state (strings required for display)
-        const content1Str = typeof rawContent1 === 'string' ? rawContent1 : decoder.decode(rawContent1);
-        const content2Str = typeof rawContent2 === 'string' ? rawContent2 : decoder.decode(rawContent2);
-
-        // --- Panel Mode Logic ---
-        dispatch(appSlice.actions.startDiffGeneration({ 
-            version1, 
-            version2, 
-            content1: content1Str, 
-            content2: content2Str 
+        // Update state to ready
+        dispatch(appSlice.actions.setDiffRequest({
+            ...diffRequest,
+            status: 'ready',
+            diffChanges: result
         }));
-
-        // Pass raw content (potentially ArrayBuffer) to manager. 
-        // Manager handles cloning/transferring to worker.
-        const diffChanges = await diffManager.computeDiff(noteId, version1.id, version2.id, rawContent1, rawContent2, 'lines');
         
-        // Race Check: Verify context after diff computation
-        if (shouldAbort(services, getState, { noteId, status: AppStatus.READY })) {
-            uiService.showNotice("View context changed, diff cancelled.", 3000);
-            dispatch(appSlice.actions.clearDiffRequest());
-            return;
-        }
-        
-        dispatch(appSlice.actions.diffGenerationSucceeded({ version1Id: version1.id, version2Id: version2.id, diffChanges }));
-        uiService.showNotice("Diff is ready. Click the indicator to view.", 4000);
+        services.uiService.showNotice("Diff generated. Click the icon in the action bar to view.", 3000);
 
     } catch (error) {
-        console.error("Version Control: Error generating diff.", error);
-        uiService.showNotice("Failed to generate diff. Check the console for details.");
-        dispatch(appSlice.actions.diffGenerationFailed({ version1Id: version1.id, version2Id: version2.id }));
+        console.error("Diff generation failed", error);
+        services.uiService.showNotice("Failed to generate diff.", 4000);
+        dispatch(appSlice.actions.clearDiffRequest());
     }
 };
 
 export const viewReadyDiff = (renderMode: 'panel' | 'window' = 'panel'): AppThunk => (dispatch, getState, services) => {
     if (shouldAbort(services, getState)) return;
-    const uiService = services.uiService;
     const state = getState().app;
 
-    if (state.status !== AppStatus.READY) return;
+    if (state.status !== AppStatus.READY || !state.diffRequest || state.diffRequest.status !== 'ready') return;
     
-    const diffRequest = state.diffRequest;
-    if (!diffRequest) return;
+    const { version1, version2, diffType } = state.diffRequest;
 
-    if (diffRequest.status === 'generating' || diffRequest.status === 're-diffing') {
-        uiService.showNotice(`A diff is currently being generated.`, 4000);
-        return;
-    }
-    
-    if (diffRequest.status !== 'ready' || !diffRequest.diffChanges) return;
-
-    const { version1, version2, diffChanges, diffType, content1, content2 } = diffRequest;
-
-    dispatch(appSlice.actions.clearDiffRequest());
     dispatch(appSlice.actions.openPanel({ 
         type: 'diff', 
         version1, 
         version2, 
-        diffChanges, 
         diffType, 
-        content1, 
-        content2, 
-        isReDiffing: false,
-        renderMode // Pass the requested render mode
+        renderMode 
     }));
 };
 
 export const recomputeDiff = (newDiffType: DiffType): AppThunk => async (dispatch, getState, services) => {
     if (shouldAbort(services, getState)) return;
-    const diffManager = services.diffManager;
-    const uiService = services.uiService;
+    
+    // Update the panel params. The component will react.
+    dispatch(appSlice.actions.updateDiffPanelParams({ diffType: newDiffType }));
+    
+    // Also update the background request state if it exists, to keep them in sync
     const state = getState().app;
-
-    if (state.panel?.type !== 'diff') return;
-    const { version1, version2, content1, content2 } = state.panel;
-    const noteId = state.noteId;
-    if (!noteId) return;
-
-    dispatch(appSlice.actions.startReDiffing({ newDiffType }));
-    try {
-        // Here we only have strings in state.panel, so we pass strings.
-        // The worker handles strings as well.
-        const diffChanges = await diffManager.computeDiff(noteId, version1.id, version2.id, content1, content2, newDiffType);
-        
-        // Race Check: Ensure we are still looking at the same diff panel
-        if (shouldAbort(services, getState, { noteId })) {
-            return;
-        }
-        // Also check if panel type is still diff, though shouldAbort doesn't check panel type specifically.
-        const currentState = getState().app;
-        if (currentState.panel?.type !== 'diff') return;
-
-        dispatch(appSlice.actions.reDiffingSucceeded({ diffChanges }));
-    } catch (error) {
-        console.error("Version Control: Failed to re-compute diff.", error);
-        uiService.showNotice("Failed to re-compute diff. Check console.", 4000);
-        dispatch(appSlice.actions.reDiffingFailed());
+    if (state.diffRequest) {
+        dispatch(appSlice.actions.setDiffRequest({
+            ...state.diffRequest,
+            diffType: newDiffType
+        }));
     }
 };
 
@@ -245,10 +201,20 @@ export const scrollToLineInEditor = (line: number): AppThunk => (_dispatch, getS
 
     const filePath = state.file.path;
 
-    const markdownLeaves = app.workspace.getLeavesOfType('markdown');
-    const targetLeaf = markdownLeaves.find(leaf => {
-        return leaf.view instanceof MarkdownView && leaf.view.file?.path === filePath;
-    });
+    // Robustly find the target leaf.
+    // 1. Try getMostRecentLeaf() first as it handles sidebar focus correctly.
+    let targetLeaf: WorkspaceLeaf | null = null;
+    const recentLeaf = (app.workspace as any).getMostRecentLeaf?.() as WorkspaceLeaf | null;
+    
+    if (recentLeaf?.view instanceof FileView && recentLeaf.view.file?.path === filePath) {
+        targetLeaf = recentLeaf;
+    } else {
+        // 2. Fallback to searching all leaves if the most recent one isn't the right file
+        const markdownLeaves = app.workspace.getLeavesOfType('markdown');
+        targetLeaf = markdownLeaves.find(leaf => {
+            return leaf.view instanceof MarkdownView && leaf.view.file?.path === filePath;
+        }) || null;
+    }
 
     if (!targetLeaf) {
         const fileName = filePath.split('/').pop() ?? filePath;
@@ -256,8 +222,14 @@ export const scrollToLineInEditor = (line: number): AppThunk => (_dispatch, getS
         return;
     }
 
-    // Since we found it via getLeavesOfType('markdown') and checked instanceof, this cast is safe.
+    // Since we verified it's a MarkdownView (or FileView with path match), we cast safely.
     const view = targetLeaf.view as MarkdownView;
+
+    // Check if view supports editor (it might be a different type of FileView in rare cases, but we checked extension)
+    if (!view.editor) {
+         uiService.showNotice("Cannot scroll: active view is not an editor.", 3000);
+         return;
+    }
 
     if (view.getMode() !== 'source') {
         uiService.showNotice("Cannot scroll to line: note is in Reading view.", 3000);
