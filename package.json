@@ -1,7 +1,7 @@
 {
   "name": "version-control",
   "version": "1.9.39",
-  "description": "Complete per-note version control: intentional snapshots with meaningful names, in-file branching, advanced side-by-side diffs, timeline search, and writing stats—plus optional auto-saves as your safety net. All local.",
+  "description": "A local, snapshot-based version control system. Lets you create finite number of versions of any note.",
   "main": "main.js",
   "type": "module",
   "sideEffects": false,
@@ -43,14 +43,14 @@
     "@uiw/react-heat-map": "^2.3.3",
     "diff-match-patch": "^1.0.5",
     "framer-motion": "^12.23.26",
-    "yaml": "^2.8.2"
+    "yaml": "^2.8.2",
+    "@sanity/diff-match-patch": "^3.2.0"
   },
   "devDependencies": {
     "@types/node": "^25.0.0",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@types/semver": "^7.7.1",
-    "@types/diff-match-patch": "^1.0.36",
     "esbuild": "^0.27.1",
     "obsidian": "1.11.0",
     "tslib": "^2.8.1",
