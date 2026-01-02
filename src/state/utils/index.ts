@@ -9,6 +9,7 @@
  *
  * - **guards**: Race condition prevention and lifecycle guards
  * - **settingsUtils**: Settings resolution and merging utilities
+ * - **thunk-validation**: Common validation logic for thunks
  */
 
 // ============================================================================
@@ -17,6 +18,7 @@
 
 export * from './guards';
 export * from './settingsUtils';
+export * from './thunk-validation';
 
 // ============================================================================
 // TYPE DEFINITIONS
