@@ -15,10 +15,7 @@
  * ## Usage
  *
  * ```typescript
- * import { loadEditHistory, saveNewEdit } from '@/state/thunks/edit-history';
- *
- * // Load edit history
- * dispatch(loadEditHistory(noteId));
+ * import { saveNewEdit } from '@/state/thunks/edit-history';
  *
  * // Save new edit
  * dispatch(saveNewEdit(false));
