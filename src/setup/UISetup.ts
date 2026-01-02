@@ -86,18 +86,23 @@ export function registerCommands(plugin: Plugin, store: AppStore): void {
  */
 async function activateViewAndDispatch(plugin: Plugin, store: AppStore) {
     let contextLeaf: WorkspaceLeaf | null = null;
-    // Use the recommended API to find the active FileView. This is safer
-    // and more generic than checking for MarkdownView and then another type.
-    const activeView = plugin.app.workspace.getActiveViewOfType(FileView);
-
-    // If there's an active file view, its leaf is our context.
-    if (activeView) {
-        contextLeaf = activeView.leaf;
+    
+    // Use getMostRecentLeaf to find the last active context, as clicking the ribbon
+    // might have shifted focus away from the editor.
+    const recentLeaf = (plugin.app.workspace as any).getMostRecentLeaf?.() as WorkspaceLeaf | null;
+    
+    if (recentLeaf?.view instanceof FileView) {
+        contextLeaf = recentLeaf;
+    } else {
+        // Fallback to active view if getMostRecentLeaf is not available or not a FileView
+        const activeView = plugin.app.workspace.getActiveViewOfType(FileView);
+        if (activeView) {
+            contextLeaf = activeView.leaf;
+        }
     }
     
     // Dispatch the initialization thunk. It will use the provided leaf as context,
     // or determine the context itself if the leaf is null.
-    // Explicitly pass undefined if contextLeaf is null, to satisfy strict call signature
     store.dispatch(thunks.initializeView(contextLeaf || undefined));
 
     // Determine the target window (document) based on the currently active UI context.
