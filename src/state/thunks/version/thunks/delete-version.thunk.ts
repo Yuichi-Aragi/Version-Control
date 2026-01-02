@@ -2,11 +2,11 @@ import { createAsyncThunk } from '@reduxjs/toolkit';
 import { TFile } from 'obsidian';
 import { appSlice, AppStatus } from '@/state';
 import type { VersionHistoryEntry } from '@/types';
-import { initializeView, loadHistoryForNoteId } from '@/state/thunks/core.thunks';
+import { initializeView } from '@/state/thunks/core.thunks';
 import { deleteAllEdits } from '@/state/thunks/edit-history/thunks/delete-edits.thunk';
 import { shouldAbort } from '@/state/utils/guards';
 import type { ThunkConfig } from '@/state/store';
-import { validateNotRenaming, validateNoteContext } from '../validation';
+import { validateNotRenaming, validateNoteContext } from '@/state/utils/thunk-validation';
 import {
     handleVersionErrorWithMessage,
     notifyDeleteSuccess,
@@ -14,6 +14,7 @@ import {
     notifyDeleteAllSuccess,
     notifyDeleteAllInBackground,
 } from '../helpers';
+import { historyApi } from '@/state/apis/history.api';
 
 /**
  * Prompts the user to confirm deleting a version.
@@ -97,16 +98,17 @@ export const deleteVersion = createAsyncThunk<
 
             const success = await versionManager.deleteVersion(noteId, versionId);
 
-            // Race Check
             if (shouldAbort(services, getState, { noteId, filePath: file.path })) {
                 if (success) {
                     notifyDeleteInBackground(uiService, file.basename);
+                    // Invalidate even if context changed
+                    dispatch(historyApi.util.invalidateTags([{ type: 'VersionHistory', id: noteId }]));
                 }
                 return rejectWithValue('Context changed');
             }
 
             if (success) {
-                dispatch(loadHistoryForNoteId({ file, noteId }));
+                dispatch(historyApi.util.invalidateTags([{ type: 'VersionHistory', id: noteId }]));
                 notifyDeleteSuccess(uiService, versionId);
                 return;
             } else {
@@ -190,17 +192,17 @@ export const deleteAllVersions = createAsyncThunk<
         try {
             const success = await versionManager.deleteAllVersionsInCurrentBranch(noteId);
 
-            // Race Check
             if (shouldAbort(services, getState, { noteId, filePath: file.path })) {
                 if (success) {
                     notifyDeleteAllInBackground(uiService, file.basename);
+                    dispatch(historyApi.util.invalidateTags([{ type: 'VersionHistory', id: noteId }]));
                 }
                 return rejectWithValue('Context changed');
             }
 
             if (success) {
                 notifyDeleteAllSuccess(uiService, file.basename);
-                dispatch(initializeView(undefined));
+                dispatch(historyApi.util.invalidateTags([{ type: 'VersionHistory', id: noteId }]));
                 return;
             } else {
                 throw new Error(`Failed to delete all versions for "${file.basename}".`);

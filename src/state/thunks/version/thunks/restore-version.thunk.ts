@@ -2,16 +2,17 @@ import { createAsyncThunk } from '@reduxjs/toolkit';
 import { TFile } from 'obsidian';
 import { appSlice, AppStatus } from '@/state';
 import type { VersionHistoryEntry } from '@/types';
-import { initializeView, loadHistoryForNoteId } from '@/state/thunks/core.thunks';
+import { initializeView } from '@/state/thunks/core.thunks';
 import { resolveSettings } from '@/state/utils/settingsUtils';
 import { shouldAbort } from '@/state/utils/guards';
 import type { ThunkConfig } from '@/state/store';
-import { validateNotRenaming, validateNoteContext } from '../validation';
+import { validateNotRenaming, validateNoteContext } from '@/state/utils/thunk-validation';
 import {
     handleVersionErrorWithMessage,
     notifyRestoreSuccess,
     notifyRestoreCancelled,
 } from '../helpers';
+import { historyApi } from '@/state/apis/history.api';
 
 /**
  * Prompts the user to confirm restoring a version.
@@ -77,7 +78,6 @@ export const restoreVersion = createAsyncThunk<
         const file = initialFileFromState!;
         const noteId = initialNoteIdFromState!;
 
-        // Close panel explicitly as this is a UI interaction
         dispatch(appSlice.actions.closePanel());
 
         try {
@@ -108,7 +108,6 @@ export const restoreVersion = createAsyncThunk<
                 settings: hybridSettings,
             });
 
-            // Race Check
             if (shouldAbort(services, getState, { noteId, status: AppStatus.READY })) {
                 notifyRestoreCancelled(uiService);
                 if (!shouldAbort(services, getState)) {
@@ -126,8 +125,10 @@ export const restoreVersion = createAsyncThunk<
             if (restoreSuccess) {
                 notifyRestoreSuccess(uiService, liveFile, versionId);
             }
-            // STRICT: Await load so we can sync watch mode after state is READY
-            await dispatch(loadHistoryForNoteId({ file: liveFile, noteId }));
+            
+            // Invalidate to refresh history list (showing new backup version)
+            dispatch(historyApi.util.invalidateTags([{ type: 'VersionHistory', id: noteId }]));
+            
             return;
         } catch (error) {
             const message = error instanceof Error ? error.message : 'An unexpected error occurred.';
