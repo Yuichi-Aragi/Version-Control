@@ -34,24 +34,31 @@ export class VersionControlView extends ItemView {
         this.containerEl.addClass("version-control-view");
         
         // FIX: Create a wrapper for the React root that we can style reliably
-        // to ensure a stable 100% height for the React layout engine. This is
-        // critical for mobile viewport resizing with virtual keyboards, as it
-        // provides a non-collapsing parent for the flexbox/height-based UI.
+        // to ensure a stable 100% height for the React layout engine.
         this.reactRootContainer = this.contentEl.createDiv();
         this.reactRootContainer.style.height = '100%';
         
-        this.reactRoot = createRoot(this.reactRootContainer);
-        this.reactRoot.render(
-            <StrictMode>
-                <Provider store={this.store}>
-                    <AppContext.Provider value={this.app}>
-                        <TimeProvider>
-                            <VersionControlRoot />
-                        </TimeProvider>
-                    </AppContext.Provider>
-                </Provider>
-            </StrictMode>
-        );
+        // PERF: Implement 2025 "Deferred View" optimization.
+        // We defer the heavy React hydration until the main thread is idle.
+        // This allows the sidebar animation (if triggered via revealLeaf) to complete
+        // smoothly before we burn CPU cycles initializing the React tree.
+        // This is critical for the "buttery smooth" feel when hydrating a DeferredView.
+        window.requestIdleCallback(() => {
+            if (!this.reactRootContainer) return;
+
+            this.reactRoot = createRoot(this.reactRootContainer);
+            this.reactRoot.render(
+                <StrictMode>
+                    <Provider store={this.store}>
+                        <AppContext.Provider value={this.app}>
+                            <TimeProvider>
+                                <VersionControlRoot />
+                            </TimeProvider>
+                        </AppContext.Provider>
+                    </Provider>
+                </StrictMode>
+            );
+        }, { timeout: 1000 });
     }
 
     override async onClose() {
