@@ -66,6 +66,19 @@ export class DebouncedDiskWriter {
     this.scheduled.delete(key);
   }
 
+  /**
+   * Cancels all pending writes for a specific note ID across all branches.
+   * Crucial for preventing race conditions during note deletion.
+   */
+  cancelNote(noteId: string): void {
+    const prefix = `${noteId}:`;
+    for (const key of this.scheduled.keys()) {
+      if (key.startsWith(prefix)) {
+        this.scheduled.delete(key);
+      }
+    }
+  }
+
   cancelAll(): void {
     this.scheduled.clear();
     this.operationQueue.clear();
