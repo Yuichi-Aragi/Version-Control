@@ -14,6 +14,7 @@ import { VersionValidator } from '@/core/version-manager/validation';
 import { QueueService } from '@/services';
 import { SettingsResolver, type LoosePartial } from '@/core/settings';
 import { updateFrontmatter, DELETE } from "@/utils/frontmatter";
+import type { EditHistoryManager } from '@/core';
 
 export class VersionManager {
   private readonly saveOperation: SaveOperation;
@@ -28,7 +29,8 @@ export class VersionManager {
     private readonly noteManager: NoteManager,
     private readonly versionContentRepo: VersionContentRepository,
     private readonly eventBus: PluginEvents,
-    private readonly queueService: QueueService
+    private readonly queueService: QueueService,
+    private readonly editHistoryManager: EditHistoryManager
   ) {
     this.saveOperation = new SaveOperation(
       this.app,
@@ -42,7 +44,8 @@ export class VersionManager {
     this.restoreOperation = new RestoreOperation(
       this.app,
       this.versionContentRepo,
-      this.queueService
+      this.queueService,
+      this.noteManager
     );
 
     this.deleteOperation = new DeleteOperation(
@@ -51,7 +54,9 @@ export class VersionManager {
       this.versionContentRepo,
       this.eventBus,
       this.plugin,
-      this.queueService
+      this.queueService,
+      this.editHistoryManager,
+      this.noteManager
     );
 
     this.updateOperation = new UpdateOperation(
@@ -285,7 +290,11 @@ export class VersionManager {
     if (contentToRestore !== null) {
         const file = this.app.vault.getAbstractFileByPath(noteManifest.notePath);
         if (file instanceof TFile) {
+            // IGNORE INTERNAL WRITE: Prevent auto-save or metadata loop when restoring branch content
+            this.noteManager.registerInternalWrite(file.path);
+            
             await this.app.vault.modify(file, contentToRestore);
+            
             if (file.extension === 'md') await this.noteManager.writeNoteIdToFrontmatter(file, noteId);
             if (targetView && newBranchState && targetView.getMode() === 'source') {
                 try {
