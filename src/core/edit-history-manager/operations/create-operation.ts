@@ -83,6 +83,8 @@ export class CreateOperation {
       let manifest: NoteManifest;
       
       if (!existingManifest) {
+        // Case 1: Manifest does not exist.
+        // Requirement: Create it before saving.
         const now = new Date().toISOString();
         manifest = {
           noteId,
@@ -98,12 +100,17 @@ export class CreateOperation {
           lastModified: now,
         };
       } else {
+        // Case 2: Manifest exists.
         manifest = JSON.parse(JSON.stringify(existingManifest));
+        
+        // Requirement: If that branch exists in note manifest... if no then don't save.
+        if (!manifest.branches[activeBranch]) {
+            console.warn(`VC: Branch "${activeBranch}" not found in edit manifest for "${noteId}". Aborting save.`);
+            throw new Error(`Cannot save edit: Branch "${activeBranch}" does not exist.`);
+        }
+
         if (manifest.currentBranch !== activeBranch) {
           manifest.currentBranch = activeBranch;
-        }
-        if (!manifest.branches[activeBranch]) {
-          manifest.branches[activeBranch] = { versions: {}, totalVersions: 0 };
         }
       }
 

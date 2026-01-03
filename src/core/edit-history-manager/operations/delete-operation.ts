@@ -65,6 +65,10 @@ export class DeleteOperation {
   }
 
   async deleteNoteHistory(noteId: string): Promise<void> {
+    // IMMEDIATE ACTION: Cancel any pending persistence for this note to prevent race conditions
+    // where a scheduled write recreates the folder after we delete it.
+    this.persistence.diskWriter.cancelNote(noteId);
+
     return this.queueService.add(
         `edit:${noteId}`,
         async () => {
@@ -84,11 +88,12 @@ export class DeleteOperation {
   }
 
   async deleteBranch(noteId: string, branchName: string): Promise<void> {
+    // IMMEDIATE ACTION: Cancel pending persistence for this branch
+    this.persistence.diskWriter.cancel(noteId, branchName);
+
     return this.queueService.add(
         `edit:${noteId}`,
         async () => {
-            this.persistence.diskWriter.cancel(noteId, branchName);
-            
             const proxy = this.workerClient.ensureWorker();
             await proxy.deleteBranch(noteId, branchName);
 
