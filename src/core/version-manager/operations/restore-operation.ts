@@ -3,6 +3,7 @@ import type { VersionContentRepository } from '@/core';
 import { VersionValidator } from '@/core/version-manager/validation';
 import type { QueueService } from '@/services';
 import { TaskPriority } from '@/types';
+import type { NoteManager } from '@/core';
 
 /**
  * Handles the restore version operation.
@@ -14,7 +15,8 @@ export class RestoreOperation {
   constructor(
     private readonly app: App,
     private readonly versionContentRepo: VersionContentRepository,
-    private readonly queueService: QueueService
+    private readonly queueService: QueueService,
+    private readonly noteManager: NoteManager
   ) {}
 
   /**
@@ -36,6 +38,9 @@ export class RestoreOperation {
               if (versionContent === null) {
                 throw new Error('Could not load version content to restore.');
               }
+
+              // IGNORE INTERNAL WRITE: Prevent auto-save loop when restoring content
+              this.noteManager.registerInternalWrite(liveFile.path);
 
               await this.app.vault.modify(liveFile, versionContent);
               return true;

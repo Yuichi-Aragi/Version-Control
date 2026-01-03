@@ -41,13 +41,18 @@ export class SaveOperation {
         `ver:${noteId}`, 
         async () => {
             let noteManifest = await this.manifestManager.loadNoteManifest(noteId);
+            
+            // Requirement: if note manifest for that noteid exists (if not then create it before saving)
             if (!noteManifest) {
               console.log(`VC: First version for "${file.path}". Creating database entry.`);
+              // createNoteEntry throws if creation fails, satisfying "if can't create ... then don't save"
               noteManifest = await this.manifestManager.createNoteEntry(noteId, file.path);
             }
 
             const branchName = noteManifest.currentBranch;
             const currentBranch = noteManifest.branches[branchName];
+            
+            // Requirement: If that branch exists in note manifest... if no then don't save
             if (!currentBranch) {
               throw new Error(`Current branch "${branchName}" not found in manifest for note ${noteId}.`);
             }

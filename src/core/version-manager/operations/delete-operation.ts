@@ -1,17 +1,21 @@
 import { App, TFile } from 'obsidian';
-import type { ManifestManager, VersionContentRepository, PluginEvents } from '@/core';
+import type { ManifestManager, VersionContentRepository, PluginEvents, EditHistoryManager } from '@/core';
 import { VersionValidator } from '@/core/version-manager/validation';
 import { DEFAULT_BRANCH_NAME } from '@/constants';
 import type { QueueService } from '@/services';
 import { TaskPriority } from '@/types';
 import { updateFrontmatter, getFrontmatterKey, DELETE } from "@/utils/frontmatter";
 import type VersionControlPlugin from '@/main';
+import type { NoteManager } from '@/core';
 
 /**
  * Handles the delete version and branch operations.
  * 
  * ENHANCEMENT: Uses a high-level transaction lock (`ver:{noteId}`) to ensure
  * no conflicts with saves or restores during deletion.
+ * 
+ * ENHANCEMENT: Coordinates with EditHistoryManager to ensure complete cleanup
+ * of all associated data (versions, edits, timeline) when deletion occurs.
  */
 export class DeleteOperation {
   constructor(
@@ -20,7 +24,9 @@ export class DeleteOperation {
     private readonly versionContentRepo: VersionContentRepository,
     private readonly eventBus: PluginEvents,
     private readonly plugin: VersionControlPlugin,
-    private readonly queueService: QueueService
+    private readonly queueService: QueueService,
+    private readonly editHistoryManager: EditHistoryManager,
+    private readonly noteManager: NoteManager
   ) {}
 
   private get noteIdKey(): string {
@@ -120,7 +126,8 @@ export class DeleteOperation {
   }
 
   /**
-   * Deletes an entire branch
+   * Deletes an entire branch.
+   * If it's the last branch, it deletes the entire note entry and all associated history.
    */
   async deleteBranch(noteId: string, branchName: string): Promise<boolean> {
     VersionValidator.validateBranchDeletion(noteId, branchName);
@@ -135,17 +142,35 @@ export class DeleteOperation {
                 return true;
               }
 
+              // CHECK IF THIS IS THE LAST BRANCH
               if (Object.keys(noteManifest.branches).length === 1) {
                 const liveFilePath = noteManifest.notePath;
+                
+                // 1. Clean up Edit History (Cancels writes, clears IDB, deletes physical branch folders)
+                // This must happen BEFORE deleting the note entry to prevent race conditions where
+                // a pending edit history write recreates the folder.
+                await this.editHistoryManager.deleteNoteHistory(noteId);
+
+                // 2. Delete Physical Folder & Central Manifest Entry
                 await this.manifestManager.deleteNoteEntry(noteId);
+                
+                // 3. Cleanup Frontmatter in the live file
                 const file = this.app.vault.getAbstractFileByPath(liveFilePath);
                 if (file instanceof TFile && file.extension === 'md') {
                   await this.cleanupFrontmatter(liveFilePath, noteId);
                 }
+                
+                // 4. Trigger event to notify TimelineManager (and UI) to clear remaining state
                 this.eventBus.trigger('history-deleted', noteId);
                 return true;
               }
 
+              // STANDARD BRANCH DELETION
+              
+              // 1. Clean up Edit History for this specific branch
+              await this.editHistoryManager.deleteBranch(noteId, branchName);
+
+              // 2. Delete Versions for this branch
               const versionsToDelete = Object.keys(noteManifest.branches[branchName]?.versions ?? {});
 
               await this.manifestManager.updateNoteManifest(noteId, (manifest) => {
@@ -182,6 +207,9 @@ export class DeleteOperation {
         
         // If the file has the expected ID, we nuke it AND legacy keys.
         if (keyResult.success && keyResult.data === expectedNoteId) {
+            // IGNORE INTERNAL WRITE: Prevent metadata change event loop
+            this.noteManager.registerInternalWrite(liveFile.path);
+
             const updates: Record<string, any> = {
                 [this.noteIdKey]: DELETE
             };
