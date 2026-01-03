@@ -11,6 +11,7 @@ import type { CleanupResult } from './types';
 import { ORPHAN_CLEANUP_QUEUE_KEY, QUEUE_PREFIX, CLEANUP_INTERVAL_MS } from './config';
 import { DebouncerManager } from './scheduling';
 import { PolicyCleanupOperation, OrphanCleanupOperation } from './operations';
+import type { NoteManager } from '@/core';
 
 /**
  * Manages all cleanup operations, such as removing old versions based on
@@ -43,7 +44,8 @@ export class CleanupManager extends Component {
     private readonly versionContentRepo: VersionContentRepository,
     private readonly plugin: VersionControlPlugin,
     private readonly storageService: StorageService,
-    private readonly store: AppStore
+    private readonly store: AppStore,
+    private readonly noteManager: NoteManager
   ) {
     super();
     this.debouncerManager = new DebouncerManager();
@@ -61,7 +63,8 @@ export class CleanupManager extends Component {
       this.pathService,
       this.storageService,
       this.eventBus,
-      this.plugin
+      this.plugin,
+      this.noteManager
     );
   }
 
@@ -99,6 +102,7 @@ export class CleanupManager extends Component {
     if (!this.plugin) throw new Error('Plugin instance is required');
     if (!this.storageService) throw new Error('StorageService is required');
     if (!this.store) throw new Error('Store is required');
+    if (!this.noteManager) throw new Error('NoteManager is required');
   }
 
   private getQueueKey(noteId: string): string {
