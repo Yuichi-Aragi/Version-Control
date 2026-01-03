@@ -56,10 +56,11 @@ export class PluginLoader {
             const uiInitializer = new UIInitializer(this.plugin, services.store);
             uiInitializer.registerUIComponents();
 
-            // Initialize core managers
+            // Initialize core managers (Non-worker dependent)
             services.cleanupManager.initialize();
-            services.timelineManager.initialize();
-            services.compressionManager.initialize();
+            
+            // NOTE: Worker-dependent managers (Timeline, Compression, EditHistory) are initialized
+            // sequentially inside onLayoutReady to prevent main thread freezing during startup.
 
             // Add child components for automatic cleanup
             this.plugin.addChild(services.cleanupManager);
@@ -67,16 +68,29 @@ export class PluginLoader {
             this.plugin.addChild(services.diffManager);
             this.plugin.addChild(services.backgroundTaskManager);
 
-            // Initialize database
+            // Initialize database (Manifests only)
             await registryInitializer.initializeDatabase(services);
 
             // Set up event listeners
             const eventRegistrar = new EventRegistrar(this.plugin, services.store, services.eventBus);
             eventRegistrar.setupEventListeners();
 
-            // Initialize view when layout is ready
-            this.plugin.app.workspace.onLayoutReady(() => {
+            // Initialize view and workers when layout is ready
+            this.plugin.app.workspace.onLayoutReady(async () => {
                 if (this.plugin.isUnloading) return;
+
+                // Defer execution to allow the sidebar and layout to stabilize.
+                // This prevents UI jank and ensures the view is ready for interaction.
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                if (this.plugin.isUnloading) return;
+                
+                // Initialize workers sequentially to prevent UI freeze
+                // Priority: Compression -> Edit History -> Timeline -> Diff
+                await services.initializeWorkers();
+
+                if (this.plugin.isUnloading) return;
+
                 uiInitializer.initializeView();
                 uiInitializer.checkForUpdates();
             });
