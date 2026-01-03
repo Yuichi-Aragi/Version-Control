@@ -1,6 +1,6 @@
 import { TFile, TFolder, Platform } from 'obsidian';
 import type { App } from 'obsidian';
-import type { ManifestManager, PathService, StorageService, EditHistoryManager, PluginEvents } from '@/core';
+import type { ManifestManager, PathService, StorageService, EditHistoryManager, PluginEvents, NoteManager } from '@/core';
 import type { CleanupResult } from '@/core/tasks/cleanup-manager/types';
 import { retryOperation } from '@/core/tasks/cleanup-manager/scheduling';
 import type VersionControlPlugin from '@/main';
@@ -14,7 +14,8 @@ export class OrphanCleanupOperation {
     private readonly pathService: PathService,
     private readonly storageService: StorageService,
     private readonly eventBus: PluginEvents,
-    private readonly plugin: VersionControlPlugin
+    private readonly plugin: VersionControlPlugin,
+    private readonly noteManager: NoteManager
   ) {}
 
   /**
@@ -307,6 +308,8 @@ export class OrphanCleanupOperation {
     }
 
     if (needsUpdate) {
+      // IGNORE INTERNAL WRITE: Prevent metadata change loop
+      this.noteManager.registerInternalWrite(file.path);
       await updateFrontmatter(this.app, file, updates);
     }
   }
