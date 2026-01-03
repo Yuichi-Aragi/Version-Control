@@ -8,6 +8,7 @@ import { QueueService } from '@/services';
 import { DEFAULT_BRANCH_NAME } from '@/constants';
 import { TaskPriority } from '@/types';
 import { executeWithRetry } from '@/utils/retry';
+import { StorageService } from '@/core/storage/storage-service';
 
 type V1NoteManifest = Omit<NoteManifest, 'branches' | 'currentBranch'> & {
     versions: { [versionId: string]: unknown };
@@ -27,7 +28,8 @@ export class NoteManifestRepository {
     constructor(
         private readonly app: App,
         private readonly pathService: PathService,
-        private readonly queueService: QueueService
+        private readonly queueService: QueueService,
+        private readonly storageService: StorageService
     ) {}
 
     private getQueueKey(noteId: string): string {
@@ -191,6 +193,10 @@ export class NoteManifestRepository {
         const content = JSON.stringify(data, null, 2);
 
         try {
+            // Robustness: Ensure parent folder exists before writing
+            const noteDbPath = this.pathService.getNoteDbPath(noteId);
+            await this.storageService.ensureFolderExists(noteDbPath);
+
             await executeWithRetry(async () => {
                 await this.app.vault.adapter.write(manifestPath, content);
             });

@@ -6,10 +6,11 @@ import { CompressionManager } from "@/core";
 import type VersionControlPlugin from "@/main";
 import { TaskPriority } from "@/types";
 import { executeWithRetry } from "@/utils/retry";
+import { StorageService } from "@/core/storage/storage-service";
 
 /**
  * Repository for managing the content of individual versions.
- * Uses shared retry logic with timeout configuration.
+ * Uses shared retry logic with timeout configuration and robust storage service.
  */
 export class VersionContentRepository {
   private readonly FILE_OPERATION_TIMEOUT_MS = 5000;
@@ -22,7 +23,8 @@ export class VersionContentRepository {
     private readonly plugin: VersionControlPlugin,
     private readonly pathService: PathService,
     private readonly queueService: QueueService,
-    private readonly compressionManager: CompressionManager
+    private readonly compressionManager: CompressionManager,
+    private readonly storageService: StorageService
   ) {
     if (!this.app?.vault?.adapter) throw new Error('VersionContentRepository: Invalid dependencies');
   }
@@ -142,6 +144,10 @@ export class VersionContentRepository {
     const versionFilePath = this.pathService.getNoteVersionPath(noteId, versionId);
     const enableCompression = this.plugin.settings.enableCompression;
 
+    // Robustness: Ensure parent folder exists before writing
+    const versionsPath = this.pathService.getNoteVersionsPath(noteId);
+    await this.storageService.ensureFolderExists(versionsPath);
+
     await executeWithRetry(
       async () => {
         if (enableCompression) {
@@ -180,6 +186,10 @@ export class VersionContentRepository {
   private async _renameInternal(noteId: string, oldVersionId: string, newVersionId: string): Promise<void> {
     const oldPath = this.pathService.getNoteVersionPath(noteId, oldVersionId);
     const newPath = this.pathService.getNoteVersionPath(noteId, newVersionId);
+
+    // Robustness: Ensure target parent folder exists (though it should for rename in same dir)
+    const versionsPath = this.pathService.getNoteVersionsPath(noteId);
+    await this.storageService.ensureFolderExists(versionsPath);
 
     await executeWithRetry(
       async () => {
