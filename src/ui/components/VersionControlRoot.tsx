@@ -64,22 +64,6 @@ export const VersionControlRoot: FC = () => {
             dispatch(appSlice.actions.updateEffectiveSettings(settingsData));
         } else if (isSettingsError) {
             // Fallback: If settings fetch fails, we still need to transition to READY to avoid getting stuck.
-            // We use the current effective settings (which are defaults from initialization)
-            // by dispatching an update with the current state's settings, which triggers the status update in the reducer.
-            // Note: We can't easily access current state here without selector, but we can dispatch a no-op update
-            // or just set status directly if we exposed that action.
-            // Cleaner: Dispatch defaults.
-            // However, since we don't have defaults handy here without importing constants,
-            // let's rely on the fact that appSlice initializes with defaults.
-            // We just need to trigger the status transition.
-            // We'll dispatch a dummy update to effective settings to trigger the reducer logic.
-            // Actually, better to just let the user interact even if settings failed to load specifically.
-            // But we need to unblock the UI.
-            // Let's assume defaults are better than being stuck.
-            // We will rely on the error handling in the API to return defaults if possible,
-            // but if it's a hard error, we must proceed.
-            // For now, if error, we don't dispatch updateEffectiveSettings, so status remains LOADING.
-            // We must force it.
             dispatch(appSlice.actions.setStatus(AppStatus.READY));
         }
     }, [settingsData, isSettingsError, dispatch]);
@@ -153,6 +137,7 @@ export const VersionControlRoot: FC = () => {
                         <div ref={mainRef} className="v-main">
                             <div className="v-ready-state-container">
                                 <HistoryList 
+                                    key={viewMode} // FIX: Force remount on view mode change to reset RTK Query hooks
                                     onCountChange={handleCountChange}
                                 />
                             </div>
