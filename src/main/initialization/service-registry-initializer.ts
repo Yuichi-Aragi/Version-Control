@@ -21,10 +21,11 @@ export class ServiceRegistryInitializer {
 
     /**
      * Initialize the database for the plugin.
+     * Note: Worker-dependent initializations (TimelineDB) are deferred to initializeWorkers().
      */
     async initializeDatabase(services: ServiceRegistry): Promise<void> {
-        // Initialize timeline database and load central manifest
-        services.timelineDatabase.initialize();
+        // Only load the central manifest here.
+        // Timeline database initialization is deferred to avoid main thread blocking on startup.
         await services.centralManifestRepo.load(true);
     }
 }
