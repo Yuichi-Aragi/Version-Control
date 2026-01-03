@@ -82,12 +82,13 @@ export class ServiceRegistry {
         this.storageService = new StorageService(this.app);
 
         // Initialize compression manager early (used by other services)
+        // Note: Worker initialization is deferred to initializeWorkers()
         this.compressionManager = new CompressionManager();
 
         // Initialize repositories
         this.centralManifestRepo = new CentralManifestRepository(plugin, this.queueService);
-        this.noteManifestRepo = new NoteManifestRepository(this.app, this.pathService, this.queueService);
-        this.versionContentRepo = new VersionContentRepository(this.app, plugin, this.pathService, this.queueService, this.compressionManager);
+        this.noteManifestRepo = new NoteManifestRepository(this.app, this.pathService, this.queueService, this.storageService);
+        this.versionContentRepo = new VersionContentRepository(this.app, plugin, this.pathService, this.queueService, this.compressionManager, this.storageService);
         this.timelineDatabase = new TimelineDatabase();
 
         // Initialize managers (in dependency order)
@@ -120,7 +121,8 @@ export class ServiceRegistry {
             this.noteManager,
             this.versionContentRepo,
             this.eventBus,
-            this.queueService
+            this.queueService,
+            this.editHistoryManager // Injected here
         );
 
         this.diffManager = new DiffManager(
@@ -150,7 +152,8 @@ export class ServiceRegistry {
             this.versionContentRepo,
             plugin,
             this.storageService,
-            {} as AppStore
+            {} as AppStore,
+            this.noteManager
         );
 
         this.backgroundTaskManager = new BackgroundTaskManager(
@@ -189,7 +192,8 @@ export class ServiceRegistry {
             this.versionContentRepo,
             this.plugin,
             this.storageService,
-            this.store
+            this.store,
+            this.noteManager
         );
 
         this.backgroundTaskManager = new BackgroundTaskManager(
@@ -234,12 +238,47 @@ export class ServiceRegistry {
     }
 
     /**
+     * Initializes all workers sequentially with a delay to prevent main thread freezing.
+     * Priority: Compression -> Edit History -> Timeline -> Diff
+     * This should be called inside onLayoutReady.
+     */
+    async initializeWorkers(): Promise<void> {
+        const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+        if (this.plugin.isUnloading) return;
+
+        // 1. Compression Worker (Highest Priority - used by other services)
+        if (this.compressionManager) {
+            this.compressionManager.initialize();
+        }
+        await delay(100);
+
+        if (this.plugin.isUnloading) return;
+
+        // 2. Edit History Worker (High Priority - data integrity)
+        if (this.editHistoryManager) {
+            this.editHistoryManager.initialize();
+        }
+        await delay(100);
+
+        if (this.plugin.isUnloading) return;
+
+        // 3. Timeline Worker (UI Priority)
+        // Note: TimelineManager.initialize() calls timelineDatabase.initialize()
+        if (this.timelineManager) {
+            this.timelineManager.initialize();
+        }
+        await delay(100);                
+    }
+
+    /**
      * Initialize all services that require initialization.
+     * @deprecated Use initializeWorkers() inside onLayoutReady instead.
      */
     async initializeAll(): Promise<void> {
-        this.timelineDatabase.initialize();
-        this.compressionManager.initialize();
-        this.editHistoryManager.initialize();
+        // Redirect to new method for backward compatibility, though this loses the benefit of onLayoutReady
+        // if called synchronously.
+        await this.initializeWorkers();
     }
 
     /**
