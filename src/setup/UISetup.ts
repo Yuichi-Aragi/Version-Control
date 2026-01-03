@@ -80,7 +80,8 @@ export function registerCommands(plugin: Plugin, store: AppStore): void {
 
 /**
  * Helper function to activate the main view and dispatch the initialization thunk.
- * This logic was previously in the main plugin class.
+ * Implements 2025 patterns for handling Deferred Views and optimizing layout performance.
+ * 
  * @param plugin The plugin instance.
  * @param store The application state store.
  */
@@ -101,22 +102,26 @@ async function activateViewAndDispatch(plugin: Plugin, store: AppStore) {
         }
     }
     
-    // Dispatch the initialization thunk. It will use the provided leaf as context,
-    // or determine the context itself if the leaf is null.
-    store.dispatch(thunks.initializeView(contextLeaf || undefined));
+    // PERF: Defer initialization to allow the UI to paint the view transition first.
+    // This is especially important when opening the sidebar, as sync dispatch
+    // could cause a frame drop during the animation.
+    window.requestIdleCallback(() => {
+        store.dispatch(thunks.initializeView(contextLeaf || undefined));
+    }, { timeout: 1000 });
 
     // Determine the target window (document) based on the currently active UI context.
-    // This ensures that if the user is in a popout window, we target that window
-    // instead of defaulting to the main window.
     const activeLeaf = plugin.app.workspace.getLeaf(false);
     const targetDocument = activeLeaf?.view.containerEl.ownerDocument ?? document;
 
     const existingLeaves = plugin.app.workspace.getLeavesOfType(VIEW_TYPE_VERSION_CONTROL);
     
     // Find a leaf that resides in the same window (document) as the active view.
+    // Note: We access containerEl which exists on DeferredView as well.
     const leafInTargetWindow = existingLeaves.find(leaf => leaf.view.containerEl.ownerDocument === targetDocument);
 
     if (leafInTargetWindow) {
+        // This handles "Deferred Views" automatically. 
+        // If the view is deferred (not instantiated), revealLeaf will hydrate it.
         plugin.app.workspace.revealLeaf(leafInTargetWindow);
     } else {
         let newLeaf: WorkspaceLeaf | null = null;
@@ -128,7 +133,6 @@ async function activateViewAndDispatch(plugin: Plugin, store: AppStore) {
         } else {
             // Popout Window: Sidebars are often not available or behave differently.
             // We create a vertical split to the right of the active leaf to mimic the sidebar behavior.
-            // 'split' creates a new leaf adjacent to the currently active leaf.
             newLeaf = plugin.app.workspace.getLeaf('split', 'vertical');
         }
 
