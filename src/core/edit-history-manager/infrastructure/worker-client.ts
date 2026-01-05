@@ -1,6 +1,6 @@
 import type { EditWorkerApi } from '@/types';
-import { WorkerManager, WorkerManagerError, type WorkerHealthStats } from '@/workers';
-import type { OperationMetadata, EditHistoryErrorCode } from '@/types';
+import { WorkerManager, WorkerManagerError } from '@/workers';
+import type { EditHistoryErrorCode, OperationMetadata } from '@/types';
 import type { Remote } from 'comlink';
 
 // Injected by esbuild define
@@ -13,64 +13,62 @@ export type WorkerClient = EditWorkerManager;
 
 /**
  * Specialized worker manager for the Edit History Worker.
- * Provides lazy initialization with ensureWorker() pattern.
  */
 export class EditWorkerManager extends WorkerManager<EditWorkerApi> {
     constructor() {
         super({
             workerString: typeof editHistoryWorkerString !== 'undefined' ? editHistoryWorkerString : '',
             workerName: 'Edit History Worker',
-            validateOnInit: false, // Edit worker validation happens on first operation
+            validateOnInit: false,
             maxConsecutiveErrors: 3,
             errorResetTime: 60000,
         });
     }
 
     /**
-     * Ensures the worker is initialized and ready for use.
-     * Provides lazy initialization with proper error handling.
-     * @returns The worker proxy for making API calls
-     * @throws EditHistoryError if worker is terminated or unavailable
+     * Override initialize to wrap errors in EditHistoryWorkerError
      */
-    public override ensureWorker(): Remote<EditWorkerApi> {
+    public override async initializeAsync(): Promise<void> {
         try {
-            return super.ensureWorker();
+            await super.initializeAsync();
         } catch (error) {
-            if (error instanceof WorkerManagerError) {
-                throw new EditHistoryWorkerError(
-                    error.message,
-                    'WORKER_UNAVAILABLE',
-                    undefined,
-                    error
-                );
-            }
-            throw error;
+            throw this.wrapError(error);
         }
     }
 
     /**
-     * Initializes the worker synchronously.
-     * @throws EditHistoryError if worker code is missing or initialization fails
+     * Override execute to wrap errors in EditHistoryWorkerError
      */
-    public override initialize(): void {
+    public override async execute<T>(
+        operation: (api: Remote<EditWorkerApi>) => Promise<T> | T,
+        options: { timeout?: number; retry?: boolean; retryAttempts?: number } = {}
+    ): Promise<T> {
         try {
-            super.initialize();
+            return await super.execute(operation, options);
         } catch (error) {
-            if (error instanceof WorkerManagerError) {
-                throw new EditHistoryWorkerError(
-                    error.message,
-                    'WORKER_UNAVAILABLE',
-                    undefined,
-                    error
-                );
-            }
-            throw error;
+            throw this.wrapError(error);
         }
+    }
+
+    /**
+     * Helper to wrap generic worker errors into domain-specific errors
+     */
+    private wrapError(error: unknown): Error {
+        if (error instanceof EditHistoryWorkerError) return error;
+        
+        const message = error instanceof Error ? error.message : String(error);
+        let code: EditHistoryErrorCode = 'WORKER_UNAVAILABLE';
+        
+        if (error instanceof WorkerManagerError) {
+            if (error.code === 'OPERATION_TIMEOUT') code = 'OPERATION_TIMEOUT';
+            else if (error.code === 'INIT_FAILED') code = 'WORKER_UNAVAILABLE';
+        }
+
+        return new EditHistoryWorkerError(message, code, undefined, error);
     }
 
     /**
      * Checks if the worker is available (initialized and not terminated).
-     * @returns true if worker is available, false otherwise
      */
     public isAvailable(): boolean {
         return this.isActive();
@@ -110,88 +108,5 @@ export class EditHistoryWorkerError extends Error {
             default:
                 return false;
         }
-    }
-}
-
-/**
- * Health statistics for the edit history worker.
- */
-export interface EditWorkerHealthStats extends WorkerHealthStats {
-    pendingOperations: number;
-}
-
-/**
- * Worker health monitoring for edit history operations.
- */
-export class EditWorkerHealthMonitor {
-    private consecutiveErrors = 0;
-    private lastErrorTime = 0;
-    private operationCount = 0;
-    private totalOperationTime = 0;
-    private pendingOperations = 0;
-    private readonly maxConsecutiveErrors = 3;
-    private readonly errorResetTime = 60000; // 1 minute
-
-    /**
-     * Records a pending operation start.
-     */
-    recordPending(): void {
-        this.pendingOperations++;
-    }
-
-    /**
-     * Records operation completion.
-     */
-    recordComplete(): void {
-        this.pendingOperations = Math.max(0, this.pendingOperations - 1);
-    }
-
-    /**
-     * Records an operation with duration.
-     */
-    recordOperation(duration: number): void {
-        this.operationCount++;
-        this.totalOperationTime += duration;
-        this.recordComplete();
-
-        if (Date.now() - this.lastErrorTime > this.errorResetTime) {
-            this.consecutiveErrors = 0;
-        }
-    }
-
-    /**
-     * Records an error.
-     */
-    recordError(): void {
-        this.consecutiveErrors++;
-        this.lastErrorTime = Date.now();
-        this.recordComplete();
-    }
-
-    /**
-     * Gets the average operation time.
-     */
-    getAverageOperationTime(): number {
-        return this.operationCount > 0 ? this.totalOperationTime / this.operationCount : 0;
-    }
-
-    /**
-     * Checks if the worker is healthy.
-     */
-    isHealthy(): boolean {
-        return this.consecutiveErrors < this.maxConsecutiveErrors;
-    }
-
-    /**
-     * Gets the current health statistics.
-     */
-    getStats(): EditWorkerHealthStats {
-        return {
-            consecutiveErrors: this.consecutiveErrors,
-            operationCount: this.operationCount,
-            averageOperationTime: this.getAverageOperationTime(),
-            isHealthy: this.isHealthy(),
-            pendingOperations: this.pendingOperations,
-        };
     }
 }
