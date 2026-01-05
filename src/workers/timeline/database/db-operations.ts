@@ -8,20 +8,9 @@ import { getDb } from '@/workers/timeline/database/timeline-db';
 import { validateStoredEventStructure } from '@/workers/timeline/utils/validation';
 
 /**
- * Database CRUD Operations
- *
- * This module provides database operations for timeline events,
- * including queries, inserts, updates, and deletions.
+ * Database CRUD Operations with Resilience Wrapper
  */
 
-/**
- * Retrieves all timeline events for a specific note, branch, and source.
- *
- * @param noteId - The note identifier
- * @param branchName - The branch name
- * @param source - The source type ('version' or 'edit')
- * @returns Array of stored timeline events, sorted by timestamp
- */
 export async function getTimelineEvents(
     noteId: string,
     branchName: string,
@@ -30,36 +19,29 @@ export async function getTimelineEvents(
     const db = getDb();
 
     try {
-        const storedEvents = await db.timeline
-            .where('[noteId+branchName+source]')
-            .equals([noteId, branchName, source])
-            .sortBy('timestamp');
-
-        return storedEvents;
+        return await db.execute(async () => {
+            return await db.timeline
+                .where('[noteId+branchName+source]')
+                .equals([noteId, branchName, source])
+                .sortBy('timestamp');
+        }, 'getTimelineEvents');
     } catch (error) {
         console.error("VC Worker: getTimelineEvents failed", error);
-        // Return empty array on failure for graceful degradation
         return [];
     }
 }
 
-/**
- * Stores or updates a timeline event in the database.
- *
- * @param event - The timeline event to store
- * @returns The stored event with its database ID
- */
 export async function putTimelineEvent(
     event: StoredTimelineEvent
 ): Promise<StoredTimelineEvent> {
     const db = getDb();
 
     try {
-        // Validate before storage
         validateStoredEventStructure(event);
 
-        // Store the event
-        await db.timeline.put(event);
+        await db.execute(async () => {
+            await db.timeline.put(event);
+        }, 'putTimelineEvent');
 
         return event;
     } catch (error) {
@@ -72,15 +54,6 @@ export async function putTimelineEvent(
     }
 }
 
-/**
- * Finds an existing event by its unique compound key.
- *
- * @param noteId - The note identifier
- * @param branchName - The branch name
- * @param source - The source type
- * @param toVersionId - The version identifier
- * @returns The existing event or undefined if not found
- */
 export async function findExistingEvent(
     noteId: string,
     branchName: string,
@@ -90,26 +63,18 @@ export async function findExistingEvent(
     const db = getDb();
 
     try {
-        const existing = await db.timeline
-            .where('[noteId+branchName+source+toVersionId]')
-            .equals([noteId, branchName, source, toVersionId])
-            .first();
-
-        return existing;
+        return await db.execute(async () => {
+            return await db.timeline
+                .where('[noteId+branchName+source+toVersionId]')
+                .equals([noteId, branchName, source, toVersionId])
+                .first();
+        }, 'findExistingEvent');
     } catch (error) {
         console.error("VC Worker: findExistingEvent failed", error);
         return undefined;
     }
 }
 
-/**
- * Updates metadata for timeline events matching the criteria.
- *
- * @param noteId - The note identifier
- * @param versionId - The version identifier
- * @param data - The metadata to update
- * @returns The number of events updated
- */
 export async function updateEventMetadata(
     noteId: string,
     versionId: string,
@@ -118,29 +83,27 @@ export async function updateEventMetadata(
     const db = getDb();
 
     try {
-        const count = await db.timeline
-            .where({ noteId, toVersionId: versionId })
-            .modify(event => {
-                // Handle Name
-                if (data.name !== undefined) {
-                    if (data.name.trim() === '') {
-                        delete event.toVersionName;
-                    } else {
-                        event.toVersionName = data.name;
+        return await db.execute(async () => {
+            return await db.timeline
+                .where({ noteId, toVersionId: versionId })
+                .modify(event => {
+                    if (data.name !== undefined) {
+                        if (data.name.trim() === '') {
+                            delete event.toVersionName;
+                        } else {
+                            event.toVersionName = data.name;
+                        }
                     }
-                }
 
-                // Handle Description
-                if (data.description !== undefined) {
-                    if (data.description.trim() === '') {
-                        delete event.toVersionDescription;
-                    } else {
-                        event.toVersionDescription = data.description;
+                    if (data.description !== undefined) {
+                        if (data.description.trim() === '') {
+                            delete event.toVersionDescription;
+                        } else {
+                            event.toVersionDescription = data.description;
+                        }
                     }
-                }
-            });
-
-        return count;
+                });
+        }, 'updateEventMetadata');
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new WorkerError(
@@ -151,15 +114,6 @@ export async function updateEventMetadata(
     }
 }
 
-/**
- * Deletes a timeline event by its unique compound key.
- *
- * @param noteId - The note identifier
- * @param branchName - The branch name
- * @param source - The source type
- * @param versionId - The version identifier
- * @returns The number of events deleted
- */
 export async function deleteEventByVersion(
     noteId: string,
     branchName: string,
@@ -169,12 +123,12 @@ export async function deleteEventByVersion(
     const db = getDb();
 
     try {
-        const count = await db.timeline
-            .where('[noteId+branchName+source+toVersionId]')
-            .equals([noteId, branchName, source, versionId])
-            .delete();
-
-        return count;
+        return await db.execute(async () => {
+            return await db.timeline
+                .where('[noteId+branchName+source+toVersionId]')
+                .equals([noteId, branchName, source, versionId])
+                .delete();
+        }, 'deleteEventByVersion');
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new WorkerError(
@@ -185,14 +139,6 @@ export async function deleteEventByVersion(
     }
 }
 
-/**
- * Clears timeline events for a specific note and optionally a specific source.
- * Uses batch deletion to prevent transaction overflow.
- *
- * @param noteId - The note identifier
- * @param source - Optional source type filter
- * @returns Total number of events deleted
- */
 export async function clearTimelineForNote(
     noteId: string,
     source?: 'version' | 'edit'
@@ -200,39 +146,35 @@ export async function clearTimelineForNote(
     const db = getDb();
 
     try {
-        let totalDeleted = 0;
+        return await db.execute(async () => {
+            let totalDeleted = 0;
 
-        await db.transaction('rw', db.timeline, async () => {
-            if (source) {
-                // Batch delete with limit to prevent transaction overflow
-                let batchDeleted: number;
+            await db.transaction('rw', db.timeline, async () => {
+                if (source) {
+                    let batchDeleted: number;
+                    do {
+                        batchDeleted = await db.timeline
+                            .where('[noteId+branchName+source]')
+                            .between([noteId, Dexie.minKey, source], [noteId, Dexie.maxKey, source])
+                            .limit(BATCH_DELETE_LIMIT)
+                            .delete();
+                        totalDeleted += batchDeleted;
+                    } while (batchDeleted === BATCH_DELETE_LIMIT);
+                } else {
+                    let batchDeleted: number;
+                    do {
+                        batchDeleted = await db.timeline
+                            .where('noteId')
+                            .equals(noteId)
+                            .limit(BATCH_DELETE_LIMIT)
+                            .delete();
+                        totalDeleted += batchDeleted;
+                    } while (batchDeleted === BATCH_DELETE_LIMIT);
+                }
+            });
 
-                do {
-                    batchDeleted = await db.timeline
-                        .where('[noteId+branchName+source]')
-                        .between([noteId, Dexie.minKey, source], [noteId, Dexie.maxKey, source])
-                        .limit(BATCH_DELETE_LIMIT)
-                        .delete();
-
-                    totalDeleted += batchDeleted;
-                } while (batchDeleted === BATCH_DELETE_LIMIT);
-            } else {
-                // Clear all events for note
-                let batchDeleted: number;
-
-                do {
-                    batchDeleted = await db.timeline
-                        .where('noteId')
-                        .equals(noteId)
-                        .limit(BATCH_DELETE_LIMIT)
-                        .delete();
-
-                    totalDeleted += batchDeleted;
-                } while (batchDeleted === BATCH_DELETE_LIMIT);
-            }
-        });
-
-        return totalDeleted;
+            return totalDeleted;
+        }, 'clearTimelineForNote');
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new WorkerError(
@@ -243,28 +185,24 @@ export async function clearTimelineForNote(
     }
 }
 
-/**
- * Clears all timeline events from the database.
- * Uses batch deletion to prevent memory issues.
- *
- * @returns Total number of events deleted
- */
 export async function clearAllTimeline(): Promise<number> {
     const db = getDb();
 
     try {
-        let totalDeleted = 0;
-        let batchDeleted: number;
+        return await db.execute(async () => {
+            let totalDeleted = 0;
+            let batchDeleted: number;
 
-        do {
-            batchDeleted = await db.timeline
-                .limit(BATCH_DELETE_LIMIT)
-                .delete();
+            do {
+                batchDeleted = await db.timeline
+                    .limit(BATCH_DELETE_LIMIT)
+                    .delete();
 
-            totalDeleted += batchDeleted;
-        } while (batchDeleted === BATCH_DELETE_LIMIT);
+                totalDeleted += batchDeleted;
+            } while (batchDeleted === BATCH_DELETE_LIMIT);
 
-        return totalDeleted;
+            return totalDeleted;
+        }, 'clearAllTimeline');
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new WorkerError(
