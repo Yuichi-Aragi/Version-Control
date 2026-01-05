@@ -25,23 +25,24 @@ export class PluginLoader {
         this.plugin.queuedChangelogRequest = null; // Reset queue on every load
 
         try {
-            // Load settings with enhanced error handling
+            // 1. Load settings with enhanced error handling
             const settingsInitializer = new SettingsInitializer(this.plugin);
             await settingsInitializer.loadSettings();
+            
+            if (this.plugin.isUnloading) return;
 
-            // Initialize service registry (without store for now)
+            // 2. Initialize service registry (without store for now)
             const registryInitializer = new ServiceRegistryInitializer(this.plugin);
             const services = registryInitializer.initializeServices();
 
             // Store reference to service registry
             this.plugin.services = services;
 
-            // Create store with properly loaded settings (NOT in constructor)
-            // This ensures state.settings is populated before any UI subscribes
+            // 3. Create store with properly loaded settings
             const initialState = getInitialState(this.plugin.settings);
             services.store = createAppStore(initialState, services);
 
-            // Finalize initialization (update services that depend on store)
+            // 4. Finalize initialization (update services that depend on store)
             services.finalizeInitialization();
 
             // Store references to frequently used services
@@ -52,47 +53,64 @@ export class PluginLoader {
             // Subscribe to store changes
             this.plugin.register(this.plugin.store.subscribe(this.plugin.handleStoreChange.bind(this.plugin)));
 
-            // Initialize UI components
+            // 5. Initialize UI components
             const uiInitializer = new UIInitializer(this.plugin, services.store);
             uiInitializer.registerUIComponents();
 
-            // Initialize core managers (Non-worker dependent)
-            services.cleanupManager.initialize();
+            // 6. Initialize core managers (Non-worker dependent)
+            try {
+                services.cleanupManager.initialize();
+            } catch (e) {
+                console.error("Version Control: Cleanup manager failed to initialize (non-fatal)", e);
+            }
             
-            // NOTE: Worker-dependent managers (Timeline, Compression, EditHistory) are initialized
-            // sequentially inside onLayoutReady to prevent main thread freezing during startup.
-
             // Add child components for automatic cleanup
             this.plugin.addChild(services.cleanupManager);
             this.plugin.addChild(services.uiService);
             this.plugin.addChild(services.diffManager);
             this.plugin.addChild(services.backgroundTaskManager);
 
-            // Initialize database (Manifests only)
+            // 7. Initialize database (Manifests only)
             await registryInitializer.initializeDatabase(services);
 
-            // Set up event listeners
+            // 8. Set up event listeners
             const eventRegistrar = new EventRegistrar(this.plugin, services.store, services.eventBus);
             eventRegistrar.setupEventListeners();
 
-            // Initialize view and workers when layout is ready
-            this.plugin.app.workspace.onLayoutReady(async () => {
+            // 9. Initialize view and workers when layout is ready
+            // We use onLayoutReady without a timeout to ensure Obsidian is fully initialized.
+            this.plugin.app.workspace.onLayoutReady(() => {
                 if (this.plugin.isUnloading) return;
 
-                // Defer execution to allow the sidebar and layout to stabilize.
-                // This prevents UI jank and ensures the view is ready for interaction.
-                await new Promise(resolve => setTimeout(resolve, 500));
+                // PERF: Use requestIdleCallback to defer heavy initialization.
+                // This allows the main thread to handle immediate UI rendering (like sidebar animations)
+                // before we consume resources for worker startup and view hydration.
+                // We provide a timeout to ensure it runs eventually even if the browser is busy.
+                const defer = window.requestIdleCallback || ((cb) => setTimeout(cb, 1));
                 
-                if (this.plugin.isUnloading) return;
-                
-                // Initialize workers sequentially to prevent UI freeze
-                // Priority: Compression -> Edit History -> Timeline -> Diff
-                await services.initializeWorkers();
+                defer(async () => {
+                    if (this.plugin.isUnloading) return;
+                    
+                    // Initialize workers sequentially to prevent UI freeze
+                    // Priority: Compression -> Edit History -> Timeline -> Diff
+                    try {
+                        await services.initializeWorkers();
+                    } catch (e) {
+                        console.error("Version Control: Worker initialization failed (partial)", e);
+                        // We continue, as some features might still work
+                    }
 
-                if (this.plugin.isUnloading) return;
+                    if (this.plugin.isUnloading) return;
 
-                uiInitializer.initializeView();
-                uiInitializer.checkForUpdates();
+                    // Attempt to initialize view, but don't crash if it fails
+                    try {
+                        uiInitializer.initializeView();
+                    } catch (e) {
+                        console.warn("Version Control: View initialization deferred/failed (non-fatal)", e);
+                    }
+
+                    uiInitializer.checkForUpdates();
+                }, { timeout: 2000 }); // Force execution within 2s
             });
 
             this.plugin.setInitialized(true);
@@ -100,15 +118,19 @@ export class PluginLoader {
         } catch (error) {
             console.error("Version Control: CRITICAL: Plugin failed to load.", error);
             const message = error instanceof Error ? error.message : "Unknown error during loading";
+            
+            // Only show notice if we really can't recover
             new Notice(`Version control plugin failed to load. Please check the console for details.\nError: ${message}`, 0);
 
             // Attempt to report error to store if available
             if (this.plugin.store) {
-                this.plugin.store.dispatch(appSlice.actions.reportError({
-                    title: "Plugin load failed",
-                    message: "The version control plugin encountered a critical error during loading.",
-                    details: message,
-                }));
+                try {
+                    this.plugin.store.dispatch(appSlice.actions.reportError({
+                        title: "Plugin load failed",
+                        message: "The version control plugin encountered a critical error during loading.",
+                        details: message,
+                    }));
+                } catch (e) { /* Ignore store dispatch errors during crash */ }
             }
 
             // Ensure cleanup if initialization fails
