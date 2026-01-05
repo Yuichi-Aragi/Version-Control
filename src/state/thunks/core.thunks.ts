@@ -166,12 +166,27 @@ export const initializeView = createAsyncThunk<
                     source: 'none' 
                 }));
             } else {
+                // Silent fallback: If no file is open, just clear the view.
                 dispatch(appSlice.actions.clearActiveNote());
+                return;
             }
             
             const contextVersion = getState().app.contextVersion;
 
-            const activeNoteInfo = await noteManager.getActiveNoteState(targetLeaf);
+            // Defensive: noteManager might throw if file system is weird
+            let activeNoteInfo;
+            try {
+                activeNoteInfo = await noteManager.getActiveNoteState(targetLeaf);
+            } catch (e) {
+                console.warn("Version Control: Failed to get active note state", e);
+                // Fallback to basic file info
+                if (initialFile) {
+                    activeNoteInfo = { file: initialFile, noteId: null, source: 'none' as const };
+                } else {
+                    dispatch(appSlice.actions.clearActiveNote());
+                    return;
+                }
+            }
             
             if (activeNoteInfo.file && noteManager.isPendingDeviation(activeNoteInfo.file.path)) {
                 return rejectWithValue('Pending deviation creation');
