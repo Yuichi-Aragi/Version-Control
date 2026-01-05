@@ -21,7 +21,7 @@ export const ErrorDisplay: FC<ErrorDisplayProps> = ({ error }) => {
         // the view will eventually recover without user intervention.
         const retryTimer = setTimeout(() => {
             handleRetry();
-        }, 3000); // Retry every 3 seconds
+        }, 1000); // Retry every 3 seconds
 
         return () => clearTimeout(retryTimer);
     }, [dispatch]);
