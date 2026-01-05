@@ -16,8 +16,7 @@ export class ReadOperation {
   async getEditContent(noteId: string, editId: string, branchName?: string): Promise<string | null> {
     return this.queueService.add(
         `edit:${noteId}`,
-        async () => {
-            const proxy = this.workerClient.ensureWorker();
+        () => this.workerClient.execute(async (proxy) => {
             let targetBranch = branchName;
             
             if (targetBranch === undefined) {
@@ -38,7 +37,7 @@ export class ReadOperation {
             if (buffer === null) return null;
 
             return this.decoder.decode(buffer);
-        },
+        }, { timeout: 5000, retry: true }),
         { priority: TaskPriority.NORMAL }
     );
   }
@@ -46,10 +45,10 @@ export class ReadOperation {
   async getEditManifest(noteId: string): Promise<NoteManifest | null> {
     return this.queueService.add(
         `edit:${noteId}`,
-        async () => {
-            const proxy = this.workerClient.ensureWorker();
-            return proxy.getEditManifest(noteId);
-        },
+        () => this.workerClient.execute(
+            (proxy) => proxy.getEditManifest(noteId),
+            { timeout: 5000, retry: true }
+        ),
         { priority: TaskPriority.NORMAL }
     );
   }
@@ -57,8 +56,7 @@ export class ReadOperation {
   async getEditHistory(noteId: string): Promise<VersionHistoryEntry[]> {
     return this.queueService.add(
         `edit:${noteId}`,
-        async () => {
-            const proxy = this.workerClient.ensureWorker();
+        () => this.workerClient.execute(async (proxy) => {
             const manifest = await proxy.getEditManifest(noteId);
             if (manifest === null) return [];
 
@@ -91,7 +89,7 @@ export class ReadOperation {
             }));
 
             return orderBy(history, ['versionNumber'], ['desc']);
-        },
+        }, { timeout: 5000, retry: true }),
         { priority: TaskPriority.NORMAL }
     );
   }

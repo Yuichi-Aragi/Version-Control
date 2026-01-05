@@ -21,8 +21,7 @@ export class DeleteOperation {
   async deleteEditEntry(noteId: string, editId: string): Promise<void> {
     return this.queueService.add(
         `edit:${noteId}`,
-        async () => {
-            const proxy = this.workerClient.ensureWorker();
+        () => this.workerClient.execute(async (proxy) => {
             const existingManifest = await proxy.getEditManifest(noteId);
             if (!existingManifest) throw new Error('Manifest not found');
 
@@ -42,7 +41,7 @@ export class DeleteOperation {
                     this.persistence.diskWriter.schedule(noteId, branchName);
                 }
             }
-        },
+        }, { timeout: 10000, retry: true }),
         { priority: TaskPriority.HIGH }
     );
   }
@@ -50,29 +49,24 @@ export class DeleteOperation {
   async deleteEdit(noteId: string, branchName: string, editId: string): Promise<void> {
     return this.queueService.add(
         `edit:${noteId}`,
-        async () => {
-            const proxy = this.workerClient.ensureWorker();
+        () => this.workerClient.execute(async (proxy) => {
             await proxy.deleteEdit(noteId, branchName, editId);
             
-            // We need manifest to check persistence settings
             const manifest = await proxy.getEditManifest(noteId);
             if (manifest && await this.shouldPersist(manifest, branchName)) {
                 this.persistence.diskWriter.schedule(noteId, branchName);
             }
-        },
+        }, { timeout: 10000, retry: true }),
         { priority: TaskPriority.HIGH }
     );
   }
 
   async deleteNoteHistory(noteId: string): Promise<void> {
-    // IMMEDIATE ACTION: Cancel any pending persistence for this note to prevent race conditions
-    // where a scheduled write recreates the folder after we delete it.
     this.persistence.diskWriter.cancelNote(noteId);
 
     return this.queueService.add(
         `edit:${noteId}`,
-        async () => {
-            const proxy = this.workerClient.ensureWorker();
+        () => this.workerClient.execute(async (proxy) => {
             await proxy.deleteNoteHistory(noteId);
 
             const noteDbPath = this.pathService.getNoteDbPath(noteId);
@@ -82,19 +76,17 @@ export class DeleteOperation {
             if (exists) {
               await this.app.vault.adapter.rmdir(branchesPath, true);
             }
-        },
+        }, { timeout: 20000, retry: true }),
         { priority: TaskPriority.CRITICAL }
     );
   }
 
   async deleteBranch(noteId: string, branchName: string): Promise<void> {
-    // IMMEDIATE ACTION: Cancel pending persistence for this branch
     this.persistence.diskWriter.cancel(noteId, branchName);
 
     return this.queueService.add(
         `edit:${noteId}`,
-        async () => {
-            const proxy = this.workerClient.ensureWorker();
+        () => this.workerClient.execute(async (proxy) => {
             await proxy.deleteBranch(noteId, branchName);
 
             const branchPath = this.pathService.getBranchPath(noteId, branchName);
@@ -103,7 +95,7 @@ export class DeleteOperation {
             if (exists) {
               await this.app.vault.adapter.rmdir(branchPath, true);
             }
-        },
+        }, { timeout: 15000, retry: true }),
         { priority: TaskPriority.HIGH }
     );
   }

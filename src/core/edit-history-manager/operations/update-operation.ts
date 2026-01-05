@@ -17,8 +17,7 @@ export class UpdateOperation {
   async updateEditMetadata(noteId: string, editId: string, name?: string, description?: string): Promise<void> {
     return this.queueService.add(
         `edit:${noteId}`,
-        async () => {
-            const proxy = this.workerClient.ensureWorker();
+        () => this.workerClient.execute(async (proxy) => {
             const existingManifest = await proxy.getEditManifest(noteId);
             if (!existingManifest) throw new Error('Manifest not found');
 
@@ -31,7 +30,6 @@ export class UpdateOperation {
                         if (name) editData.name = name;
                         else delete editData.name;
                     }
-                    
                     if (description !== undefined) {
                         if (description) editData.description = description;
                         else delete editData.description;
@@ -46,7 +44,7 @@ export class UpdateOperation {
                     this.persistence.diskWriter.schedule(noteId, updatedManifest.currentBranch);
                 }
             }
-        },
+        }, { timeout: 5000, retry: true }),
         { priority: TaskPriority.NORMAL }
     );
   }
@@ -54,10 +52,9 @@ export class UpdateOperation {
   async renameEdit(noteId: string, oldEditId: string, newEditId: string): Promise<void> {
     return this.queueService.add(
         `edit:${noteId}`,
-        async () => {
+        () => this.workerClient.execute(async (proxy) => {
             if (oldEditId === newEditId) return;
             
-            const proxy = this.workerClient.ensureWorker();
             await proxy.renameEdit(noteId, oldEditId, newEditId);
 
             const manifest = await proxy.getEditManifest(noteId);
@@ -71,7 +68,7 @@ export class UpdateOperation {
                     }
                 }
             }
-        },
+        }, { timeout: 10000, retry: true }),
         { priority: TaskPriority.NORMAL }
     );
   }
@@ -79,10 +76,9 @@ export class UpdateOperation {
   async renameNote(oldNoteId: string, newNoteId: string, newPath: string): Promise<void> {
     return this.queueService.add(
         [`edit:${oldNoteId}`, `edit:${newNoteId}`],
-        async () => {
+        () => this.workerClient.execute(async (proxy) => {
             if (oldNoteId === newNoteId) return;
             
-            const proxy = this.workerClient.ensureWorker();
             await proxy.renameNote(oldNoteId, newNoteId, newPath);
 
             const newManifest = await proxy.getEditManifest(newNoteId);
@@ -93,7 +89,7 @@ export class UpdateOperation {
                     }
                 }
             }
-        },
+        }, { timeout: 30000, retry: true }),
         { priority: TaskPriority.CRITICAL }
     );
   }
@@ -101,8 +97,7 @@ export class UpdateOperation {
   async updateNotePath(noteId: string, newPath: string): Promise<void> {
     return this.queueService.add(
         `edit:${noteId}`,
-        async () => {
-            const proxy = this.workerClient.ensureWorker();
+        () => this.workerClient.execute(async (proxy) => {
             await proxy.updateNotePath(noteId, newPath);
             
             const manifest = await proxy.getEditManifest(noteId);
@@ -113,7 +108,7 @@ export class UpdateOperation {
                     }
                 }
             }
-        },
+        }, { timeout: 5000, retry: true }),
         { priority: TaskPriority.NORMAL }
     );
   }
@@ -121,8 +116,7 @@ export class UpdateOperation {
   async saveEditManifest(noteId: string, manifest: NoteManifest, forcePersistence = false): Promise<void> {
     return this.queueService.add(
         `edit:${noteId}`,
-        async () => {
-            const proxy = this.workerClient.ensureWorker();
+        () => this.workerClient.execute(async (proxy) => {
             await proxy.saveEditManifest(noteId, manifest);
             
             if (manifest.currentBranch) {
@@ -130,7 +124,7 @@ export class UpdateOperation {
                     this.persistence.diskWriter.schedule(noteId, manifest.currentBranch);
                 }
             }
-        },
+        }, { timeout: 5000, retry: true }),
         { priority: TaskPriority.HIGH }
     );
   }
