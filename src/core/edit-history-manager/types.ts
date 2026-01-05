@@ -42,11 +42,9 @@ export interface EditHistoryStats {
 // Re-export for backward compatibility
 export type {
   WorkerClient,
-  EditWorkerHealthStats,
 } from './infrastructure/worker-client';
 
 export {
   EditHistoryWorkerError,
-  EditWorkerHealthMonitor,
   EditWorkerManager,
 } from './infrastructure/worker-client';
