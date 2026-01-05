@@ -20,10 +20,13 @@ export default class VersionControlPlugin extends Plugin {
     public backgroundTaskManager!: BackgroundTaskManager;
     public debouncedLeafChangeHandler?: Debouncer<[WorkspaceLeaf | null], void>;
     public autoSaveDebouncers = new Map<string, DebouncerInfo>();
+    
+    // Volatile state guards
     private _isUnloading: boolean = false;
-    public settings!: VersionControlSettings;
     private _initialized: boolean = false;
     private _unloadPromise: Promise<void> | null = null;
+    
+    public settings!: VersionControlSettings;
 
     /** Holds a request to show the changelog panel if the UI is not ready. */
     public queuedChangelogRequest: QueuedChangelogRequest | null = null;
@@ -36,7 +39,8 @@ export default class VersionControlPlugin extends Plugin {
     // Setter for isUnloading with validation
     public set isUnloading(value: boolean) {
         if (typeof value !== 'boolean') {
-            throw new TypeError('isUnloading must be a boolean');
+            console.warn("Version Control: Invalid value passed to isUnloading setter", value);
+            return;
         }
         this._isUnloading = value;
     }
@@ -52,18 +56,28 @@ export default class VersionControlPlugin extends Plugin {
     }
 
     override async onload() {
+        // Defensive: Reset critical flags on load
+        this._isUnloading = false;
+        this._unloadPromise = null;
+
         const loader = new PluginLoader(this);
         await loader.load();
     }
 
     override async onunload() {
-        // Prevent multiple unload operations
+        // Idempotency: Prevent multiple unload operations
         if (this._unloadPromise) {
             return this._unloadPromise;
         }
 
+        this._isUnloading = true;
         this._unloadPromise = this.performUnload();
-        return this._unloadPromise;
+        
+        try {
+            await this._unloadPromise;
+        } catch (e) {
+            console.error("Version Control: Unload promise rejected (unexpected)", e);
+        }
     }
 
     private async performUnload(): Promise<void> {
@@ -75,34 +89,48 @@ export default class VersionControlPlugin extends Plugin {
      * Saves settings to disk with validation.
      */
     async saveSettings(): Promise<void> {
-        const settingsInitializer = new SettingsInitializer(this);
-        await settingsInitializer.saveSettings();
+        if (this.isUnloading) return;
+        
+        try {
+            const settingsInitializer = new SettingsInitializer(this);
+            await settingsInitializer.saveSettings();
+        } catch (e) {
+            console.error("Version Control: Failed to save settings", e);
+        }
     }
 
     /**
      * Handles store state changes, particularly for queued changelog requests.
      */
     public handleStoreChange(): void {
-        if (this.isUnloading || !this.queuedChangelogRequest) {
+        // Immediate guard against running logic during unload
+        if (this.isUnloading) return;
+        
+        if (!this.queuedChangelogRequest) {
             return;
         }
 
-        const currentState = this.store.getState();
+        try {
+            const currentState = this.store.getState();
 
-        const isChangelogReady = (state: AppState): boolean => {
-            if (!state) return false;
-            const isViewStable = state.status === AppStatus.INITIALIZING || state.status === AppStatus.READY || state.status === AppStatus.PLACEHOLDER || state.status === AppStatus.LOADING;
-            const isPanelAvailable = !state.panel || state.panel.type === 'changelog';
-            return isViewStable && isPanelAvailable;
-        };
+            const isChangelogReady = (state: AppState): boolean => {
+                if (!state) return false;
+                const isViewStable = state.status === AppStatus.INITIALIZING || state.status === AppStatus.READY || state.status === AppStatus.PLACEHOLDER || state.status === AppStatus.LOADING;
+                const isPanelAvailable = !state.panel || state.panel.type === 'changelog';
+                return isViewStable && isPanelAvailable;
+            };
 
-        if (isChangelogReady(currentState.app)) {
-            // Use a timeout to avoid dispatching during a dispatch cycle.
-            setTimeout(() => {
-                if (this.isUnloading) return;
-                // processQueuedChangelogRequest will clear the queue, so this only runs once per queued item.
-                this.store.dispatch(thunks.processQueuedChangelogRequest());
-            }, 0);
+            if (isChangelogReady(currentState.app)) {
+                // Use a timeout to avoid dispatching during a dispatch cycle.
+                // We use window.setTimeout to ensure it's a standard macrotask.
+                window.setTimeout(() => {
+                    if (this.isUnloading) return;
+                    // processQueuedChangelogRequest will clear the queue, so this only runs once per queued item.
+                    this.store.dispatch(thunks.processQueuedChangelogRequest());
+                }, 0);
+            }
+        } catch (error) {
+            console.error("Version Control: Error handling store change", error);
         }
     }
 
@@ -112,8 +140,15 @@ export default class VersionControlPlugin extends Plugin {
     public cancelDebouncedOperations(): void {
         try {
             this.debouncedLeafChangeHandler?.cancel();
-            this.autoSaveDebouncers.forEach(info => info.debouncer.cancel());
-            this.autoSaveDebouncers.clear();
+            
+            if (this.autoSaveDebouncers) {
+                this.autoSaveDebouncers.forEach(info => {
+                    try {
+                        info.debouncer?.cancel();
+                    } catch (e) { /* Ignore individual cancellation failures */ }
+                });
+                this.autoSaveDebouncers.clear();
+            }
         } catch (error) {
             console.error("Version Control: Error cancelling debounced operations", error);
         }
@@ -153,7 +188,13 @@ export default class VersionControlPlugin extends Plugin {
                 if (queueService) queueService.clearAll();
                 
                 // Explicitly terminate EditHistoryManager to clear IDB cache and stop worker
-                if (editHistoryManager) await editHistoryManager.terminate();
+                if (editHistoryManager) {
+                    try {
+                        await editHistoryManager.terminate();
+                    } catch (e) {
+                        console.warn("Version Control: EditHistoryManager termination warning", e);
+                    }
+                }
             }
         } catch (error) {
             // This might happen if the services failed to initialize or were already cleaned up.
