@@ -26,6 +26,10 @@ export interface WorkerHealthStats {
     averageOperationTime: number;
     /** Whether the worker is considered healthy */
     isHealthy: boolean;
+    /** Timestamp of the last error */
+    lastErrorTime: number;
+    /** Timestamp of the last successful operation */
+    lastSuccessTime: number;
 }
 
 /**
@@ -64,7 +68,9 @@ export type WorkerErrorCode =
     | 'DB_CLEAR_FAILED'
     | 'DB_GLOBAL_CLEAR_FAILED'
     | 'LOCK_TIMEOUT'
-    | 'COMPRESSION_FAILED';
+    | 'COMPRESSION_FAILED'
+    | 'WORKER_CRASHED'
+    | 'WORKER_DISCONNECTED';
 
 /**
  * Common worker initialization options.
@@ -76,6 +82,20 @@ export interface WorkerInitOptions {
     maxConsecutiveErrors?: number;
     /** Time window in ms to reset error count */
     errorResetTime?: number;
+}
+
+/**
+ * Options for executing a worker operation.
+ */
+export interface WorkerExecutionOptions {
+    /** Timeout in milliseconds for the operation. Default: 30000ms */
+    timeout?: number;
+    /** Whether to automatically retry on failure. Default: true */
+    retry?: boolean;
+    /** Number of retry attempts. Default: 1 */
+    retryAttempts?: number;
+    /** Whether to force a worker restart before execution. Default: false */
+    forceRestart?: boolean;
 }
 
 /**

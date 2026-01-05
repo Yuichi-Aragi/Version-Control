@@ -1,5 +1,5 @@
 import { wrap, releaseProxy, transfer, type Remote } from 'comlink';
-import type { WorkerHealthStats } from './types';
+import type { WorkerHealthStats, WorkerExecutionOptions } from './types';
 
 /**
  * Configuration options for WorkerManager initialization.
@@ -18,53 +18,30 @@ export interface WorkerManagerConfig {
 }
 
 /**
- * Result of worker initialization.
- */
-export interface WorkerInitResult {
-    success: boolean;
-    error?: Error;
-}
-
-/**
  * Centralized worker lifecycle manager that eliminates code duplication
- * across multiple worker clients (diff, compression, timeline, edit-history).
- * 
- * Performance optimizations:
- * - Blob URL reuse (no repeated URL.createObjectURL calls)
- * - Efficient proxy management with Comlink
- * - Minimized state checks in hot paths
- * - Transferable-aware operations for zero-copy data transfer
+ * across multiple worker clients.
  * 
  * Features:
- * - Unified initialization and termination
- * - Health monitoring with configurable thresholds
- * - Lazy initialization with ensureWorker() pattern
- * - Worker validation on startup
- * - Proper resource cleanup (Blob URLs, proxies, workers)
- * - Error tracking and recovery support
- * 
- * @example
- * ```typescript
- * const manager = new WorkerManager({
- *     workerString: diffWorkerString,
- *     workerName: 'Diff Worker',
- *     validateOnInit: true
- * });
- * 
- * const proxy = manager.ensureWorker();
- * const result = await proxy.computeDiff('lines', content1, content2);
- * ```
+ * - Robust error handling and automatic recovery
+ * - Timeout management
+ * - Zero-copy transfer support
+ * - Health monitoring
+ * - Thread-safe initialization
  */
 export class WorkerManager<TApi = unknown> {
     protected worker: Worker | null = null;
     protected workerProxy: Remote<TApi> | null = null;
     protected workerUrl: string | null = null;
+    
+    // State flags
     protected isTerminated = false;
     protected isInitializing = false;
+    private initPromise: Promise<void> | null = null;
     
     // Health monitoring
     private consecutiveErrors = 0;
     private lastErrorTime = 0;
+    private lastSuccessTime = 0;
     private operationCount = 0;
     private totalOperationTime = 0;
     
@@ -88,107 +65,223 @@ export class WorkerManager<TApi = unknown> {
     }
 
     /**
-     * Initializes the worker synchronously if not already initialized.
-     * Safe to call multiple times - will be a no-op after first successful init.
+     * Executes a function using the worker API with robust error handling,
+     * timeouts, and automatic retries.
+     * 
+     * @param operation Function that takes the worker proxy and returns a promise
+     * @param options Execution options (timeout, retries)
+     * @returns The result of the operation
      */
-    public initialize(): void {
-        if (this.isTerminated) {
-            throw new WorkerManagerError(
-                `${this.workerName} has been terminated`,
-                'INVALID_STATE'
-            );
-        }
-        
-        if (this.worker !== null) return;
+    public async execute<T>(
+        operation: (api: Remote<TApi>) => Promise<T> | T,
+        options: WorkerExecutionOptions = {}
+    ): Promise<T> {
+        const { 
+            timeout = 30000, 
+            retry = true, 
+            retryAttempts = 1,
+            forceRestart = false 
+        } = options;
 
-        this.createWorker();
-    }
-
-    /**
-     * Ensures the worker is initialized and ready for use.
-     * Throws if worker cannot be initialized.
-     * @returns The worker proxy for making API calls
-     * @throws WorkerManagerError if worker is terminated or unavailable
-     */
-    public ensureWorker(): Remote<TApi> {
+        // 1. Check Termination State (Fast Fail)
         if (this.isTerminated) {
             throw new WorkerManagerError(
                 `${this.workerName} has been terminated`,
                 'WORKER_UNAVAILABLE'
             );
         }
-        
-        if (this.workerProxy === null) {
-            this.createWorker();
+
+        // 2. Force Restart if requested
+        if (forceRestart) {
+            await this.restart();
         }
-        
-        if (this.workerProxy === null) {
+
+        // 3. Ensure Worker is Ready (Lazy Init)
+        try {
+            if (!this.workerProxy) {
+                await this.initializeAsync();
+            }
+        } catch (e) {
+            // If init fails, we can't proceed
             throw new WorkerManagerError(
-                `${this.workerName} not available`,
-                'WORKER_UNAVAILABLE'
+                `Failed to initialize ${this.workerName} for execution`,
+                'INIT_FAILED',
+                { originalError: e }
             );
         }
-        
-        return this.workerProxy;
+
+        const startTime = performance.now();
+
+        try {
+            // 4. Execute with Timeout
+            const result = await this.runWithTimeout(
+                () => operation(this.workerProxy!), 
+                timeout
+            );
+            
+            // 5. Success Handling
+            this.recordOperation(performance.now() - startTime);
+            return result;
+
+        } catch (error) {
+            // 6. Error Handling & Retry Logic
+            this.recordError();
+            
+            const isRetryable = retry && retryAttempts > 0 && this.isRetryableError(error);
+            
+            if (isRetryable && !this.isTerminated) {
+                console.warn(`Version Control: Retrying ${this.workerName} operation after error:`, error);
+                
+                // Force a clean restart before retry to clear bad state
+                await this.restart();
+                
+                // Recursive retry with decremented attempts
+                return this.execute(operation, {
+                    ...options,
+                    retryAttempts: retryAttempts - 1,
+                    forceRestart: false // Already restarted
+                });
+            }
+
+            // Transform error if needed
+            if (error instanceof WorkerManagerError) throw error;
+            
+            throw new WorkerManagerError(
+                `${this.workerName} operation failed: ${error instanceof Error ? error.message : String(error)}`,
+                'OPERATION_FAILED',
+                { originalError: error }
+            );
+        }
     }
 
     /**
-     * Initializes the worker asynchronously with validation.
-     * Use this when you need to await the initialization result.
-     * @returns Promise resolving when worker is ready
-     * @throws WorkerManagerError if initialization fails
+     * Helper to run a promise with a timeout.
+     */
+    private runWithTimeout<T>(fn: () => Promise<T> | T, timeoutMs: number): Promise<T> {
+        return new Promise<T>(async (resolve, reject) => {
+            let timer: number | undefined;
+            
+            // Create timeout promise
+            const timeoutPromise = new Promise<never>((_, rejectTimeout) => {
+                timer = window.setTimeout(() => {
+                    rejectTimeout(new WorkerManagerError(
+                        `${this.workerName} operation timed out after ${timeoutMs}ms`,
+                        'OPERATION_TIMEOUT'
+                    ));
+                }, timeoutMs);
+            });
+
+            try {
+                // Race execution against timeout
+                const result = await Promise.race([
+                    Promise.resolve(fn()),
+                    timeoutPromise
+                ]);
+                resolve(result);
+            } catch (error) {
+                reject(error);
+            } finally {
+                if (timer !== undefined) {
+                    clearTimeout(timer);
+                }
+            }
+        });
+    }
+
+    /**
+     * Determines if an error suggests the worker should be restarted and the operation retried.
+     */
+    private isRetryableError(error: unknown): boolean {
+        if (this.isTerminated) return false;
+        
+        const msg = error instanceof Error ? error.message : String(error);
+        
+        // Comlink/Worker specific errors indicating disconnection or crash
+        if (msg.includes('Proxy has been released')) return true;
+        if (msg.includes('MessagePort was closed')) return true;
+        if (msg.includes('The worker has been terminated')) return true;
+        
+        // Timeout is retryable (worker might have been just temporarily stuck)
+        if (error instanceof WorkerManagerError && error.code === 'OPERATION_TIMEOUT') return true;
+        
+        return false;
+    }
+
+    /**
+     * Initializes the worker asynchronously with concurrency protection.
      */
     public async initializeAsync(): Promise<void> {
-        if (this.isTerminated) {
-            throw new WorkerManagerError(
-                `${this.workerName} has been terminated`,
-                'INVALID_STATE'
-            );
-        }
+        if (this.isTerminated) return;
         
-        if (this.worker !== null || this.isInitializing) {
+        // Return existing promise if initialization is in progress
+        if (this.initPromise) {
+            return this.initPromise;
+        }
+
+        // Return immediately if already ready
+        if (this.worker && this.workerProxy) {
             return;
         }
 
-        this.isInitializing = true;
-        
-        try {
-            this.createWorker();
-            
-            if (this.validateOnInit && this.workerProxy !== null) {
-                await this.validateWorker();
+        // Start initialization lock
+        this.initPromise = (async () => {
+            this.isInitializing = true;
+            try {
+                this.createWorker();
+                
+                if (this.validateOnInit && this.workerProxy) {
+                    await this.validateWorker();
+                }
+            } catch (error) {
+                // Clean up on failure
+                this.cleanupResources();
+                throw error;
+            } finally {
+                this.isInitializing = false;
+                this.initPromise = null;
             }
-        } catch (error) {
-            this.terminate();
-            throw new WorkerManagerError(
-                `${this.workerName} initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                'INIT_FAILED',
-                { originalError: error }
-            );
-        } finally {
-            this.isInitializing = false;
-        }
+        })();
+
+        return this.initPromise;
+    }
+
+    /**
+     * Synchronous initialization trigger (fire and forget).
+     */
+    public initialize(): void {
+        this.initializeAsync().catch(err => {
+            console.warn(`Version Control: Background initialization of ${this.workerName} failed`, err);
+        });
     }
 
     /**
      * Creates the worker and proxy. Internal method.
-     * Reuses Blob URL for efficiency.
      */
     protected createWorker(): void {
-        if (this.worker !== null) return;
+        // Double check inside lock
+        if (this.worker) return;
 
-        if (typeof this.workerString === 'undefined' || this.workerString === '') {
-            console.error(`Version Control: ${this.workerName} code missing.`);
-            return;
+        if (!this.workerString) {
+            throw new WorkerManagerError(
+                `${this.workerName} code missing`,
+                'WORKER_CODE_MISSING'
+            );
         }
 
         try {
             const blob = new Blob([this.workerString], { type: 'application/javascript' });
             this.workerUrl = URL.createObjectURL(blob);
+            
             this.worker = new Worker(this.workerUrl);
+            
+            // Add error listener for crash detection
+            this.worker.onerror = (evt) => {
+                console.error(`Version Control: ${this.workerName} error:`, evt);
+                this.recordError();
+            };
+
             this.workerProxy = wrap<TApi>(this.worker);
         } catch (error) {
-            console.error(`Version Control: Failed to initialize ${this.workerName}`, error);
             this.cleanupResources();
             throw new WorkerManagerError(
                 'Worker creation failed',
@@ -200,30 +293,54 @@ export class WorkerManager<TApi = unknown> {
 
     /**
      * Validates that the worker is functioning correctly.
-     * Override this in subclasses to implement worker-specific validation.
-     * @throws Error if validation fails
      */
     protected async validateWorker(): Promise<void> {
-        // Default implementation does nothing
-        // Subclasses can override to implement worker-specific tests
+        // Subclasses override this
     }
 
     /**
-     * Records a successful operation for health monitoring.
-     * @param duration The duration of the operation in milliseconds
+     * Ensures the worker is initialized and returns the proxy.
+     * @deprecated Use execute() for safer operation handling.
+     */
+    public ensureWorker(): Remote<TApi> {
+        if (this.isTerminated) {
+            throw new WorkerManagerError(
+                `${this.workerName} has been terminated`,
+                'WORKER_UNAVAILABLE'
+            );
+        }
+        
+        if (!this.workerProxy) {
+            // Synchronous creation attempt if not ready
+            this.createWorker();
+        }
+        
+        if (!this.workerProxy) {
+            throw new WorkerManagerError(
+                `${this.workerName} not available`,
+                'WORKER_UNAVAILABLE'
+            );
+        }
+        
+        return this.workerProxy;
+    }
+
+    /**
+     * Records a successful operation.
      */
     public recordOperation(duration: number): void {
         this.operationCount++;
         this.totalOperationTime += duration;
+        this.lastSuccessTime = Date.now();
 
-        // Reset error count if enough time has passed since last error
+        // Reset error count if enough time has passed
         if (Date.now() - this.lastErrorTime > this.errorResetTime) {
             this.consecutiveErrors = 0;
         }
     }
 
     /**
-     * Records an error for health monitoring.
+     * Records an error.
      */
     public recordError(): void {
         this.consecutiveErrors++;
@@ -231,8 +348,7 @@ export class WorkerManager<TApi = unknown> {
     }
 
     /**
-     * Gets the current health statistics.
-     * @returns WorkerHealthStats object with current health metrics
+     * Gets current health statistics.
      */
     public getHealthStats(): WorkerHealthStats {
         return {
@@ -241,105 +357,88 @@ export class WorkerManager<TApi = unknown> {
             averageOperationTime: this.operationCount > 0 
                 ? this.totalOperationTime / this.operationCount 
                 : 0,
-            isHealthy: this.consecutiveErrors < this.maxConsecutiveErrors
+            isHealthy: this.consecutiveErrors < this.maxConsecutiveErrors,
+            lastErrorTime: this.lastErrorTime,
+            lastSuccessTime: this.lastSuccessTime
         };
     }
 
     /**
-     * Checks if the worker is currently healthy.
-     * @returns true if worker is healthy, false otherwise
+     * Checks if worker is healthy.
      */
     public isHealthy(): boolean {
         return this.consecutiveErrors < this.maxConsecutiveErrors;
     }
 
     /**
-     * Terminates the worker and releases all resources.
-     * Safe to call multiple times.
+     * Terminates the worker and releases resources.
+     * Idempotent and safe to call anytime.
      */
     public terminate(): void {
         if (this.isTerminated) return;
-        
         this.isTerminated = true;
         this.cleanupResources();
     }
 
     /**
-     * Cleans up worker resources without setting terminated flag.
-     * Used internally and can be called during error recovery.
-     */
-    protected cleanupResources(): void {
-        if (this.workerProxy !== null) {
-            try {
-                // Type assertion to access the releaseProxy symbol
-                const releaseProxySymbol = releaseProxy as unknown as string;
-                const releaseFn = (this.workerProxy as unknown as Record<string, () => void | undefined>)[releaseProxySymbol];
-                if (releaseFn !== undefined) {
-                    releaseFn();
-                }
-            } catch {
-                // Ignore cleanup errors for proxy release
-            }
-            this.workerProxy = null;
-        }
-
-        if (this.worker !== null) {
-            this.worker.terminate();
-            this.worker = null;
-        }
-
-        if (this.workerUrl !== null) {
-            URL.revokeObjectURL(this.workerUrl);
-            this.workerUrl = null;
-        }
-    }
-
-    /**
-     * Restarts the worker by terminating and reinitializing.
-     * @returns Promise resolving when worker is ready again
+     * Restarts the worker.
      */
     public async restart(): Promise<void> {
+        if (this.isTerminated) return;
+        
         this.cleanupResources();
         this.consecutiveErrors = 0;
-        this.lastErrorTime = 0;
         
         await this.initializeAsync();
     }
 
     /**
-     * Checks if the worker has been terminated.
-     * @returns true if terminated, false otherwise
+     * Cleans up resources safely.
      */
-    public isTerminatedState(): boolean {
-        return this.isTerminated;
+    protected cleanupResources(): void {
+        // 1. Release Proxy
+        if (this.workerProxy) {
+            try {
+                const releaseProxySymbol = releaseProxy as unknown as string;
+                const releaseFn = (this.workerProxy as unknown as Record<string, () => void | undefined>)[releaseProxySymbol];
+                if (typeof releaseFn === 'function') {
+                    releaseFn();
+                }
+            } catch (e) {
+                // Ignore errors during cleanup
+            }
+            this.workerProxy = null;
+        }
+
+        // 2. Terminate Worker
+        if (this.worker) {
+            try {
+                this.worker.terminate();
+            } catch (e) {
+                // Ignore
+            }
+            this.worker = null;
+        }
+
+        // 3. Revoke URL
+        if (this.workerUrl) {
+            try {
+                URL.revokeObjectURL(this.workerUrl);
+            } catch (e) {
+                // Ignore
+            }
+            this.workerUrl = null;
+        }
     }
 
     /**
-     * Checks if the worker has been initialized.
-     * @returns true if worker exists, false otherwise
+     * Status getters
      */
-    public isInitialized(): boolean {
-        return this.worker !== null;
-    }
+    public isTerminatedState(): boolean { return this.isTerminated; }
+    public isInitialized(): boolean { return this.worker !== null; }
+    public isActive(): boolean { return this.worker !== null && !this.isTerminated; }
 
-    /**
-     * Checks if the worker is currently active (initialized and not terminated).
-     * @returns true if active, false otherwise
-     */
-    public isActive(): boolean {
-        return this.worker !== null && !this.isTerminated;
-    }
-
-    /**
-     * Gets the current worker status for debugging/monitoring.
-     * @returns Object with all status information
-     */
-    public getStatus(): {
-        isInitialized: boolean;
-        isActive: boolean;
-        isHealthy: boolean;
-        healthStats: WorkerHealthStats;
-    } {
+    public getStatus() {
         const stats = this.getHealthStats();
         return {
             isInitialized: this.isInitialized(),
@@ -365,19 +464,7 @@ export class WorkerManagerError extends Error {
 }
 
 /**
- * Utility function to prepare transferables for ArrayBuffer arguments.
- * Wraps content in Comlink.transfer() if it's an ArrayBuffer for zero-copy transfer.
- * 
- * @param content The content to prepare for transfer
- * @param transfers Array to push transferables into
- * @returns The original content or wrapped transfer
- * 
- * @example
- * ```typescript
- * const transfers: ArrayBuffer[] = [];
- * const result = prepareTransferable(content, transfers);
- * // If content is ArrayBuffer, it's now wrapped for zero-copy transfer
- * ```
+ * Utility to prepare transferables.
  */
 export function prepareTransferable(
     content: string | ArrayBuffer,
