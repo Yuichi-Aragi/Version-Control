@@ -91,7 +91,9 @@ export class CompressionService {
         try {
             const stream = new Blob([buffer]).stream();
             const decompressed = stream.pipeThrough(new DecompressionStream('gzip'));
-            const resultBuffer = await new Response(decompressed).arrayBuffer();
+            
+            // Wrap native promise in Dexie.waitFor to prevent transaction loss
+            const resultBuffer = await Dexie.waitFor(new Response(decompressed).arrayBuffer());
             
             if (resultBuffer.byteLength > CONFIG.MAX_CONTENT_SIZE) {
                 throw new SecurityError('Legacy decompression exceeded size limit', 'decompressLegacy', 'medium');
@@ -111,8 +113,9 @@ export class CompressionService {
 
         try {
             if (!record.storageType) {
-                const result = await this.decompressLegacy(record.content);
-                return Dexie.waitFor(result);
+                // Legacy records need async decompression.
+                // decompressLegacy now handles Dexie.waitFor internally.
+                return this.decompressLegacy(record.content);
             }
             
             return this.decompressContent(record.content);

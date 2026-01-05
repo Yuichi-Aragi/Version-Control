@@ -13,78 +13,74 @@ export class ImportExportService {
         noteId: string,
         branchName: string
     ): Promise<ArrayBuffer> {
-        const edits = await db.edits
-            .where('[noteId+branchName]')
-            .equals([noteId, branchName])
-            .toArray();
+        return db.execute(async () => {
+            const edits = await db.edits
+                .where('[noteId+branchName]')
+                .equals([noteId, branchName])
+                .toArray();
 
-        // NOTE: We do NOT return early if edits.length === 0.
-        // We must generate a valid ZIP file representing the empty state to persist deletions.
-
-        if (edits.length > this.MAX_FILE_COUNT) {
-            throw new ValidationError(
-                `Too many edits to export: ${edits.length}`,
-                'editCount'
-            );
-        }
-
-        const metadataList: Omit<StoredEdit, 'content'>[] = [];
-        const files: Zippable = {};
-
-        let totalSize = 0;
-        
-        for (const edit of edits) {
-            const { content, ...metadata } = edit;
-            metadataList.push(metadata);
-
-            const fileName = `blobs/${edit.editId}.bin`;
-            files[fileName] = [new Uint8Array(content), { level: 0 }];
-            
-            totalSize += content.byteLength;
-            
-            if (totalSize > this.MAX_ZIP_SIZE) {
+            if (edits.length > this.MAX_FILE_COUNT) {
                 throw new ValidationError(
-                    `Export size exceeds maximum ${this.MAX_ZIP_SIZE} bytes`,
-                    'exportSize'
+                    `Too many edits to export: ${edits.length}`,
+                    'editCount'
                 );
             }
-        }
 
-        // Get current manifest for this branch to preserve version metadata AND settings
-        const manifestRecord = await db.manifests.get(noteId);
-        const branchManifest = manifestRecord?.manifest.branches[branchName];
-        
-        // Use the manifest's lastModified as the export timestamp to ensure consistency
-        const exportedAt = manifestRecord?.manifest.lastModified || new Date().toISOString();
+            const metadataList: Omit<StoredEdit, 'content'>[] = [];
+            const files: Zippable = {};
 
-        const metadataJson = JSON.stringify(metadataList);
-        files['data.json'] = [strToU8(metadataJson), { level: 9 }];
-        
-        // Export Metadata
-        files['manifest.json'] = [strToU8(JSON.stringify({
-            noteId,
-            branchName,
-            editCount: edits.length,
-            totalSize,
-            version: '1.0',
-            exportedAt: exportedAt,
-            branchMetadata: branchManifest // Include full branch manifest info (settings, versions, etc.)
-        })), { level: 9 }];
+            let totalSize = 0;
+            
+            for (const edit of edits) {
+                const { content, ...metadata } = edit;
+                metadataList.push(metadata);
 
-        return new Promise<ArrayBuffer>((resolve, reject) => {
-            zip(files, { level: 9 }, (err, data) => {
-                if (err) {
-                    reject(new StateConsistencyError('ZIP creation failed', { originalError: err }));
-                } else if (data.length > this.MAX_ZIP_SIZE) {
-                    reject(new ValidationError(
-                        `Generated ZIP exceeds maximum size: ${data.length} bytes`,
-                        'zipSize'
-                    ));
-                } else {
-                    resolve(data.buffer as ArrayBuffer);
+                const fileName = `blobs/${edit.editId}.bin`;
+                files[fileName] = [new Uint8Array(content), { level: 0 }];
+                
+                totalSize += content.byteLength;
+                
+                if (totalSize > this.MAX_ZIP_SIZE) {
+                    throw new ValidationError(
+                        `Export size exceeds maximum ${this.MAX_ZIP_SIZE} bytes`,
+                        'exportSize'
+                    );
                 }
+            }
+
+            const manifestRecord = await db.manifests.get(noteId);
+            const branchManifest = manifestRecord?.manifest.branches[branchName];
+            
+            const exportedAt = manifestRecord?.manifest.lastModified || new Date().toISOString();
+
+            const metadataJson = JSON.stringify(metadataList);
+            files['data.json'] = [strToU8(metadataJson), { level: 9 }];
+            
+            files['manifest.json'] = [strToU8(JSON.stringify({
+                noteId,
+                branchName,
+                editCount: edits.length,
+                totalSize,
+                version: '1.0',
+                exportedAt: exportedAt,
+                branchMetadata: branchManifest
+            })), { level: 9 }];
+
+            return new Promise<ArrayBuffer>((resolve, reject) => {
+                zip(files, { level: 9 }, (err, data) => {
+                    if (err) {
+                        reject(new StateConsistencyError('ZIP creation failed', { originalError: err }));
+                    } else if (data.length > this.MAX_ZIP_SIZE) {
+                        reject(new ValidationError(
+                            `Generated ZIP exceeds maximum size: ${data.length} bytes`,
+                            'zipSize'
+                        ));
+                    } else {
+                        resolve(data.buffer as ArrayBuffer);
+                    }
+                });
             });
-        });
+        }, 'exportBranchData');
     }
 
     static async importBranchData(
@@ -157,104 +153,94 @@ export class ImportExportService {
 
             const edit: StoredEdit = {
                 ...meta,
-                storageType: meta.storageType || 'full', // Default to full for robustness
+                storageType: meta.storageType || 'full',
                 content: blobData.buffer as ArrayBuffer
             };
 
-            // Enforce invariant: Full edits must have chainLength 0
-            // This sanitizes potential corruption from imported data
             if (edit.storageType === 'full' && edit.chainLength > 0) {
-                // @ts-ignore - modifying readonly for import sanitization
+                // @ts-ignore
                 edit.chainLength = 0;
             }
 
             edits.push(edit);
         }
 
-        // Transaction: Update Edits AND Manifest
-        await db.transaction('rw', db.edits, db.manifests, async () => {
-            // 1. Clear existing edits for branch
-            await db.edits
-                .where('[noteId+branchName]')
-                .equals([noteId, branchName])
-                .delete();
-            
-            // 2. Insert new edits
-            if (edits.length > 0) {
-                await db.edits.bulkPut(edits);
-            }
-
-            // 3. Reconstruct/Update Manifest
-            let currentManifestRecord = await db.manifests.get(noteId);
-            let manifest = currentManifestRecord?.manifest;
-
-            if (!manifest) {
-                 manifest = {
-                     noteId,
-                     notePath: '', // Cannot determine path from import alone if new
-                     currentBranch: branchName,
-                     branches: {},
-                     createdAt: new Date().toISOString(),
-                     lastModified: new Date().toISOString()
-                 };
-            }
-
-            // Try to get branch metadata from manifest.json
-            let branchManifest: any = null;
-            let exportedAt = new Date().toISOString();
-
-            if (manifestFile) {
-                try {
-                    const manifestJson = strFromU8(manifestFile as Uint8Array);
-                    const parsed = JSON.parse(manifestJson);
-                    if (parsed.branchMetadata) {
-                        branchManifest = parsed.branchMetadata;
-                    }
-                    if (parsed.exportedAt) {
-                        exportedAt = parsed.exportedAt;
-                    }
-                } catch (e) {
-                    console.warn('Failed to parse manifest.json during import', e);
-                }
-            }
-
-            // Fallback: Reconstruct branch manifest from edits if missing
-            if (!branchManifest) {
-                const versions: Record<string, any> = {};
-                const sortedEdits = [...edits].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+        await db.execute(async () => {
+            await db.transaction('rw', db.edits, db.manifests, async () => {
+                await db.edits
+                    .where('[noteId+branchName]')
+                    .equals([noteId, branchName])
+                    .delete();
                 
-                sortedEdits.forEach((edit, index) => {
-                    versions[edit.editId] = {
-                        versionNumber: index + 1,
-                        timestamp: new Date(edit.createdAt || Date.now()).toISOString(),
-                        size: edit.size || 0,
-                        uncompressedSize: edit.uncompressedSize || 0,
-                        contentHash: edit.contentHash || ''
+                if (edits.length > 0) {
+                    await db.edits.bulkPut(edits);
+                }
+
+                let currentManifestRecord = await db.manifests.get(noteId);
+                let manifest = currentManifestRecord?.manifest;
+
+                if (!manifest) {
+                     manifest = {
+                         noteId,
+                         notePath: '',
+                         currentBranch: branchName,
+                         branches: {},
+                         createdAt: new Date().toISOString(),
+                         lastModified: new Date().toISOString()
+                     };
+                }
+
+                let branchManifest: any = null;
+                let exportedAt = new Date().toISOString();
+
+                if (manifestFile) {
+                    try {
+                        const manifestJson = strFromU8(manifestFile as Uint8Array);
+                        const parsed = JSON.parse(manifestJson);
+                        if (parsed.branchMetadata) {
+                            branchManifest = parsed.branchMetadata;
+                        }
+                        if (parsed.exportedAt) {
+                            exportedAt = parsed.exportedAt;
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse manifest.json during import', e);
+                    }
+                }
+
+                if (!branchManifest) {
+                    const versions: Record<string, any> = {};
+                    const sortedEdits = [...edits].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+                    
+                    sortedEdits.forEach((edit, index) => {
+                        versions[edit.editId] = {
+                            versionNumber: index + 1,
+                            timestamp: new Date(edit.createdAt || Date.now()).toISOString(),
+                            size: edit.size || 0,
+                            uncompressedSize: edit.uncompressedSize || 0,
+                            contentHash: edit.contentHash || ''
+                        };
+                    });
+
+                    branchManifest = {
+                        versions,
+                        totalVersions: edits.length
                     };
+                }
+
+                manifest = ManifestService.setBranchData(manifest, branchName, branchManifest);
+
+                manifest = produce(manifest, (draft) => {
+                    draft.lastModified = exportedAt;
                 });
 
-                branchManifest = {
-                    versions,
-                    totalVersions: edits.length
-                };
-            }
-
-            // Update manifest with imported branch data
-            manifest = ManifestService.setBranchData(manifest, branchName, branchManifest);
-
-            // CRITICAL: Override lastModified to match the export timestamp.
-            // This prevents the "Import -> Update DB -> DB Newer -> Export -> Loop" cycle.
-            // We set the DB state to exactly match the file state.
-            manifest = produce(manifest, (draft) => {
-                draft.lastModified = exportedAt;
+                await db.manifests.put({
+                    noteId,
+                    manifest,
+                    updatedAt: Date.now()
+                });
             });
-
-            await db.manifests.put({
-                noteId,
-                manifest,
-                updatedAt: Date.now()
-            });
-        });
+        }, 'importBranchData');
     }
 
     static async readManifestFromZip(zipData: ArrayBuffer): Promise<any> {
@@ -268,7 +254,6 @@ export class ImportExportService {
                         return;
                     }
                     
-                    // 1. Try manifest.json
                     const manifestFile = unzipped['manifest.json'];
                     if (manifestFile) {
                         try {
@@ -276,11 +261,10 @@ export class ImportExportService {
                             resolve(JSON.parse(json));
                             return;
                         } catch (e) {
-                            // Fallthrough if corrupt
+                            // Fallthrough
                         }
                     }
 
-                    // 2. Fallback to data.json
                     const dataFile = unzipped['data.json'];
                     if (dataFile) {
                         try {
@@ -288,11 +272,9 @@ export class ImportExportService {
                             const edits = JSON.parse(json);
                             
                             if (Array.isArray(edits) && edits.length > 0) {
-                                // Find latest timestamp to mimic manifest.exportedAt
                                 const latest = edits.reduce((max, curr) => 
                                     (curr.createdAt || 0) > max ? (curr.createdAt || 0) : max, 0);
                                 
-                                // Return synthetic manifest
                                 resolve({
                                     noteId: edits[0].noteId,
                                     branchName: edits[0].branchName,
@@ -303,7 +285,6 @@ export class ImportExportService {
                                 });
                                 return;
                             } else if (Array.isArray(edits) && edits.length === 0) {
-                                // Handle empty data.json case
                                 resolve({
                                     noteId: 'unknown',
                                     branchName: 'unknown',
@@ -346,7 +327,6 @@ export class ImportExportService {
     } {
         const size = zipData.byteLength;
         const compressed = size > 0;
-        
         return { size, compressed };
     }
 }

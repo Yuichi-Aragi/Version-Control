@@ -40,10 +40,8 @@ export class EditStorageService {
             }
 
             // 2. Context Retrieval with Strict Freshness
-            // We need the absolute latest head to determine if we can append or need a full save.
             let previousContext = null;
             try {
-                // Force cache bypass implied by checking DB head inside ContextService
                 previousContext = await ContextService.getPreviousEditContext(noteId, branchName);
             } catch (error) {
                 console.warn(`[EditStorageService] Failed to retrieve context for ${noteId}:${branchName}, forcing full save.`, error);
@@ -82,28 +80,25 @@ export class EditStorageService {
             );
 
             try {
-                // 4. Execute Atomic Transaction
-                const committed = await this.executeSaveTransaction(
-                    noteId,
-                    branchName,
-                    editId,
-                    editRecord,
-                    updatedManifest,
-                    previousContext?.editId, // Pass the head we BUILT upon
-                    options.force
-                );
+                // 4. Execute Atomic Transaction via Resilient Wrapper
+                const committed = await db.execute(async () => {
+                    return await this.executeSaveTransaction(
+                        noteId,
+                        branchName,
+                        editId,
+                        editRecord,
+                        updatedManifest,
+                        previousContext?.editId,
+                        options.force
+                    );
+                }, 'saveEdit');
 
                 if (committed) {
-                    // Invalidate cache immediately after write
                     ContextService.clearCache(noteId, branchName);
                     return { size: compressedContent.byteLength, contentHash };
                 }
-                // If not committed and no error thrown, loop will retry
             } catch (error) {
-                // If concurrency error (head moved), we retry.
-                // If other error, we might rethrow.
                 if (error instanceof ConcurrencyError) {
-                    // Head moved. Retry loop will re-fetch context and try again.
                     console.warn(`[EditStorageService] Concurrency conflict (head moved), retrying... Attempt ${attempt + 1}`);
                 } else if (attempt === this.MAX_TRANSACTION_RETRIES - 1) {
                     throw error;
@@ -126,28 +121,30 @@ export class EditStorageService {
         branchName: string,
         editId: string
     ): Promise<ArrayBuffer | null> {
-        const edits = await db.edits
-            .where('[noteId+branchName]')
-            .equals([noteId, branchName])
-            .toArray();
+        return db.execute(async () => {
+            const edits = await db.edits
+                .where('[noteId+branchName]')
+                .equals([noteId, branchName])
+                .toArray();
 
-        const editMap = new Map(edits.map((e) => [e.editId, e]));
+            const editMap = new Map(edits.map((e) => [e.editId, e]));
 
-        if (!editMap.has(editId)) {
-            return null;
-        }
+            if (!editMap.has(editId)) {
+                return null;
+            }
 
-        try {
-            const result = await ReconstructionService.reconstructFromMap(editId, editMap, true);
-            return CompressionService.textEncoder.encode(result.content).buffer as ArrayBuffer;
-        } catch (error) {
-            throw new IntegrityError(
-                `Failed to reconstruct edit ${editId}`,
-                '', 
-                error instanceof Error ? error.message : 'Unknown error',
-                'error'
-            );
-        }
+            try {
+                const result = await ReconstructionService.reconstructFromMap(editId, editMap, true);
+                return CompressionService.textEncoder.encode(result.content).buffer as ArrayBuffer;
+            } catch (error) {
+                throw new IntegrityError(
+                    `Failed to reconstruct edit ${editId}`,
+                    '', 
+                    error instanceof Error ? error.message : 'Unknown error',
+                    'error'
+                );
+            }
+        }, 'getEditContent');
     }
 
     static async deleteEdit(
@@ -155,22 +152,24 @@ export class EditStorageService {
         branchName: string,
         editId: string
     ): Promise<void> {
-        await db.transaction('rw', db.edits, async () => {
-            const branchEdits = await db.edits
-                .where('[noteId+branchName]')
-                .equals([noteId, branchName])
-                .toArray();
+        await db.execute(async () => {
+            await db.transaction('rw', db.edits, async () => {
+                const branchEdits = await db.edits
+                    .where('[noteId+branchName]')
+                    .equals([noteId, branchName])
+                    .toArray();
 
-            const editMap = new Map(branchEdits.map((e) => [e.editId, e]));
-            const targetEdit = editMap.get(editId);
+                const editMap = new Map(branchEdits.map((e) => [e.editId, e]));
+                const targetEdit = editMap.get(editId);
 
-            if (!targetEdit) {
-                return;
-            }
+                if (!targetEdit) {
+                    return;
+                }
 
-            await this.handleEditDeletion(targetEdit, branchEdits, editMap);
-            ContextService.clearCache(noteId, branchName);
-        });
+                await this.handleEditDeletion(targetEdit, branchEdits, editMap);
+                ContextService.clearCache(noteId, branchName);
+            });
+        }, 'deleteEdit');
     }
 
     static async renameEdit(
@@ -180,18 +179,20 @@ export class EditStorageService {
     ): Promise<void> {
         if (oldEditId === newEditId) return;
 
-        await db.transaction('rw', db.edits, async () => {
-            const oldExists = await this.checkEditExistsById(noteId, oldEditId);
-            if (!oldExists) return;
+        await db.execute(async () => {
+            await db.transaction('rw', db.edits, async () => {
+                const oldExists = await this.checkEditExistsById(noteId, oldEditId);
+                if (!oldExists) return;
 
-            const newExists = await this.checkEditExistsById(noteId, newEditId);
-            if (newExists) {
-                throw new ValidationError(`Edit ${newEditId} already exists`, 'newEditId');
-            }
+                const newExists = await this.checkEditExistsById(noteId, newEditId);
+                if (newExists) {
+                    throw new ValidationError(`Edit ${newEditId} already exists`, 'newEditId');
+                }
 
-            await this.renameEditRecords(noteId, oldEditId, newEditId);
-            await this.updateDependentRecords(noteId, oldEditId, newEditId);
-        });
+                await this.renameEditRecords(noteId, oldEditId, newEditId);
+                await this.updateDependentRecords(noteId, oldEditId, newEditId);
+            });
+        }, 'renameEdit');
     }
 
     private static async getExistingEdit(
@@ -199,10 +200,12 @@ export class EditStorageService {
         branchName: string,
         editId: string
     ): Promise<StoredEdit | undefined> {
-        return await db.edits
-            .where('[noteId+branchName+editId]')
-            .equals([noteId, branchName, editId])
-            .first();
+        return db.execute(async () => {
+            return await db.edits
+                .where('[noteId+branchName+editId]')
+                .equals([noteId, branchName, editId])
+                .first();
+        }, 'getExistingEdit');
     }
 
     private static async checkEditExistsById(noteId: string, editId: string): Promise<boolean> {
@@ -306,9 +309,6 @@ export class EditStorageService {
                     .equals([noteId, branchName])
                     .last();
 
-                // If we expected a specific previous ID (because we built a diff against it),
-                // and the current head is different, we have a conflict.
-                // The head has moved. We cannot safely append our diff.
                 if (expectedPreviousId && currentHead?.editId !== expectedPreviousId) {
                     throw new ConcurrencyError(
                         'Head moved during save transaction',
@@ -317,7 +317,6 @@ export class EditStorageService {
                     );
                 }
                 
-                // If we expected NO previous ID (first edit), but head exists, conflict.
                 if (!expectedPreviousId && currentHead) {
                      throw new ConcurrencyError(
                         'Head exists but expected none (initialization conflict)',
@@ -400,9 +399,6 @@ export class EditStorageService {
 
             for (const descendant of descendants) {
                 if (!visited.has(descendant.editId)) {
-                    // FIX: Stop propagation at full edits.
-                    // Full edits start a new chain and establish a new base.
-                    // They shield their descendants from upstream base/chain changes.
                     if (descendant.storageType === 'full') {
                         continue;
                     }
@@ -496,9 +492,6 @@ export class EditStorageService {
         baseEditId?: string;
         previousEditId?: string;
     }): CreateStoredEdit {
-        // Enforce invariant: Full edits must start a new chain (length 0).
-        // This prevents state corruption where 'full' edits carry non-zero chain lengths,
-        // which would otherwise break chain length calculations for subsequent edits.
         const chainLength = params.storageType === 'full' ? 0 : params.chainLength;
 
         return freeze({

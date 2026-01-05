@@ -1,3 +1,4 @@
+import { Dexie } from 'dexie';
 import { CONFIG } from '@/workers/edit-history/config';
 
 export class HashService {
@@ -7,7 +8,10 @@ export class HashService {
         // Caching removed to prevent collisions and ensure data integrity.
         // Modern crypto.subtle is sufficiently fast for typical note sizes.
         const data = this.encoder.encode(content);
-        const hashBuffer = await crypto.subtle.digest(CONFIG.HASH_ALGORITHM, data);
+        
+        // Wrap native promise in Dexie.waitFor to prevent transaction commit issues
+        const hashBuffer = await Dexie.waitFor(crypto.subtle.digest(CONFIG.HASH_ALGORITHM, data));
+        
         const hashArray = Array.from(new Uint8Array(hashBuffer));
         return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     }
