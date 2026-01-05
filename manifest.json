@@ -1,7 +1,7 @@
 {
 	"id": "version-control",
 	"name": "Version Control",
-	"version": "1.9.41",
+	"version": "1.9.42",
 	"minAppVersion": "1.7.1",
 	"description": "Create intentional snapshots with meaningful names, in-file branching, side-by-side diffs, timeline search, writing stats, and optional auto-saves.",
 	"author": "Yuichi-Aragi",
