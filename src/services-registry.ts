@@ -241,6 +241,8 @@ export class ServiceRegistry {
      * Initializes all workers sequentially with a delay to prevent main thread freezing.
      * Priority: Compression -> Edit History -> Timeline -> Diff
      * This should be called inside onLayoutReady.
+     * 
+     * Resilient: Failures in one worker do not block others.
      */
     async initializeWorkers(): Promise<void> {
         const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -248,25 +250,36 @@ export class ServiceRegistry {
         if (this.plugin.isUnloading) return;
 
         // 1. Compression Worker (Highest Priority - used by other services)
-        if (this.compressionManager) {
-            this.compressionManager.initialize();
+        try {
+            if (this.compressionManager) {
+                this.compressionManager.initialize();
+            }
+        } catch (e) {
+            console.error("Version Control: Failed to initialize Compression Worker", e);
         }
         await delay(100);
 
         if (this.plugin.isUnloading) return;
 
         // 2. Edit History Worker (High Priority - data integrity)
-        if (this.editHistoryManager) {
-            this.editHistoryManager.initialize();
+        try {
+            if (this.editHistoryManager) {
+                this.editHistoryManager.initialize();
+            }
+        } catch (e) {
+            console.error("Version Control: Failed to initialize Edit History Worker", e);
         }
         await delay(100);
 
         if (this.plugin.isUnloading) return;
 
         // 3. Timeline Worker (UI Priority)
-        // Note: TimelineManager.initialize() calls timelineDatabase.initialize()
-        if (this.timelineManager) {
-            this.timelineManager.initialize();
+        try {
+            if (this.timelineManager) {
+                this.timelineManager.initialize();
+            }
+        } catch (e) {
+            console.error("Version Control: Failed to initialize Timeline Worker", e);
         }
         await delay(100);                
     }
@@ -286,14 +299,26 @@ export class ServiceRegistry {
      */
     async cleanupAll(): Promise<void> {
         // Invalidate caches and clear all pending task queues
-        this.centralManifestRepo.invalidateCache();
-        this.noteManifestRepo.clearCache();
-        this.queueService.clearAll();
+        try {
+            this.centralManifestRepo.invalidateCache();
+            this.noteManifestRepo.clearCache();
+            this.queueService.clearAll();
+        } catch (e) {
+            console.warn("Version Control: Error clearing service caches", e);
+        }
 
         // Terminate workers
-        await this.editHistoryManager.terminate();
-        this.compressionManager.terminate();
-        this.timelineDatabase.terminate();
+        try {
+            await this.editHistoryManager.terminate();
+        } catch (e) { /* Ignore */ }
+        
+        try {
+            this.compressionManager.terminate();
+        } catch (e) { /* Ignore */ }
+        
+        try {
+            this.timelineDatabase.terminate();
+        } catch (e) { /* Ignore */ }
     }
 
     /**
@@ -304,6 +329,8 @@ export class ServiceRegistry {
             this.instance = new ServiceRegistry(plugin);
         }
         if (!this.instance) {
+            // Defensive: If called during unload or before init, return a dummy or throw
+            // Ideally we throw, but if we are in a shutdown phase, we might want to be softer.
             throw new Error('ServiceRegistry not initialized. Call getInstance with a plugin first.');
         }
         return this.instance;
