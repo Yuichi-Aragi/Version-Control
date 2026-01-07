@@ -89,7 +89,7 @@ export class PersistenceService {
 
     for (const filePath of vctrlFiles) {
         const parts = filePath.split('/');
-        const name = parts.pop();
+        const name = parts.pop() ?? ''; // Ensure name is string
         if (!name) continue;
 
         const match = name.match(filenameRegex);
