@@ -14,6 +14,11 @@ const CENTRAL_MANIFEST_QUEUE_KEY = 'system:central-manifest';
  * Uses the Public (Queued) / Internal (Unqueued) pattern to prevent deadlocks.
  * Implements strict state synchronization with the plugin settings.
  * Utilises Immer for all state modifications to ensure immutability.
+ * 
+ * ENFORCEMENT:
+ * Strictly enforces a One-to-One mapping from File Path to Note ID.
+ * While a Note ID can conceptually map to multiple paths over time (via renaming),
+ * at any single point in time, a File Path (case-sensitive) MUST map to at most one Note ID.
  */
 export class CentralManifestRepository {
     private cache: CentralManifest | null = null;
@@ -44,6 +49,14 @@ export class CentralManifestRepository {
     public async addNoteEntry(noteId: string, notePath: string, noteManifestPath: string): Promise<void> {
         const now = new Date().toISOString();
         await this._updateAndSaveManifest(draft => {
+            // STRICT ENFORCEMENT: Path Uniqueness
+            // Ensure no other ID is already claiming this path
+            for (const [existingId, entry] of Object.entries(draft.notes)) {
+                if (entry && entry.notePath === notePath && existingId !== noteId) {
+                    throw new Error(`Integrity Violation: Path "${notePath}" is already assigned to noteId "${existingId}". Cannot assign to "${noteId}".`);
+                }
+            }
+
             if (draft.notes[noteId]) {
                 console.warn(`VC: Note ID ${noteId} already exists. Overwriting entry.`);
             }
@@ -68,10 +81,50 @@ export class CentralManifestRepository {
     public async updateNotePath(noteId: string, newPath: string): Promise<void> {
         const now = new Date().toISOString();
         await this._updateAndSaveManifest(draft => {
+            // STRICT ENFORCEMENT: Path Uniqueness
+            // Ensure no other ID is already claiming the new path
+            for (const [existingId, entry] of Object.entries(draft.notes)) {
+                if (entry && entry.notePath === newPath && existingId !== noteId) {
+                    throw new Error(`Integrity Violation: Path "${newPath}" is already assigned to noteId "${existingId}". Cannot move "${noteId}" to this path.`);
+                }
+            }
+
             const noteEntry = draft.notes[noteId];
             if (noteEntry) {
                 noteEntry.notePath = newPath;
                 noteEntry.lastModified = now;
+            }
+        });
+    }
+
+    /**
+     * Atomically replaces a note ID with a new one, preserving the entry data.
+     * This is critical for renames to ensure we don't violate path uniqueness constraints
+     * that would occur if we tried to add the new ID before removing the old one.
+     */
+    public async replaceNoteId(oldId: string, newId: string, newManifestPath: string): Promise<void> {
+        await this._updateAndSaveManifest(draft => {
+            const oldEntry = draft.notes[oldId];
+            if (!oldEntry) {
+                throw new Error(`Cannot replace ID: Old ID "${oldId}" not found.`);
+            }
+            
+            if (newId !== oldId && draft.notes[newId]) {
+                throw new Error(`Cannot replace ID: New ID "${newId}" already exists.`);
+            }
+
+            // Note: We do not need to check path uniqueness here because we are
+            // effectively transferring ownership of the path from oldId to newId
+            // within a single atomic transaction.
+
+            draft.notes[newId] = {
+                ...oldEntry,
+                manifestPath: newManifestPath,
+                lastModified: new Date().toISOString()
+            };
+
+            if (newId !== oldId) {
+                delete draft.notes[oldId];
             }
         });
     }

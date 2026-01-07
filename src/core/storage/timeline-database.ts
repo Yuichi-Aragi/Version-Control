@@ -62,10 +62,19 @@ export class TimelineWorkerManager extends WorkerManager<TimelineWorkerApi> {
         return JSON.parse(this.decoder.decode(buffer)) as T;
     }
 
-    public prepareTransferable(content: string | ArrayBuffer, transfers: ArrayBuffer[]): string | ArrayBuffer {
+    /**
+     * Prepares content for zero-copy transfer.
+     * 
+     * CRITICAL FIX: This method must NOT use a shared/accumulated transfer array.
+     * Comlink aggregates transfer lists from all arguments. If we pass the same array reference
+     * or accumulate buffers in a shared array, Comlink will see duplicate ArrayBuffers in the 
+     * final transfer list, causing "DataCloneError: ArrayBuffer at index X is a duplicate".
+     * 
+     * Instead, we attach a specific, isolated transfer list to each transferred object.
+     */
+    public prepareTransferable(content: string | ArrayBuffer): string | ArrayBuffer {
         if (content instanceof ArrayBuffer) {
-            transfers.push(content);
-            return transfer(content, transfers);
+            return transfer(content, [content]);
         }
         return content;
     }
@@ -126,9 +135,9 @@ export class TimelineDatabase extends Component {
 
         const resultBuffer = await this.workerManager.execute(
             (api) => {
-                const transfers: ArrayBuffer[] = [];
-                const c1 = this.workerManager.prepareTransferable(content1, transfers);
-                const c2 = this.workerManager.prepareTransferable(content2, transfers);
+                // Prepare transferables independently to avoid duplicate transfer list entries
+                const c1 = this.workerManager.prepareTransferable(content1);
+                const c2 = this.workerManager.prepareTransferable(content2);
                 
                 return api.generateAndStoreEvent(
                     validNoteId,
