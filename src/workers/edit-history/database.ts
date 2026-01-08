@@ -2,6 +2,7 @@ import { Dexie, type Table } from 'dexie';
 import { CONFIG } from '@/workers/edit-history/config';
 import type { StoredEdit, StoredManifest } from '@/workers/edit-history/types';
 import { sleep } from '@/workers/edit-history/utils';
+import { CapacityError } from '@/workers/edit-history/errors';
 
 /**
  * Extended Dexie class with built-in resilience patterns.
@@ -13,6 +14,7 @@ class EditHistoryDB extends Dexie {
 
     private readonly MAX_RETRIES = 3;
     private readonly RETRY_DELAY_BASE = 50;
+    private readonly MAX_RETRY_DELAY = 1000;
 
     constructor() {
         super(CONFIG.DB_NAME);
@@ -103,48 +105,77 @@ class EditHistoryDB extends Dexie {
     }
 
     /**
-     * Executes a database operation with robust error handling and retries.
+     * Executes a database operation with robust error handling, retries, and transaction awareness.
      * This is the primary entry point for all DB interactions.
      */
     async execute<T>(operation: () => Promise<T>, context: string = 'db-op'): Promise<T> {
+        // 1. Transaction Passthrough
+        // If we are already inside a transaction, we MUST NOT attempt to manage connection state
+        // or retry the operation individually, as that would violate transaction isolation
+        // or cause TransactionInactiveError. We pass control through to the active transaction.
+        if (Dexie.currentTransaction) {
+            return operation();
+        }
+
         let attempts = 0;
         let lastError: unknown;
 
         while (attempts <= this.MAX_RETRIES) {
             try {
-                // 1. Ensure connection is open
+                // 2. Ensure connection is open
                 if (!this.isOpen()) {
                     await this.open();
                 }
 
-                // 2. Execute operation
+                // 3. Execute operation
                 return await operation();
 
             } catch (error: any) {
                 lastError = error;
                 attempts++;
 
-                // 3. Analyze error for recoverability
+                // 4. Fatal Error Handling
+                // QuotaExceededError is fatal and requires user intervention (cleanup)
+                if (error.name === 'QuotaExceededError' || error.message?.toLowerCase().includes('quota')) {
+                    throw new CapacityError(
+                        'Storage quota exceeded',
+                        'database',
+                        0, // Unknown current usage
+                        0, // Unknown limit
+                        'bytes'
+                    );
+                }
+
+                // Schema/Data errors are logic errors, not transient
+                if (error.name === 'SchemaError' || error.name === 'DataError') {
+                    throw error;
+                }
+
+                // 5. Retry Logic
                 const isRecoverable = this.isRecoverableError(error);
                 
                 if (!isRecoverable || attempts > this.MAX_RETRIES) {
-                    // Fatal error or max retries reached
                     if (attempts > this.MAX_RETRIES) {
                         console.error(`VC: DB Operation '${context}' failed after ${attempts} attempts. Last error:`, error);
                     }
                     throw error;
                 }
 
-                // 4. Recovery logic
-                console.warn(`VC: Retrying DB operation '${context}' (Attempt ${attempts}/${this.MAX_RETRIES}). Error: ${error.name || error.message}`);
-                
-                // If the database connection is bad, force close to trigger fresh open on next loop
+                // 6. Recovery Actions
                 if (this.isConnectionError(error)) {
-                    this.close();
+                    // Force close to reset connection state before next attempt
+                    try { this.close(); } catch (e) { /* ignore */ }
                 }
 
-                // Exponential backoff
-                await sleep(this.RETRY_DELAY_BASE * Math.pow(2, attempts));
+                // 7. Exponential Backoff with Jitter
+                // delay = min(MAX, BASE * 2^attempts) + random_jitter
+                const backoff = Math.min(this.MAX_RETRY_DELAY, this.RETRY_DELAY_BASE * Math.pow(2, attempts));
+                const jitter = Math.random() * (backoff * 0.5);
+                const delay = backoff + jitter;
+
+                console.warn(`VC: Retrying DB op '${context}' (${attempts}/${this.MAX_RETRIES}) in ${Math.round(delay)}ms. Error: ${error.name || error.message}`);
+                
+                await sleep(delay);
             }
         }
 
@@ -159,9 +190,11 @@ class EditHistoryDB extends Dexie {
         return (
             name === 'DatabaseClosedError' ||
             name === 'TransactionInactiveError' ||
-            name === 'UnknownError' || // Often wraps I/O errors
+            name === 'UnknownError' || // Often wraps I/O errors or internal browser DB errors
             name === 'AbortError' ||
             name === 'TimeoutError' ||
+            name === 'InvalidStateError' || // DB might be closing/opening
+            name === 'ReadOnlyError' || // Sometimes transient if lock is held
             message.includes('closing') ||
             message.includes('closed')
         );
@@ -169,7 +202,11 @@ class EditHistoryDB extends Dexie {
 
     private isConnectionError(error: any): boolean {
         const name = error.name;
-        return name === 'DatabaseClosedError' || name === 'UnknownError';
+        return (
+            name === 'DatabaseClosedError' || 
+            name === 'UnknownError' || 
+            name === 'InvalidStateError'
+        );
     }
 
     async compact(): Promise<void> {
