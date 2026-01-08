@@ -8,7 +8,6 @@ import { findExistingEvent, putTimelineEvent } from '@/workers/timeline/database
 import {
     validateString,
     validateContent,
-    compressDiffData,
     getLockKey,
     validateStoredEventStructure,
 } from '@/workers/timeline/utils';
@@ -24,12 +23,6 @@ import { calculateStats } from '@/workers/timeline/services/stats-calculator';
 
 /**
  * Generates and stores a timeline event.
- * This is the main service function that orchestrates the entire process:
- * 1. Validates input
- * 2. Computes diff
- * 3. Calculates statistics
- * 4. Compresses data
- * 5. Stores in database (with lock)
  *
  * @param noteId - The note identifier
  * @param branchName - The branch name
@@ -79,8 +72,9 @@ export async function generateAndStoreTimelineEvent(
     // 2. Data Preparation (CPU Bound - before lock)
     const diffData = processContentDiff(content1, content2);
     const stats = calculateStats(diffData);
-    const compressedDiff = compressDiffData(diffData);
-
+    
+    // No compression - storing raw Change[]
+    
     const lockKey = getLockKey(noteId, branchName, source, toVersionId);
 
     // 3. Critical Section (I/O Bound - Locked)
@@ -88,65 +82,68 @@ export async function generateAndStoreTimelineEvent(
         try {
             let finalEvent: TimelineEvent;
 
-            await db.transaction('rw', db.timeline, async () => {
-                // Check for existing event using the unique compound index
-                const existing = await findExistingEvent(noteId, branchName, source, toVersionId);
+            // Wrap the transaction in db.execute to benefit from the retry logic
+            // for the entire transaction block if a transient error occurs.
+            await db.execute(async () => {
+                await db.transaction('rw', db.timeline, async () => {
+                    // Check for existing event using the unique compound index
+                    // findExistingEvent uses db.execute internally, but since we are in a transaction,
+                    // it will pass through directly without nested retry logic.
+                    const existing = await findExistingEvent(noteId, branchName, source, toVersionId);
 
-                // Resolve metadata: explicit input overrides existing
-                // Treat undefined as "no update provided", treat empty string as "clear field" (handled below)
-                let resolvedName: string | undefined;
-                if (metadata && metadata.name !== undefined) {
-                    resolvedName = metadata.name;
-                } else {
-                    resolvedName = existing?.toVersionName;
-                }
+                    // Resolve metadata: explicit input overrides existing
+                    let resolvedName: string | undefined;
+                    if (metadata && metadata.name !== undefined) {
+                        resolvedName = metadata.name;
+                    } else {
+                        resolvedName = existing?.toVersionName;
+                    }
 
-                let resolvedDescription: string | undefined;
-                if (metadata && metadata.description !== undefined) {
-                    resolvedDescription = metadata.description;
-                } else {
-                    resolvedDescription = existing?.toVersionDescription;
-                }
+                    let resolvedDescription: string | undefined;
+                    if (metadata && metadata.description !== undefined) {
+                        resolvedDescription = metadata.description;
+                    } else {
+                        resolvedDescription = existing?.toVersionDescription;
+                    }
 
-                const storedEvent: StoredTimelineEvent = {
-                    noteId,
-                    branchName,
-                    source,
-                    fromVersionId,
-                    toVersionId,
-                    timestamp: toVersionTimestamp,
-                    diffData: compressedDiff, // Store compressed
-                    stats,
-                    toVersionNumber,
-                };
+                    const storedEvent: StoredTimelineEvent = {
+                        noteId,
+                        branchName,
+                        source,
+                        fromVersionId,
+                        toVersionId,
+                        timestamp: toVersionTimestamp,
+                        diffData: diffData, // Store raw Change[]
+                        stats,
+                        toVersionNumber,
+                    };
 
-                // Handle optional properties explicitly
-                // Only store if non-empty string. Empty strings effectively clear the field.
-                if (resolvedName !== undefined && resolvedName.trim() !== '') {
-                    storedEvent.toVersionName = resolvedName;
-                }
-                if (resolvedDescription !== undefined && resolvedDescription.trim() !== '') {
-                    storedEvent.toVersionDescription = resolvedDescription;
-                }
+                    // Handle optional properties explicitly
+                    if (resolvedName !== undefined && resolvedName.trim() !== '') {
+                        storedEvent.toVersionName = resolvedName;
+                    }
+                    if (resolvedDescription !== undefined && resolvedDescription.trim() !== '') {
+                        storedEvent.toVersionDescription = resolvedDescription;
+                    }
 
-                // Preserve ID for update to maintain referential integrity
-                if (existing?.id !== undefined) {
-                    storedEvent.id = existing.id;
-                }
+                    // Preserve ID for update to maintain referential integrity
+                    if (existing?.id !== undefined) {
+                        storedEvent.id = existing.id;
+                    }
 
-                // Atomic Put with validation
-                validateStoredEventStructure(storedEvent);
-                await putTimelineEvent(storedEvent);
+                    // Atomic Put with validation
+                    validateStoredEventStructure(storedEvent);
+                    await putTimelineEvent(storedEvent);
 
-                // Reconstruct full event for return (uncompressed)
-                finalEvent = {
-                    ...storedEvent,
-                    diffData: diffData
-                };
-            });
+                    finalEvent = storedEvent as TimelineEvent;
+                });
+            }, 'generateAndStoreTimelineEvent');
 
             return finalEvent!;
         } catch (error) {
+            // Unwrap WorkerError if it was wrapped, or create new one
+            if (error instanceof WorkerError) throw error;
+            
             const message = error instanceof Error ? error.message : String(error);
             throw new WorkerError(
                 'Database transaction failed',
