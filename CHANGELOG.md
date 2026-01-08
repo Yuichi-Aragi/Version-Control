@@ -1,5 +1,14 @@
 ***
 
+**Version: 1.9.43**
+
+#### 🎨 Improvements & UX
+
+* **General Stability:** Implemented stability improvements for a more reliable experience.
+
+
+***
+
 **Version: 1.9.41**
 
 #### 🎨 Improvements & UX

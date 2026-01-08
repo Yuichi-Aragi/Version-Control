@@ -41,7 +41,6 @@
     "es-toolkit": "^1.42.0",
     "valibot": "^1.2.0",
     "@uiw/react-heat-map": "^2.3.3",
-    "diff-match-patch": "^1.0.5",
     "framer-motion": "^12.23.26",
     "yaml": "^2.8.2",
     "@sanity/diff-match-patch": "^3.2.0"
