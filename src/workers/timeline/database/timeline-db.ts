@@ -1,9 +1,9 @@
 /// <reference lib="webworker" />
 
 import { Dexie, type Table } from 'dexie';
-import { compressSync, strToU8 } from 'fflate';
-import { DB_NAME, COMPRESSION_LEVEL } from '@/workers/timeline/config';
+import { DB_NAME } from '@/workers/timeline/config';
 import type { StoredTimelineEvent } from '@/workers/timeline/types';
+import { WorkerError } from '@/workers/timeline/types';
 import { validateStoredEventStructure } from '@/workers/timeline/utils/validation';
 
 /**
@@ -14,6 +14,7 @@ export class InternalTimelineDB extends Dexie {
     
     private readonly MAX_RETRIES = 3;
     private readonly RETRY_DELAY_BASE = 50;
+    private readonly MAX_RETRY_DELAY = 1000;
 
     constructor() {
         super(DB_NAME);
@@ -24,24 +25,15 @@ export class InternalTimelineDB extends Dexie {
 
         this.version(5).stores({
             timeline: '++id, [noteId+branchName+source], &[noteId+branchName+source+toVersionId], toVersionId, timestamp'
+        });
+
+        // Version 6: Migration to non-compressed storage (Change[])
+        // Wipes existing data as per requirement
+        this.version(6).stores({
+            timeline: '++id, [noteId+branchName+source], &[noteId+branchName+source+toVersionId], toVersionId, timestamp'
         }).upgrade(tx => {
-            return tx.table('timeline').toCollection().modify(event => {
-                if (Array.isArray(event.diffData)) {
-                    try {
-                        const json = JSON.stringify(event.diffData);
-                        const u8 = strToU8(json);
-                        const compressed = compressSync(u8, { level: COMPRESSION_LEVEL });
-                        event.diffData = compressed.buffer.slice(
-                            compressed.byteOffset,
-                            compressed.byteOffset + compressed.byteLength
-                        ) as ArrayBuffer;
-                    } catch (e) {
-                        console.error("VC Worker: Failed to migrate timeline event", event.id, e);
-                        const empty = compressSync(strToU8("[]"));
-                        event.diffData = empty.buffer.slice(empty.byteOffset, empty.byteOffset + empty.byteLength) as ArrayBuffer;
-                    }
-                }
-            });
+            console.log("VC Timeline: Upgrading to v6 - Clearing legacy compressed data");
+            return tx.table('timeline').clear();
         });
 
         this.on('populate', () => {
@@ -62,27 +54,54 @@ export class InternalTimelineDB extends Dexie {
     }
 
     /**
-     * Executes a database operation with robust error handling and retries.
+     * Executes a database operation with robust error handling, retries, and transaction awareness.
      */
     async execute<T>(operation: () => Promise<T>, context: string = 'timeline-op'): Promise<T> {
+        // 1. Transaction Passthrough
+        // If we are already inside a transaction, we MUST NOT attempt to manage connection state
+        // or retry the operation individually.
+        if (Dexie.currentTransaction) {
+            return operation();
+        }
+
         let attempts = 0;
         let lastError: unknown;
 
         while (attempts <= this.MAX_RETRIES) {
             try {
+                // 2. Ensure connection is open
                 if (!this.isOpen()) {
                     await this.open();
                 }
+                
+                // 3. Execute operation
                 return await operation();
+
             } catch (error: any) {
                 lastError = error;
                 attempts++;
 
+                // 4. Fatal Error Handling
+                if (error.name === 'QuotaExceededError' || error.message?.toLowerCase().includes('quota')) {
+                    throw new WorkerError(
+                        'Storage quota exceeded',
+                        'CAPACITY_ERROR',
+                        { originalError: error.message }
+                    );
+                }
+
+                if (error.name === 'SchemaError' || error.name === 'DataError') {
+                    throw error;
+                }
+
+                // 5. Retry Logic
                 const isRecoverable = (
                     error.name === 'DatabaseClosedError' ||
                     error.name === 'TransactionInactiveError' ||
                     error.name === 'UnknownError' ||
                     error.name === 'AbortError' ||
+                    error.name === 'TimeoutError' ||
+                    error.name === 'InvalidStateError' ||
                     (error.message && error.message.includes('closing'))
                 );
 
@@ -90,13 +109,19 @@ export class InternalTimelineDB extends Dexie {
                     throw error;
                 }
 
-                console.warn(`VC Timeline: Retrying ${context} (Attempt ${attempts})`);
-                
-                if (error.name === 'DatabaseClosedError' || error.name === 'UnknownError') {
-                    this.close();
+                // 6. Recovery Actions
+                if (error.name === 'DatabaseClosedError' || error.name === 'UnknownError' || error.name === 'InvalidStateError') {
+                    try { this.close(); } catch (e) { /* ignore */ }
                 }
 
-                await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY_BASE * Math.pow(2, attempts)));
+                // 7. Exponential Backoff with Jitter
+                const backoff = Math.min(this.MAX_RETRY_DELAY, this.RETRY_DELAY_BASE * Math.pow(2, attempts));
+                const jitter = Math.random() * (backoff * 0.5);
+                const delay = backoff + jitter;
+
+                console.warn(`VC Timeline: Retrying ${context} (Attempt ${attempts}) in ${Math.round(delay)}ms`);
+                
+                await new Promise(resolve => setTimeout(resolve, delay));
             }
         }
         throw lastError;

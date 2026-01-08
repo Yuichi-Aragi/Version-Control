@@ -20,10 +20,21 @@ export async function getTimelineEvents(
 
     try {
         return await db.execute(async () => {
-            return await db.timeline
+            const events = await db.timeline
                 .where('[noteId+branchName+source]')
                 .equals([noteId, branchName, source])
-                .sortBy('timestamp');
+                .toArray();
+            
+            // Perform in-memory sort to ensure deterministic order
+            // Primary: Timestamp, Secondary: Version Number
+            return events.sort((a, b) => {
+                // Compare timestamps
+                if (a.timestamp < b.timestamp) return -1;
+                if (a.timestamp > b.timestamp) return 1;
+                
+                // If timestamps are equal, use version number
+                return (a.toVersionNumber || 0) - (b.toVersionNumber || 0);
+            });
         }, 'getTimelineEvents');
     } catch (error) {
         console.error("VC Worker: getTimelineEvents failed", error);
