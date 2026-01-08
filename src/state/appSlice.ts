@@ -2,7 +2,7 @@ import { createSlice } from '@reduxjs/toolkit';
 import type { PayloadAction, AnyAction } from '@reduxjs/toolkit';
 import { AppStatus, getInitialState } from './state';
 import type { AppState, PanelState, SortOrder, DiffPanel } from './state';
-import type { VersionControlSettings, HistorySettings, AppError, TimelineEvent, TimelineSettings, ViewMode, ActiveNoteInfo, DiffRequest } from '@/types';
+import type { VersionControlSettings, HistorySettings, AppError, ViewMode, ActiveNoteInfo, DiffRequest } from '@/types';
 import { DEFAULT_SETTINGS } from '@/constants';
 
 // Import Async Thunks for ExtraReducers
@@ -27,7 +27,6 @@ export const appSlice = createSlice({
         updateEffectiveSettings(state, action: PayloadAction<HistorySettings>) {
             state.effectiveSettings = action.payload;
             // CRITICAL FIX: Transition to READY when settings are loaded if we have a valid context.
-            // This replaces the logic previously handled by loadEffectiveSettingsForNote.fulfilled
             if (state.noteId && state.status === AppStatus.LOADING) {
                 state.status = AppStatus.READY;
             }
@@ -63,43 +62,29 @@ export const appSlice = createSlice({
             let isContextChange = true;
             
             if (noteId) {
-                // We have a definite ID. Compare with last known ID.
                 const compareId = state.noteId || state.lastNoteId;
                 isContextChange = compareId !== noteId;
             } else if (file) {
-                // No ID (Unregistered or Initializing).
-                // Check if file matches last known file path.
                 if (state.lastFilePath && state.lastFilePath === file.path) {
-                    // Same file path, treat as same context (waiting for ID or unregistered).
                     isContextChange = false;
                 } else {
-                    // Different file path.
-                    // If we had a previous note ID, definitely a change.
                     if (state.lastNoteId) {
                         isContextChange = true;
                     } else {
-                        // Previous was also unregistered. Compare paths directly.
                         isContextChange = state.file?.path !== file.path;
                     }
                 }
             }
 
             if (isContextChange) {
-                 // STRICT: Reset view mode to versions on context change
                  state.viewMode = 'versions';
                  state.contextVersion += 1;
-                 
-                 // STRICT: Reset effective settings to global defaults immediately.
                  state.effectiveSettings = { ...DEFAULT_SETTINGS.versionHistorySettings, isGlobal: true };
 
                  if (state.panel?.type !== 'changelog') {
                      state.panel = null;
                  }
 
-                 // CRITICAL FIX: Reset processing state on context change.
-                 // This prevents UI deadlocks if a background operation from the previous context
-                 // aborts silently or fails to dispatch a completion action.
-                 // Exception: Global renaming locks the entire database, so it persists.
                  if (!state.isRenaming) {
                      state.isProcessing = false;
                  }
@@ -147,9 +132,6 @@ export const appSlice = createSlice({
                 state.currentBranch = null;
                 state.availableBranches = [];
 
-                // If noteId is null, it means the note is unregistered.
-                // We set status to READY so the UI can render the "Empty State" / "Start Tracking" view.
-                // If noteId exists, we set LOADING to fetch history.
                 if (!noteId) {
                     state.status = AppStatus.READY;
                 } else {
@@ -188,16 +170,11 @@ export const appSlice = createSlice({
             if (state.panel?.type !== 'changelog') {
                 state.panel = null;
             }
-            // Ensure processing state is cleared when clearing note, unless global rename is active
             if (!state.isRenaming) {
                 state.isProcessing = false;
             }
             state.error = null;
             state.isManualVersionEdit = false;
-            
-            // NOTE: We do NOT reset viewMode, effectiveSettings, lastNoteId, or lastFilePath here.
-            // This preserves the user's context if they temporarily close/reopen the view (e.g. mobile sidebar).
-            // The next initializeView will handle resetting if the context genuinely changes.
         },
 
         // --- Actions specific to ReadyState ---
@@ -328,39 +305,6 @@ export const appSlice = createSlice({
             }
         },
 
-        // --- Timeline Actions ---
-        setTimelineData(state, action: PayloadAction<TimelineEvent[]>) {
-            if (state.panel?.type === 'timeline') {
-                state.panel.events = action.payload;
-            }
-        },
-        addTimelineEvent(state, action: PayloadAction<TimelineEvent>) {
-            if (state.panel?.type === 'timeline' && state.panel.events) {
-                state.panel.events.unshift(action.payload);
-            }
-        },
-        removeTimelineEvent(state, action: PayloadAction<{ versionId: string }>) {
-            if (state.panel?.type === 'timeline' && state.panel.events) {
-                const idToRemove = action.payload.versionId;
-                state.panel.events = state.panel.events.filter(e => e.toVersionId !== idToRemove);
-            }
-        },
-        setTimelineSettings(state, action: PayloadAction<TimelineSettings>) {
-            if (state.panel?.type === 'timeline') {
-                state.panel.settings = action.payload;
-            }
-        },
-        updateTimelineEventInState(state, action: PayloadAction<{ versionId: string; name?: string; description?: string }>) {
-            if (state.panel?.type === 'timeline' && state.panel.events) {
-                const { versionId, name, description } = action.payload;
-                const event = state.panel.events.find(e => e.toVersionId === versionId);
-                if (event) {
-                    if (name !== undefined) event.toVersionName = name;
-                    if (description !== undefined) event.toVersionDescription = description;
-                }
-            }
-        },
-
         // --- Watch Mode UI action ---
         setWatchModeCountdown(state, action: PayloadAction<number | null>) {
             if (state.status === AppStatus.READY || state.status === AppStatus.LOADING) {
@@ -376,7 +320,6 @@ export const appSlice = createSlice({
         }
     },
     extraReducers: (builder) => {
-        // --- Core Thunks ---
         builder.addCase(loadEffectiveSettingsForNote.fulfilled, (state, action) => {
             state.effectiveSettings = action.payload;
             if (state.noteId) {
@@ -384,7 +327,6 @@ export const appSlice = createSlice({
             }
         });
 
-        // --- Version Thunks ---
         builder.addCase(saveNewVersion.fulfilled, (state, action) => {
             state.isProcessing = false;
             if (action.payload && action.payload.newVersionEntry) {
@@ -399,7 +341,6 @@ export const appSlice = createSlice({
             }
         });
 
-        // --- Edit History Thunks ---
         builder.addCase(saveNewEdit.fulfilled, (state, action) => {
             state.isProcessing = false;
             if (action.payload) {
@@ -410,9 +351,6 @@ export const appSlice = createSlice({
             }
         });
 
-        // --- Consolidated Matchers for Pending/Rejected ---
-        // Exclude RTK Query actions (historyApi, changelogApi) from global processing state
-        // to prevent UI freezing or global error states for data fetching issues.
         builder.addMatcher(
             (action): action is AnyAction => 
                 action.type.endsWith('/pending') && 
@@ -434,8 +372,6 @@ export const appSlice = createSlice({
                     return;
                 }
                 
-                // Check for AbortError in action.error if payload is undefined
-                // This handles RTK's built-in abort mechanism
                 if (action.error?.name === 'AbortError' || action.error?.message === 'Aborted') {
                     return;
                 }

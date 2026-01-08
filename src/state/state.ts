@@ -1,5 +1,5 @@
 import { TFile } from 'obsidian';
-import type { VersionControlSettings, HistorySettings, VersionHistoryEntry, AppError, DiffTarget, DiffRequest, DiffType, TimelineEvent, TimelineSettings, ViewMode } from '@/types';
+import type { VersionControlSettings, HistorySettings, VersionHistoryEntry, AppError, DiffTarget, DiffRequest, DiffType, ViewMode } from '@/types';
 export type { TimelineEvent } from '@/types';
 import { DEFAULT_SETTINGS } from '@/constants';
 import type { AppThunk } from './store';
@@ -56,8 +56,7 @@ export interface ChangelogPanel {
 
 export interface TimelinePanel {
     type: 'timeline';
-    events: TimelineEvent[] | null; // null while loading
-    settings: TimelineSettings;
+    // Data is now managed by RTK Query (historyApi)
 }
 
 export interface DashboardPanel {
