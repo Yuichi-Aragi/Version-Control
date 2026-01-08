@@ -7,10 +7,30 @@ import type { TimelinePanelProps } from '@/ui/components/panels/TimelinePanel/ty
 import { TimelineHeader, TimelineEvent, TimelineEmpty } from '@/ui/components/panels/TimelinePanel/components';
 import { useMatchController, useVirtualScroll } from '@/ui/components/panels/TimelinePanel/hooks';
 import { sortEvents } from '@/ui/components/panels/TimelinePanel/utils';
+import { useGetTimelineQuery } from '@/state/apis/history.api';
 
-export const TimelinePanel: FC<TimelinePanelProps> = ({ panelState }) => {
-    const { events, settings } = panelState;
+export const TimelinePanel: FC<TimelinePanelProps> = ({ panelState: _ }) => {
+    // Selectors
+    const noteId = useAppSelector(state => state.app.noteId);
+    const currentBranch = useAppSelector(state => state.app.currentBranch);
     const viewMode = useAppSelector(state => state.app.viewMode);
+
+    // RTK Query
+    const { data, isLoading } = useGetTimelineQuery(
+        { noteId: noteId!, branchName: currentBranch!, viewMode },
+        { skip: !noteId || !currentBranch }
+    );
+
+    const events = data?.events ?? null;
+    const settings = data?.settings ?? {
+        showDescription: false,
+        showName: true,
+        showVersionNumber: true,
+        showPreview: true,
+        expandByDefault: false,
+    };
+
+    // Hooks
     const handleClose = usePanelClose();
     const handleBackdropClick = useBackdropClick(handleClose);
     const search = usePanelSearch();
@@ -83,8 +103,8 @@ export const TimelinePanel: FC<TimelinePanelProps> = ({ panelState }) => {
                 />
 
                 <div className="v-timeline-content">
-                    {events === null || sortedEvents.length === 0 ? (
-                        <TimelineEmpty isLoading={events === null} />
+                    {events === null || (sortedEvents.length === 0 && !isLoading) ? (
+                        <TimelineEmpty isLoading={isLoading} />
                     ) : (
                         <div className="v-timeline-list-container">
                             <Virtuoso

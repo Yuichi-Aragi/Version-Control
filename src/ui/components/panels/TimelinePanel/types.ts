@@ -1,9 +1,10 @@
-import type { TimelinePanel as TimelinePanelState, TimelineEvent } from '@/state';
+import type { TimelineEvent } from '@/state';
 import type { TimelineSettings } from '@/types';
 import type { VirtuosoHandle } from 'react-virtuoso';
+import type { TimelinePanel } from '@/state';
 
 export interface TimelinePanelProps {
-    panelState: TimelinePanelState;
+    panelState: TimelinePanel;
 }
 
 export interface TimelineMatch {
