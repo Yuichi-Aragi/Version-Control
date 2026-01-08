@@ -268,7 +268,8 @@ export const handleVaultSave = (file: TFile): AppThunk => async (dispatch, _getS
                     dispatch(performAutoSave(f));
                 }
                 if (editSettings.autoSaveOnSave) {
-                    dispatch(saveNewEdit(true)); // Pass true for isAuto
+                    // Explicitly disallow initialization for auto-save
+                    dispatch(saveNewEdit({ isAuto: true, allowInit: false }));
                 }
             },
             intervalMs

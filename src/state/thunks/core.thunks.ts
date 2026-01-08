@@ -79,9 +79,11 @@ export const autoRegisterNote = createAsyncThunk<
         dispatch(appSlice.actions.initializeView({ file, noteId: null, source: 'none' }));
 
         try {
+            // Explicitly allow initialization for auto-register
             const resultAction = await dispatch(saveNewVersion({
                 name: 'Initial Version',
                 isAuto: true,
+                allowInit: true,
                 force: true,
                 settings: getState().app.settings,
             }));
@@ -140,16 +142,16 @@ export const initializeView = createAsyncThunk<
             if (leaf !== undefined) {
                 targetLeaf = leaf;
             } else {
-                // Priority 1: The leaf of the currently active FileView (if focused)
+                // Priority 1: The most recent leaf (if sidebar is focused)
+                    // This is critical for sidebar plugins to maintain context of the last active note
+                    const recentLeaf = app.workspace.getMostRecentLeaf();
+                    if (recentLeaf?.view instanceof FileView) {
+                        targetLeaf = recentLeaf;
+                } else {
+                    // Priority 2: The leaf of the currently active FileView (if focused)
                 const activeView = app.workspace.getActiveViewOfType(FileView);
                 if (activeView) {
                     targetLeaf = activeView.leaf;
-                } else {
-                    // Priority 2: The most recent leaf (if sidebar is focused)
-                    // This is critical for sidebar plugins to maintain context of the last active note
-                    const recentLeaf = (app.workspace as any).getMostRecentLeaf?.() as WorkspaceLeaf | null;
-                    if (recentLeaf?.view instanceof FileView) {
-                        targetLeaf = recentLeaf;
                     }
                 }
             }
@@ -214,7 +216,8 @@ export const initializeView = createAsyncThunk<
 
                 if (editSettings.autoRegisterNotes && isPathAllowed(activeNoteInfo.file.path, { pathFilters: editSettings.pathFilters })) {
                     dispatch(appSlice.actions.setViewMode('edits'));
-                    dispatch(saveNewEdit(true));
+                    // Explicitly allow initialization for auto-register
+                    dispatch(saveNewEdit({ isAuto: true, allowInit: true }));
                     return;
                 }
             }
