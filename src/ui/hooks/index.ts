@@ -43,6 +43,7 @@ export { useBackdropClick } from './useBackdropClick';
 export { useDelayedFocus } from './useDelayedFocus';
 export { usePanelClose } from './usePanelClose';
 export { usePanelSearch } from './usePanelSearch';
+export { useObsidianComponent } from './useObsidianComponent';
 
 // ============================================================================
 // REDUX HOOKS
