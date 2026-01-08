@@ -263,12 +263,17 @@ export class CleanupManager extends Component {
       };
 
       try {
+        // Delegate to the robust operation
         await this.orphanCleanupOp.performDeepCleanup(result, () => this.isDestroyed);
       } catch (e) {
+        // This catch block is a final safety net. 
+        // performDeepCleanup catches its own internal errors to allow partial success,
+        // so we should only reach here on catastrophic failure.
         result.success = false;
         const error = e instanceof Error ? e.message : String(e);
-        result.errors?.push(error);
-        console.error('VC: Unexpected error during orphan data cleanup.', e);
+        result.errors = result.errors || [];
+        result.errors.push(`Catastrophic cleanup failure: ${error}`);
+        console.error('VC: Catastrophic error during orphan data cleanup.', e);
       }
 
       return result;
