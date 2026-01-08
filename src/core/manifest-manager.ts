@@ -180,19 +180,13 @@ export class ManifestManager {
                 manifest.lastModified = new Date().toISOString();
             });
 
-            const centralManifest = await this.centralManifestRepo.load();
-            const noteEntry = centralManifest.notes[oldId];
-            
-            if (noteEntry) {
-                await this.centralManifestRepo.addNoteEntry(
-                    newId, 
-                    noteEntry.notePath, 
-                    this.pathService.getNoteManifestPath(newId)
-                );
-                await this.centralManifestRepo.removeNoteEntry(oldId);
-            } else {
-                console.warn(`VC: Renaming note entry ${oldId} -> ${newId}, but old entry not found in central manifest.`);
-            }
+            // Use atomic replacement to ensure strict path uniqueness is respected.
+            // Traditional add-then-remove would fail because the path is still claimed by oldId during add.
+            await this.centralManifestRepo.replaceNoteId(
+                oldId, 
+                newId, 
+                this.pathService.getNoteManifestPath(newId)
+            );
 
         } catch (error) {
             console.error(`VC: Failed to rename note entry from ${oldId} to ${newId}.`, error);
