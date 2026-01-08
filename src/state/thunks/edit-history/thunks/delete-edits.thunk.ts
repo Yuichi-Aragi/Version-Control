@@ -26,7 +26,6 @@ export const deleteEdit = createAsyncThunk<
         if (!validateReadyState(state, uiService)) return rejectWithValue('Not ready');
         if (!validateNoteContext(state.noteId, state.file)) return rejectWithValue('Invalid context');
         
-        // validateNoteContext ensures noteId is not null, but we must assert it for TS
         const noteId = state.noteId!;
 
         dispatch(appSlice.actions.closePanel());
@@ -37,19 +36,17 @@ export const deleteEdit = createAsyncThunk<
 
             if (shouldAbort(services, getState, { noteId })) return rejectWithValue('Context changed');
 
-            if (state.panel?.type === 'timeline' && state.viewMode === 'edits') {
-                dispatch(appSlice.actions.removeTimelineEvent({ versionId: editId }));
-            }
-
             // Invalidate RTK Query tag
-            dispatch(historyApi.util.invalidateTags([{ type: 'EditHistory', id: noteId }]));
+            dispatch(historyApi.util.invalidateTags([
+                { type: 'EditHistory', id: noteId },
+                { type: 'Timeline', id: noteId }
+            ]));
 
             uiService.showNotice('Edit deleted.');
             return;
         } catch (error) {
             console.error('VC: Failed to delete edit', error);
             uiService.showNotice('Failed to delete edit.');
-            // Force refresh on error
             dispatch(historyApi.util.invalidateTags([{ type: 'EditHistory', id: noteId }]));
             return rejectWithValue(String(error));
         }
@@ -75,7 +72,6 @@ export const deleteAllEdits = createAsyncThunk<
         if (!validateReadyState(state, uiService)) return rejectWithValue('Not ready');
         if (!validateNoteContext(state.noteId, state.file)) return rejectWithValue('Invalid context');
         
-        // validateNoteContext ensures noteId is not null, but we must assert it for TS
         const noteId = state.noteId!;
 
         dispatch(appSlice.actions.closePanel());
@@ -106,12 +102,11 @@ export const deleteAllEdits = createAsyncThunk<
             if (shouldAbort(services, getState, { noteId })) return rejectWithValue('Context changed');
 
             // Invalidate RTK Query tag
-            dispatch(historyApi.util.invalidateTags([{ type: 'EditHistory', id: noteId }]));
+            dispatch(historyApi.util.invalidateTags([
+                { type: 'EditHistory', id: noteId },
+                { type: 'Timeline', id: noteId }
+            ]));
             
-            if (state.panel?.type === 'timeline' && state.viewMode === 'edits') {
-                dispatch(appSlice.actions.setTimelineData([]));
-            }
-
             uiService.showNotice('All edits in this branch deleted.');
             return;
 

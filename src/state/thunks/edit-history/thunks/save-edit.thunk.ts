@@ -8,17 +8,29 @@ import type { VersionHistoryEntry } from '@/types';
 import { historyApi } from '@/state/apis/history.api';
 import { validateReadyState, validateFileExists } from '@/state/utils/thunk-validation';
 
+export interface SaveEditOptions {
+    isAuto?: boolean;
+    allowInit?: boolean;
+}
+
 /**
  * Saves a new edit for the current note.
  */
 export const saveNewEdit = createAsyncThunk<
     { newEditEntry: VersionHistoryEntry; deletedIds: string[] } | null,
-    boolean | undefined,
+    SaveEditOptions | boolean | undefined,
     ThunkConfig
 >(
     'editHistory/saveNewEdit',
-    async (isAuto = false, { dispatch, getState, extra: services, rejectWithValue }) => {
+    async (arg, { dispatch, getState, extra: services, rejectWithValue }) => {
         if (shouldAbort(services, getState)) return rejectWithValue('Aborted');
+
+        // Normalize argument
+        const options: SaveEditOptions = typeof arg === 'boolean' 
+            ? { isAuto: arg, allowInit: !arg } 
+            : (arg || { isAuto: false, allowInit: true });
+        
+        const { isAuto = false, allowInit = !isAuto } = options;
 
         const state = getState().app;
         const uiService = services.uiService;
@@ -27,7 +39,6 @@ export const saveNewEdit = createAsyncThunk<
         const noteManager = services.noteManager;
         const manifestManager = services.manifestManager;
         const backgroundTaskManager = services.backgroundTaskManager;
-        const timelineManager = services.timelineManager;
         const eventBus = services.eventBus;
 
         if (!validateReadyState(state, uiService, isAuto)) {
@@ -37,6 +48,17 @@ export const saveNewEdit = createAsyncThunk<
         const file = state.file;
         if (!validateFileExists(file, uiService, isAuto)) {
             return rejectWithValue('No file');
+        }
+
+        if (isAuto && !allowInit) {
+            if (!state.noteId) {
+                return null;
+            }
+
+            const manifest = await editHistoryManager.getEditManifest(state.noteId);
+            if (!manifest) {
+                return null;
+            }
         }
 
         try {
@@ -58,7 +80,6 @@ export const saveNewEdit = createAsyncThunk<
                 }
 
                 dispatch(appSlice.actions.updateNoteIdInState({ noteId }));
-                // Trigger refresh since noteId is new
                 dispatch(historyApi.util.invalidateTags([{ type: 'EditHistory', id: noteId }]));
             }
 
@@ -81,31 +102,17 @@ export const saveNewEdit = createAsyncThunk<
                 const { entry: newEditEntry, deletedIds } = result;
 
                 eventBus.trigger('version-saved', noteId);
-                
-                const currentState = getState().app;
-                if (currentState.panel?.type === 'timeline' && currentState.viewMode === 'edits') {
-                    try {
-                        const newEvent = await timelineManager.createEventForNewVersion(
-                            noteId,
-                            currentBranch,
-                            'edit',
-                            newEditEntry
-                        );
-                        if (newEvent) {
-                            dispatch(appSlice.actions.addTimelineEvent(newEvent));
-                        }
-                    } catch (timelineError) {
-                        console.error('VC: Failed to update timeline instantly', timelineError);
-                    }
-                }
 
                 if (!isAuto) {
                     uiService.showNotice(`Edit #${newEditEntry.versionNumber} saved.`);
                     backgroundTaskManager.resetTimer('edit');
                 }
                 
-                // Invalidate RTK Query tag to update list
-                dispatch(historyApi.util.invalidateTags([{ type: 'EditHistory', id: noteId }]));
+                // Invalidate RTK Query tags to update list and timeline
+                dispatch(historyApi.util.invalidateTags([
+                    { type: 'EditHistory', id: noteId },
+                    { type: 'Timeline', id: noteId }
+                ]));
 
                 return { newEditEntry, deletedIds };
             } else {

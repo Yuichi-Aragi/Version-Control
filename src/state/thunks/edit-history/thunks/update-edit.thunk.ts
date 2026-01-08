@@ -30,23 +30,17 @@ export const updateEditDetails =
         if (!validateReadyState(state, uiService)) return;
         if (!validateNoteContext(state.noteId, state.file)) return;
         
-        // validateNoteContext ensures noteId is not null, but we must assert it for TS
         const noteId = state.noteId!;
-
-        // 1. Optimistic Update: Timeline Panel
-        dispatch(
-            appSlice.actions.updateTimelineEventInState({
-                versionId: editId,
-                ...details,
-            })
-        );
 
         try {
             await editHistoryManager.updateEditMetadata(noteId, editId, details.name, details.description);
             eventBus.trigger('version-updated', noteId, editId, details);
             
-            // Invalidate to refresh list
-            dispatch(historyApi.util.invalidateTags([{ type: 'EditHistory', id: noteId }]));
+            // Invalidate to refresh list and timeline
+            dispatch(historyApi.util.invalidateTags([
+                { type: 'EditHistory', id: noteId },
+                { type: 'Timeline', id: noteId }
+            ]));
 
         } catch (error) {
             console.error('VC: Failed to update edit details', error);
