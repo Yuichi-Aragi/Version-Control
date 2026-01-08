@@ -162,11 +162,19 @@ export default class VersionControlPlugin extends Plugin {
             // Ensure any critical, queued file operations are completed before shutdown.
             // This is wrapped in a try-catch to guarantee that the unload process continues
             // even if this step fails, which is critical for preventing resource leaks.
+            
+            // 1. Cleanup Manager tasks (e.g. deleting old versions)
             if (this.cleanupManager) {
                 await this.cleanupManager.completePendingCleanups();
             }
+
+            // 2. Flush Edit History writes (Critical for data integrity)
+            // We must ensure that any buffered writes to .vctrl files are flushed to disk.
+            if (this.services?.editHistoryManager) {
+                await this.services.editHistoryManager.flushAllPendingWrites();
+            }
         } catch (error) {
-            console.error("Version Control: Error while completing pending cleanups on unload.", error);
+            console.error("Version Control: Error while completing pending operations on unload.", error);
         }
     }
 
