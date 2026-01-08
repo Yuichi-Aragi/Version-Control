@@ -1,4 +1,7 @@
 import type VersionControlPlugin from '@/main/VersionControlPlugin';
+import { historyApi } from '@/state/apis/history.api';
+import { changelogApi } from '@/state/apis/changelog.api';
+import { ServiceRegistry } from '@/services-registry';
 
 /**
  * Handles plugin unloading lifecycle.
@@ -61,6 +64,21 @@ export class PluginUnloader {
                     console.warn("Version Control: Error cleaning up registry", e);
                 }
             }
+
+            // 6. Reset ServiceRegistry Singleton to allow fresh init on reload
+            ServiceRegistry.resetInstance();
+
+            // 7. Reset RTK Query State to clear caches and subscriptions
+            // This ensures that if the plugin is reloaded, we don't have stale cache entries.
+            if (this.plugin.store) {
+                this.plugin.store.dispatch(historyApi.util.resetApiState());
+                this.plugin.store.dispatch(changelogApi.util.resetApiState());
+                // Explicitly nullify store reference on plugin to aid GC
+                this.plugin.store = null as any;
+            }
+            
+            // Nullify services reference
+            this.plugin.services = null as any;
 
             this.plugin.setInitialized(false);
         } catch (error) {
