@@ -27,9 +27,3 @@ export const CONTENT_IDENTITY_THRESHOLD = 100 * 1024; // 100KB threshold for ide
  * Prevents transaction overflow in IndexedDB.
  */
 export const BATCH_DELETE_LIMIT = 1000; // Prevent transaction overflow
-
-/**
- * Compression level for fflate (0-9).
- * Level 9 provides balanced compression with acceptable performance.
- */
-export const COMPRESSION_LEVEL = 9; // Balanced compression

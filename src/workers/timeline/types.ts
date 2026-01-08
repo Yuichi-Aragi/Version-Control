@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 
 import type { TimelineEvent } from '@/types';
-import type { Change } from 'diff';
+import type { Change } from '@/types';
 
 /**
  * Timeline Worker Types & Error Definitions
@@ -44,17 +44,17 @@ export type WorkerErrorCode =
     | 'DB_GLOBAL_CLEAR_FAILED'
     | 'LOCK_TIMEOUT'
     | 'VALIDATION_FAILED'
-    | 'COMPRESSION_FAILED';
+    | 'CAPACITY_ERROR';
 
 // --- Database Types ---
 
 /**
- * Internal representation of timeline events with compressed diff data.
- * Used for IndexedDB storage to minimize footprint.
+ * Internal representation of timeline events.
+ * Now stores diffData as raw objects (Change[]) without compression.
  */
 export interface StoredTimelineEvent extends Omit<TimelineEvent, 'diffData'> {
-    /** Compressed JSON of Change[] using fflate */
-    diffData: ArrayBuffer;
+    /** Raw Change objects */
+    diffData: Change[];
 }
 
 // --- Re-export for convenience ---
