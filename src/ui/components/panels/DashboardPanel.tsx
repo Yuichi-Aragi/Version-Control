@@ -1,6 +1,6 @@
-import React, { useMemo, useRef, useEffect, useLayoutEffect } from 'react';
+import { useMemo, useRef, useEffect, useLayoutEffect } from 'react';
 import HeatMap from '@uiw/react-heat-map';
-import { useAppDispatch, useAppSelector } from '@/ui/hooks';
+import { useAppDispatch, useAppSelector, useObsidianComponent } from '@/ui/hooks';
 import { appSlice } from '@/state/appSlice';
 import { useGetVersionHistoryQuery, useGetEditHistoryQuery } from '@/state/apis/history.api';
 import { moment } from 'obsidian';
@@ -25,6 +25,9 @@ export const DashboardPanel: React.FC = () => {
     
     const noteId = useAppSelector(state => state.app.noteId);
     const viewMode = useAppSelector(state => state.app.viewMode);
+
+    // Manage Obsidian Component lifecycle for DOM events
+    const component = useObsidianComponent();
 
     // Fetch data using RTK Query hooks
     // We conditionally skip fetching based on viewMode to optimize performance
@@ -69,12 +72,12 @@ export const DashboardPanel: React.FC = () => {
             }
         };
 
-        // Use mousedown to capture the event early, covering clicks both in the overlay and outside the view
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => {
-            document.removeEventListener('mousedown', handleClickOutside);
-        };
-    }, [dispatch]);
+        // Use Component to register DOM events for automatic cleanup
+        // We use document here, which is supported by registerDomEvent
+        component.registerDomEvent(document, 'mousedown', handleClickOutside);
+
+        // No explicit cleanup needed as component.unload() handles it
+    }, [dispatch, component]);
 
     // Scroll to end of heatmap on mount/update to ensure the latest dates (right side) are visible
     // This fixes the issue where new cells might be cut off if the container is too narrow

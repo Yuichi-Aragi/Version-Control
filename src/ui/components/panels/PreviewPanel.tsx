@@ -1,4 +1,4 @@
-import { MarkdownRenderer, moment, Component } from 'obsidian';
+import { MarkdownRenderer, moment } from 'obsidian';
 import { type FC, useCallback, useState, useRef, useLayoutEffect, useEffect, useMemo } from 'react';
 import type { VirtuosoHandle } from 'react-virtuoso';
 import { useAppSelector } from '@/ui/hooks';
@@ -10,6 +10,7 @@ import clsx from 'clsx';
 import { escapeRegExp } from '@/ui/utils/strings';
 import { usePanelClose } from '@/ui/hooks';
 import { usePanelSearch } from '@/ui/hooks';
+import { useObsidianComponent } from '@/ui/hooks';
 import { useGetVersionContentQuery } from '@/state/apis/history.api';
 
 interface PreviewPanelProps {
@@ -28,6 +29,9 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
     const markdownRef = useRef<HTMLDivElement>(null);
     const virtuosoRef = useRef<VirtuosoHandle>(null);
     const { version } = panelState;
+
+    // Manage Obsidian Component lifecycle for Markdown rendering
+    const component = useObsidianComponent();
 
     // Fetch content using RTK Query
     const { data: content, isLoading, isError } = useGetVersionContentQuery(
@@ -89,13 +93,15 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
             const container = markdownRef.current;
             container.empty();
             try {
-                MarkdownRenderer.render(app, content, container, notePath, new Component());
+                // Pass the managed component to MarkdownRenderer
+                // This ensures any resources (embeds, post-processors) are cleaned up when the panel unmounts
+                MarkdownRenderer.render(app, content, container, notePath, component);
             } catch (error) {
                 console.error("VC: Failed to render Markdown preview.", error);
                 container.setText(content);
             }
         }
-    }, [shouldRenderMarkdown, content, notePath, app]);
+    }, [shouldRenderMarkdown, content, notePath, app, component]);
     
     const versionLabel = version.name ? `V${version.versionNumber}: ${version.name}` : `Version ${version.versionNumber}`;
 
