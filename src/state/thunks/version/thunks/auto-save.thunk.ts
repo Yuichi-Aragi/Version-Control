@@ -4,6 +4,7 @@ import { AppStatus } from '@/state';
 import { resolveSettings } from '@/state/utils/settingsUtils';
 import { shouldAbort } from '@/state/utils/guards';
 import { updateStateWithNewVersion } from '../helpers';
+import { saveNewVersion } from './save-version.thunk';
 
 /**
  * Performs an automatic save for a file.
@@ -29,7 +30,6 @@ export const performAutoSave = (file: TFile): AppThunk => async (dispatch, getSt
         return; // Silently ignore auto-saves during rename
     }
 
-    const versionManager = services.versionManager;
     const manifestManager = services.manifestManager;
     const plugin = services.plugin;
 
@@ -44,23 +44,27 @@ export const performAutoSave = (file: TFile): AppThunk => async (dispatch, getSt
         ...historySettings,
     };
 
-    const result = await versionManager.saveNewVersionForFile(file, {
+    // Note: isAuto=true implies allowInit=false, preventing creation of history if it doesn't exist
+    const resultAction = await dispatch(saveNewVersion({
         name: 'Auto-save',
         force: false,
         isAuto: true,
         settings: hybridSettings,
-    });
+    }));
 
-    if (result.status === 'saved' && result.newVersionEntry) {
-        const currentState = getState().app;
-        // Only update state if we are still viewing the file that was auto-saved
-        if (currentState.status === AppStatus.READY && currentState.file?.path === file.path && currentState.noteId === noteId) {
-            updateStateWithNewVersion(
-                dispatch,
-                result.newVersionEntry,
-                result.newNoteId,
-                currentState.noteId
-            );
+    if (saveNewVersion.fulfilled.match(resultAction)) {
+        const result = resultAction.payload;
+        if (result && result.status === 'saved' && result.newVersionEntry) {
+            const currentState = getState().app;
+            // Only update state if we are still viewing the file that was auto-saved
+            if (currentState.status === AppStatus.READY && currentState.file?.path === file.path && currentState.noteId === noteId) {
+                updateStateWithNewVersion(
+                    dispatch,
+                    result.newVersionEntry,
+                    result.newNoteId,
+                    currentState.noteId
+                );
+            }
         }
     }
 };

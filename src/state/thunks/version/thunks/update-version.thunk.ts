@@ -49,9 +49,6 @@ export const updateVersionDetails = (
         description: details.description.trim(),
     };
 
-    // Optimistically update timeline
-    dispatch(appSlice.actions.updateTimelineEventInState({ versionId, ...updatePayload }));
-
     try {
         await versionManager.updateVersionDetails(
             noteId,
@@ -62,15 +59,19 @@ export const updateVersionDetails = (
         const eventBus = services.eventBus;
         eventBus.trigger('version-updated', noteId, versionId, updatePayload);
 
-        // Invalidate to refresh list
-        dispatch(historyApi.util.invalidateTags([{ type: 'VersionHistory', id: noteId }]));
+        // Invalidate to refresh list and timeline
+        dispatch(historyApi.util.invalidateTags([
+            { type: 'VersionHistory', id: noteId },
+            { type: 'Timeline', id: noteId }
+        ]));
 
     } catch (error) {
         console.error(
-            `VC: Failed to save details update for version ${versionId}. Reverting UI.`,
+            `VC: Failed to save details update for version ${versionId}.`,
             error
         );
-        uiService.showNotice("VC: Error, could not save version details. Reverting changes.", 5000);
+        uiService.showNotice("VC: Error, could not save version details.", 5000);
+        // Ensure UI is consistent
         dispatch(historyApi.util.invalidateTags([{ type: 'VersionHistory', id: noteId }]));
     } finally {
         if (!shouldAbort(services, getState)) {

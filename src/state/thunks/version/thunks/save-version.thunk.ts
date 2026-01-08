@@ -40,7 +40,7 @@ export const saveNewVersion = createAsyncThunk<
             return rejectWithValue('Invalid options');
         }
 
-        const { isAuto = false, settings } = options;
+        const { isAuto = false, allowInit = !isAuto, settings } = options;
         const uiService = services.uiService;
         const initialState = getState().app;
 
@@ -49,6 +49,7 @@ export const saveNewVersion = createAsyncThunk<
         }
 
         const versionManager = services.versionManager;
+        const manifestManager = services.manifestManager;
         const app = services.app;
         const backgroundTaskManager = services.backgroundTaskManager;
 
@@ -59,6 +60,23 @@ export const saveNewVersion = createAsyncThunk<
         const initialFileFromState = initialState.file;
         if (!validateFileExists(initialFileFromState, uiService, isAuto)) {
             return rejectWithValue('No file');
+        }
+
+        // AUTHORITY CHECK: Prevent auto-saves from initializing history
+        // If allowInit is true (e.g. manual save or autoRegisterNote), we skip this check
+        // and proceed to create ID and manifest if missing.
+        if (isAuto && !allowInit) {
+            // Case 1: Note is completely untracked (no ID in state)
+            if (!initialState.noteId) {
+                return null;
+            }
+
+            // Case 2: Note has ID, but might not have a manifest (orphaned ID or just generated)
+            const manifest = await manifestManager.loadNoteManifest(initialState.noteId);
+            if (!manifest) {
+                // No history exists, and this is an auto-save without init authority. Abort.
+                return null;
+            }
         }
 
         try {
