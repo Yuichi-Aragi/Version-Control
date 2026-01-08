@@ -1,16 +1,27 @@
 import type { FC } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { useAppDispatch } from '@/ui/hooks';
-import { thunks } from '@/state';
+import { useAppSelector } from '@/ui/hooks';
 import { Icon } from '@/ui/components';
 import type { TimelineFiltersProps } from '@/ui/components/panels/TimelinePanel/types';
 import type { TimelineSettings } from '@/types';
+import { useUpdateTimelineSettingsMutation } from '@/state/apis/history.api';
 
 export const TimelineFilters: FC<TimelineFiltersProps> = ({ settings }) => {
-    const dispatch = useAppDispatch();
+    const noteId = useAppSelector(state => state.app.noteId);
+    const currentBranch = useAppSelector(state => state.app.currentBranch);
+    const viewMode = useAppSelector(state => state.app.viewMode);
+
+    const [updateSettings] = useUpdateTimelineSettingsMutation();
 
     const toggle = (key: keyof TimelineSettings) => {
-        dispatch(thunks.updateTimelineSettings({ [key]: !settings[key] }));
+        if (!noteId || !currentBranch) return;
+        
+        updateSettings({
+            noteId,
+            branchName: currentBranch,
+            viewMode,
+            settings: { [key]: !settings[key] }
+        });
     };
 
     return (
