@@ -1,7 +1,7 @@
 import clsx from 'clsx';
 import { type FC, memo, useState, useEffect, type SyntheticEvent } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { useAppDispatch, useAppSelector } from '@/ui/hooks';
+import { useAppDispatch, useAppSelector, useObsidianComponent } from '@/ui/hooks';
 import { GlobalSettings } from './settings/GlobalSettings';
 import { NoteSpecificSettings } from './settings/NoteSpecificSettings';
 import { Icon } from '@/ui/components';
@@ -24,6 +24,9 @@ const SettingsPanelComponent: FC = () => {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isOnline, setIsOnline] = useState(navigator.onLine);
 
+    // Manage Obsidian Component lifecycle for window events
+    const component = useObsidianComponent();
+
     const {
         handleRefresh,
         handleExport,
@@ -38,13 +41,13 @@ const SettingsPanelComponent: FC = () => {
     useEffect(() => {
         const handleOnline = () => setIsOnline(true);
         const handleOffline = () => setIsOnline(false);
-        window.addEventListener('online', handleOnline);
-        window.addEventListener('offline', handleOffline);
-        return () => {
-            window.removeEventListener('online', handleOnline);
-            window.removeEventListener('offline', handleOffline);
-        };
-    }, []);
+
+        // Use Component to register DOM events for automatic cleanup
+        component.registerDomEvent(window, 'online', handleOnline);
+        component.registerDomEvent(window, 'offline', handleOffline);
+
+        // No explicit cleanup return needed as component.unload() handles it
+    }, [component]);
 
     useEffect(() => {
         if (!isActive) {
