@@ -158,8 +158,6 @@ export class ServiceRegistry {
 
         this.backgroundTaskManager = new BackgroundTaskManager(
             {} as AppStore,
-            this.manifestManager,
-            this.editHistoryManager,
             plugin
         );
 
@@ -198,8 +196,6 @@ export class ServiceRegistry {
 
         this.backgroundTaskManager = new BackgroundTaskManager(
             this.store,
-            this.manifestManager,
-            this.editHistoryManager,
             this.plugin
         );
 
@@ -300,25 +296,34 @@ export class ServiceRegistry {
     async cleanupAll(): Promise<void> {
         // Invalidate caches and clear all pending task queues
         try {
-            this.centralManifestRepo.invalidateCache();
-            this.noteManifestRepo.clearCache();
-            this.queueService.clearAll();
+            this.centralManifestRepo?.invalidateCache();
+            this.noteManifestRepo?.clearCache();
+            this.queueService?.clearAll();
         } catch (e) {
             console.warn("Version Control: Error clearing service caches", e);
         }
 
         // Terminate workers
         try {
-            await this.editHistoryManager.terminate();
+            await this.editHistoryManager?.terminate();
         } catch (e) { /* Ignore */ }
         
         try {
-            this.compressionManager.terminate();
+            this.compressionManager?.terminate();
         } catch (e) { /* Ignore */ }
         
         try {
-            this.timelineDatabase.terminate();
+            this.timelineDatabase?.terminate();
         } catch (e) { /* Ignore */ }
+
+        // Clear references to allow GC for non-readonly properties
+        this.store = null as any;
+        this.uiService = null as any;
+        this.cleanupManager = null as any;
+        this.backgroundTaskManager = null as any;
+        
+        // Readonly properties like diffManager and eventBus cannot be reassigned. 
+        // We rely on the ServiceRegistry instance itself being dereferenced in PluginUnloader.
     }
 
     /**
