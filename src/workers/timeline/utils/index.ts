@@ -18,9 +18,6 @@ export {
     decodeContent,
     sanitizeString,
     areStringsEqual,
-    compressDiffData,
-    decompressDiffData,
     serializeAndTransfer,
-    fastSerializeTimelineEvents,
     getLockKey,
 } from './data-transformer';

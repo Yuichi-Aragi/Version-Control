@@ -128,7 +128,7 @@ export function validateStoredEventStructure(event: unknown): asserts event is S
         throw new WorkerError('Invalid event fields', 'VALIDATION_FAILED');
     }
 
-    if (!isArrayBuffer(e['diffData'])) {
-        throw new WorkerError('diffData must be ArrayBuffer', 'VALIDATION_FAILED');
+    if (!Array.isArray(e['diffData'])) {
+        throw new WorkerError('diffData must be an Array of Changes', 'VALIDATION_FAILED');
     }
 }
