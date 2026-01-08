@@ -28,26 +28,7 @@ export function updateStateWithNewVersion(
     // Invalidate tags to trigger RTK Query refetch
     dispatch(historyApi.util.invalidateTags([
         { type: 'VersionHistory', id: noteId },
-        { type: 'Branches', id: noteId }
+        { type: 'Branches', id: noteId },
+        { type: 'Timeline', id: noteId }
     ]));
-}
-
-/**
- * Updates version details in both history and timeline.
- *
- * @param dispatch - Redux dispatch function.
- * @param versionId - The ID of the version to update.
- * @param name - The new name.
- * @param description - The new description.
- */
-export function updateVersionDetailsInState(
-    dispatch: Dispatch,
-    versionId: string,
-    name: string,
-    description: string
-): void {
-    const updatePayload = { name, description };
-
-    // Update in timeline panel (optimistic)
-    dispatch(appSlice.actions.updateTimelineEventInState({ versionId, ...updatePayload }));
 }
