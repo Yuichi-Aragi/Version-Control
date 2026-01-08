@@ -9,6 +9,21 @@
     height: 100%;
 }
 
+.version-control-view {
+    height: 100%;
+}
+
+.version-control-react-root {
+    height: 100%;
+    width: 100%;
+}
+
+.version-control-error {
+    padding: 1rem;
+    color: var(--text-error);
+    text-align: center;
+}
+
 /* General View Styles */
 .version-control-view {
     padding: 0;
