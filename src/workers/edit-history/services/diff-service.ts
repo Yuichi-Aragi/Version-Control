@@ -25,7 +25,6 @@ import {
     DIFF_INSERT,
     DIFF_EQUAL,
     type Diff,
-    type DiffType,
     type Patch,
     type PatchResult,
     type AdjustmentOptions
