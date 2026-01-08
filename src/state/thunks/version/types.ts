@@ -24,6 +24,12 @@ export interface SaveVersionOptions {
     isAuto?: boolean;
 
     /**
+     * Whether this save is allowed to initialize tracking for a note that has no history.
+     * Defaults to false if isAuto is true, and true if isAuto is false.
+     */
+    allowInit?: boolean;
+
+    /**
      * Settings to use for this save operation.
      * If not provided, falls back to effective settings from state.
      */
