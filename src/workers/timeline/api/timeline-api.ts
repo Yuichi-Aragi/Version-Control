@@ -4,7 +4,7 @@ import type { TimelineWorkerApi, TimelineEvent } from '@/types';
 import { WorkerError } from '@/workers/timeline/types';
 import { getTimelineEvents, deleteEventByVersion, clearTimelineForNote, clearAllTimeline } from '@/workers/timeline/database';
 import { updateEventMetadata as dbUpdateEventMetadata } from '@/workers/timeline/database';
-import { validateString, serializeAndTransfer, decompressDiffData, getLockKey } from '@/workers/timeline/utils';
+import { validateString, serializeAndTransfer, getLockKey } from '@/workers/timeline/utils';
 import { generateAndStoreTimelineEvent } from '@/workers/timeline/services';
 
 /**
@@ -34,11 +34,9 @@ export const timelineApi: TimelineWorkerApi = {
 
             const storedEvents = await getTimelineEvents(noteId, branchName, source);
 
-            // Decompress diffData for each event before returning
-            const events: TimelineEvent[] = storedEvents.map(e => ({
-                ...e,
-                diffData: decompressDiffData(e.diffData)
-            }));
+            // Events are stored uncompressed now, so direct cast is valid
+            // StoredTimelineEvent matches TimelineEvent structure exactly now
+            const events = storedEvents as TimelineEvent[];
 
             return serializeAndTransfer(events);
         } catch (error) {
