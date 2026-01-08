@@ -465,14 +465,20 @@ export class WorkerManagerError extends Error {
 
 /**
  * Utility to prepare transferables.
+ * 
+ * CRITICAL FIX: This function MUST NOT push to the `transfers` array.
+ * Comlink's `transfer(obj, [obj])` wrapper is sufficient to mark the object for transfer.
+ * If we also push to `transfers`, and the caller reuses that array in another `transfer()` call,
+ * Comlink will merge the lists, causing "Duplicate ArrayBuffer" errors in `postMessage`.
  */
 export function prepareTransferable(
     content: string | ArrayBuffer,
-    transfers: ArrayBuffer[]
+    _transfers?: ArrayBuffer[] // Kept for signature compatibility but ignored
 ): string | ArrayBuffer {
     if (content instanceof ArrayBuffer) {
-        transfers.push(content);
-        return transfer(content, transfers);
+        // DO NOT push to _transfers.
+        // Return the Comlink transfer wrapper which isolates the transfer list for this specific argument.
+        return transfer(content, [content]);
     }
     return content;
 }

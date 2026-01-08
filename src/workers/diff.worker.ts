@@ -6,7 +6,6 @@ import {
   cleanupSemantic,
   DIFF_DELETE,
   DIFF_INSERT,
-  DIFF_EQUAL,
   type Diff,
 } from '@sanity/diff-match-patch';
 import type { DiffType as ConsumerDiffType, Change } from '@/types';
