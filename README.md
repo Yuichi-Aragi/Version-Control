@@ -190,8 +190,16 @@ For immediate use:
 
 ## Platform Support
 
-*   ✅ **Mobile** (iOS & Android)
-*   ✅ **Desktop** (Windows, macOS, Linux)
+* ✅ **Mobile** (iOS & Android)
+* ✅ **Desktop** (Windows, macOS, Linux)
+
+---
+
+## ⚖️ Open Source & Licensing
+
+We believe in the freedom of software. This plugin's source code is available under the **MIT License**. 
+
+If you find that our vision doesn't perfectly align with yours, or if you want to make drastic changes to the core functionality, you are encouraged to **fork the repository**. Under the MIT license, you are free to modify, redistribute, and build upon this work—you don't even have to give credit to us. We want this tool to be a foundation for better versioning, however that looks for you.
 
 ---
 
@@ -201,8 +209,8 @@ For immediate use:
 
 This plugin is a passion project maintained by **Yuichi Aragi** and **Lae Aragi**. We are dedicated to its development and stability.
 
-*   **Contributors:** We are **not** accepting code contributions or Pull Requests. We want to maintain a specific vision and code standard for this tool.
-*   **Feedback:** If you have Feature Requests, Issues, or Suggestions, please simply **tell us**. Open an issue on GitHub, and we will handle the implementation.
+* **Contributors:** We are **not** accepting code contributions or Pull Requests. We want to maintain a specific vision and code standard for this tool.
+* **Feedback:** If you have Feature Requests, Issues, or Suggestions, please simply **tell us**. Open an issue on GitHub, and we will handle the implementation.
 
 ---
 
@@ -210,8 +218,8 @@ This plugin is a passion project maintained by **Yuichi Aragi** and **Lae Aragi*
 
 To jump straight to the Version Control plugin in Obsidian, try this:
 
-*   **​Click the URI:** Copy and paste or click this [link](obsidian://show-plugin?id=version-control), which should launch the app: obsidian://show-plugin?id=version-control
-*   **Alternatively (Search):** If the link doesn't work, go to your Obsidian Settings and search for 'Version-Control' in the Community Plugins list.
+* **​Click the URI:** Copy and paste or click this [link](obsidian://show-plugin?id=version-control), which should launch the app: obsidian://show-plugin?id=version-control
+* **Alternatively (Search):** If the link doesn't work, go to your Obsidian Settings and search for 'Version-Control' in the Community Plugins list.
 
 ---
 
