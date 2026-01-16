@@ -142,7 +142,7 @@ async function createBuildOptions() {
   const editHistoryWorkerCode = await buildWorkerCode('src/workers/edit-history/index.ts');
   const compressionWorkerCode = await buildWorkerCode('src/workers/compression.worker.ts');
 
-  const entryPoints = ["src/main/index.ts"];
+  const entryPoints = ["src/main.ts"];
   if (fileExists("src/styles.css")) {
     entryPoints.push("src/styles.css");
   }
@@ -161,7 +161,7 @@ async function createBuildOptions() {
     minifyWhitespace: !isDevelopment,
     minifyIdentifiers: !isDevelopment,
     minifySyntax: !isDevelopment,
-    outdir: ".",
+    outdir: "assets",
     // JSX configuration for React 17+ automatic runtime
     jsx: "automatic",
     loader: {

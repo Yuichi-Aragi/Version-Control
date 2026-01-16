@@ -41,17 +41,22 @@
     display: flex;
     align-items: center;
     gap: var(--size-4-2);
+    min-width: 0; /* Allow shrinking */
 }
 
 .v-settings-panel-header h3 {
     margin: 0;
     font-size: var(--font-ui-medium);
     font-weight: var(--font-semibold);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .v-settings-badge {
     height: 20px;
     display: block;
+    flex-shrink: 0;
 }
 
 .v-settings-panel-content-wrapper {
@@ -60,6 +65,7 @@
     height: auto;
     box-sizing: border-box;
     overflow-y: auto;
+    overflow-x: hidden; /* Prevent horizontal scroll */
     padding: var(--size-4-2) var(--size-4-3);
 }
 
@@ -70,6 +76,7 @@
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
     gap: var(--size-4-2);
     width: 100%;
+    box-sizing: border-box;
 }
 
 /* Actions */
@@ -88,6 +95,7 @@
     color: var(--text-normal);
     width: 100%; /* Fill the grid cell */
     text-align: center;
+    box-sizing: border-box;
 }
 
 .v-settings-action-button:hover {
@@ -111,6 +119,7 @@
 /* FIX: Slider with Input Control Container - Vertical Layout */
 .v-slider-with-input-container {
     width: 100%;
+    box-sizing: border-box;
 }
 
 .v-slider-with-input-container .v-slider-input-field {
@@ -123,6 +132,7 @@
     padding: var(--size-4-1) var(--size-4-2);
     font-size: var(--font-ui-small);
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    box-sizing: border-box;
 }
 
 .v-slider-with-input-container .v-slider-input-field:focus {
@@ -146,6 +156,7 @@
     user-select: none;
     -webkit-user-select: none;
     touch-action: pan-y;
+    box-sizing: border-box;
 }
 
 /* Slider input styles */
@@ -163,6 +174,7 @@
     transition: background 0.15s ease;
     touch-action: pan-y;
     will-change: transform;
+    box-sizing: border-box;
 }
 
 /* Hover / disabled */
@@ -304,15 +316,18 @@
     align-items: flex-start;
     gap: var(--size-4-3);
     margin-bottom: var(--size-4-3);
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .v-settings-section-header-row h4,
 .v-settings-section-header-row h2 {
     margin: 0;
     flex-grow: 1;
-    min-width: 0;
+    min-width: 0; /* Allow text to shrink/wrap */
     line-height: 1.4;
     word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 .v-settings-section-header-row .clickable-icon {
@@ -325,6 +340,8 @@
     font-size: var(--font-ui-small);
     margin-bottom: var(--size-4-3);
     max-width: 100%;
+    overflow-wrap: break-word;
+    word-break: break-word;
 }
 
 /* --- Settings Tab Styles --- */
@@ -374,6 +391,7 @@
     width: 100%;
     display: flex;
     flex-direction: column;
+    box-sizing: border-box;
 }
 
 /* Valid state - Green accent */
@@ -437,6 +455,7 @@
 .v-input-validation-wrapper textarea {
     width: 100%;
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    box-sizing: border-box;
 }
 
 /* --- Settings Tab Navigation --- */
@@ -535,4 +554,129 @@
 
 .v-dropdown-sub-trigger {
     justify-content: space-between;
+}
+
+/* --- Forms & Actions (Shared) --- */
+.v-setting-form {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+}
+
+.v-settings-action-row {
+    width: 100%;
+    display: flex;
+    margin-top: var(--size-4-2);
+    justify-content: flex-end; /* Default for tabs: right aligned */
+    box-sizing: border-box;
+}
+
+/* --- SETTINGS PANEL LAYOUT OVERRIDES --- */
+/* These rules specifically target the side panel to enforce vertical stacking and full width */
+
+.v-settings-panel .setting-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    border-top: none;
+    border-bottom: 1px solid var(--background-modifier-border);
+    padding: var(--size-4-3); /* Changed to uniform padding */
+    /* Ensure container handles width correctly */
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.v-settings-panel .setting-item-info {
+    width: 100%;
+    margin-right: 0;
+    margin-bottom: var(--size-4-2);
+    flex: 0 0 auto;
+    /* Ensure text wraps */
+    min-width: 0;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: break-word;
+}
+
+.v-settings-panel .setting-item-name {
+    font-weight: var(--font-semibold);
+    font-size: var(--font-ui-small);
+    margin-bottom: var(--size-4-1);
+    /* Ensure title wraps */
+    white-space: normal;
+    overflow-wrap: break-word;
+}
+
+.v-settings-panel .setting-item-description {
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+    /* Ensure description wraps */
+    white-space: normal;
+    overflow-wrap: break-word;
+}
+
+.v-settings-panel .setting-item-control {
+    width: 100%;
+    flex: 0 0 auto;
+    justify-content: flex-start;
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-2);
+    /* Ensure control doesn't overflow */
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+/* Full width inputs and buttons in the panel */
+.v-settings-panel .setting-item-control input[type="text"],
+.v-settings-panel .setting-item-control input[type="number"],
+.v-settings-panel .setting-item-control input[type="search"],
+.v-settings-panel .setting-item-control textarea,
+.v-settings-panel .setting-item-control select,
+.v-settings-panel .setting-item-control button:not(.v-slider-input):not(.clickable-icon) {
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+}
+
+/* Action row overrides for panel */
+.v-settings-panel .v-settings-action-row {
+    justify-content: flex-start;
+}
+
+.v-settings-panel .v-settings-action-row button {
+    width: 100%;
+}
+
+/* Toggles (checkboxes) - Full Width Styling */
+body .v-settings-panel .setting-item-control input[type="checkbox"] {
+    margin-left: 0;
+    width: 100%;
+    max-width: none;
+    cursor: pointer;
+    position: relative;
+    /* Ensure height is standard to prevent distortion if width forces aspect ratio changes */
+    height: 18px; 
+    box-sizing: border-box;
+}
+
+/* Override Obsidian's transform-based animation for the full-width toggle */
+body .v-settings-panel .setting-item-control input[type="checkbox"]::after {
+    transition: left 0.2s ease-in-out, background-color 0.2s ease-in-out !important;
+    transform: none !important;
+    will-change: left;
+}
+
+body .v-settings-panel .setting-item-control input[type="checkbox"]:checked::after {
+    /* Position at far right: 100% - knob width (approx 18px) - margin (2px) */
+    left: calc(100% - 20px) !important;
+    transform: none !important;
+}
+
+/* Slider container adjustments for panel */
+.v-settings-panel .v-slider-with-input-container {
+    width: 100%;
 }
