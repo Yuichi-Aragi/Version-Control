@@ -63,7 +63,6 @@ export const MaxVersionsSetting: React.FC<{ disabled: boolean }> = memo(({ disab
             <form 
                 onSubmit={handleSubmit(onSubmit)} 
                 className="v-setting-form"
-                style={{ width: '100%' }}
                 onBlur={handleSubmit(onSubmit)} // Auto-save on blur if valid
             >
                 <ValidatedInput
