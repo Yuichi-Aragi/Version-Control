@@ -142,16 +142,22 @@ export const initializeView = createAsyncThunk<
             if (leaf !== undefined) {
                 targetLeaf = leaf;
             } else {
-                // Priority 1: The most recent leaf (if sidebar is focused)
-                    // This is critical for sidebar plugins to maintain context of the last active note
-                    const recentLeaf = app.workspace.getMostRecentLeaf();
-                    if (recentLeaf?.view instanceof FileView) {
-                        targetLeaf = recentLeaf;
+                // Strategy 1: The most recent leaf (if sidebar is focused)
+                // This is critical for sidebar plugins to maintain context of the last active note
+                const recentLeaf = app.workspace.getMostRecentLeaf();
+                if (recentLeaf?.view instanceof FileView) {
+                    targetLeaf = recentLeaf;
                 } else {
-                    // Priority 2: The leaf of the currently active FileView (if focused)
-                const activeView = app.workspace.getActiveViewOfType(FileView);
-                if (activeView) {
-                    targetLeaf = activeView.leaf;
+                    // Strategy 2: The leaf of the currently active FileView (if focused)
+                    const activeView = app.workspace.getActiveViewOfType(FileView);
+                    if (activeView) {
+                        targetLeaf = activeView.leaf;
+                    } else {
+                        // Strategy 3: Generic active leaf check (fallback for edge cases)
+                        const genericLeaf = app.workspace.activeLeaf;
+                        if (genericLeaf?.view instanceof FileView) {
+                            targetLeaf = genericLeaf;
+                        }
                     }
                 }
             }
@@ -159,6 +165,11 @@ export const initializeView = createAsyncThunk<
             let initialFile: TFile | null = null;
             if (targetLeaf?.view instanceof FileView && targetLeaf.view.file) {
                 initialFile = targetLeaf.view.file;
+            }
+
+            // Fallback: If leaf resolution failed to yield a file, try getting active file directly
+            if (!initialFile) {
+                initialFile = app.workspace.getActiveFile();
             }
 
             if (initialFile) {
