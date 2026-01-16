@@ -48,14 +48,14 @@ const DatabasePathSetting: React.FC = memo(() => {
             name="Database path" 
             desc={`The vault-relative path for the version history database. Current: ${databasePath}`}
         >
-            <form onSubmit={handleSubmit(onSubmit)} className="v-setting-form" style={{ width: '100%' }}>
+            <form onSubmit={handleSubmit(onSubmit)} className="v-setting-form">
                 <ValidatedInput 
                     name="databasePath" 
                     control={control} 
                     placeholder="e.g., .versiondb" 
                     maxLength={255}
                 />
-                <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'flex-end' }}>
+                <div className="v-settings-action-row">
                     <button 
                         type="submit"
                         aria-label="Apply database path change"
@@ -103,14 +103,14 @@ const FrontmatterKeySetting: React.FC = memo(() => {
             name="Frontmatter key"
             desc={`The key used in note frontmatter to store the version control ID. Current: ${frontmatterKey}`}
         >
-            <form onSubmit={handleSubmit(onSubmit)} className="v-setting-form" style={{ width: '100%' }}>
+            <form onSubmit={handleSubmit(onSubmit)} className="v-setting-form">
                 <ValidatedInput
                     name="key"
                     control={control}
                     placeholder="e.g., vc-id"
                     maxLength={50}
                 />
-                <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'flex-end' }}>
+                <div className="v-settings-action-row">
                     <button
                         type="submit"
                         aria-label="Apply frontmatter key change"
@@ -180,7 +180,7 @@ const IdFormatSettings: React.FC = memo(() => {
     };
 
     return (
-        <form onSubmit={handleSubmit(onSubmit)} style={{ width: '100%' }}>
+        <form onSubmit={handleSubmit(onSubmit)} className="v-setting-form">
             <SettingComponent
                 name="Note ID format"
                 desc="Format for generating note IDs. Available variables: {path}, {uuid}, {timestamp}. Default: {uuid}"
@@ -206,7 +206,7 @@ const IdFormatSettings: React.FC = memo(() => {
             </SettingComponent>
 
             {isDirty && (
-                <div className="v-settings-action-row" style={{ marginTop: '12px' }}>
+                <div className="v-settings-action-row">
                     <button
                         type="submit"
                         aria-label="Apply ID format changes"
