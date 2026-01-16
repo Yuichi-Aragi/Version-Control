@@ -1,5 +1,13 @@
 ***
 
+**Version: 1.9.44 (January 16, 2026)**
+
+#### 🎨 Improvements & UX
+
+* **UI Bug Fix:** Resolved a UI issue affecting obsidian mobile version 1.11 and above.
+
+***
+
 **Version: 1.9.43**
 
 #### 🎨 Improvements & UX
