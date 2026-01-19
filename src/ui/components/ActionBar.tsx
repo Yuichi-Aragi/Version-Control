@@ -184,7 +184,7 @@ export const ActionBar: FC = () => {
     
     const isDiffGenerating = diffRequest?.status === 'generating' || diffRequest?.status === 're-diffing';
     const diffIndicatorClasses = clsx('clickable-icon', 'v-diff-indicator', {
-        'is-hidden': !diffRequest,
+        'v-is-hidden': !diffRequest,
         'is-generating': isDiffGenerating,
         'is-ready': diffRequest?.status === 'ready',
     });
@@ -341,7 +341,7 @@ export const ActionBar: FC = () => {
                             <Icon name="case-sensitive" />
                         </button>
                         <button 
-                            className={clsx('clickable-icon', { 'is-hidden': !localQuery })} 
+                            className={clsx('clickable-icon', { 'v-is-hidden': !localQuery })} 
                             aria-label="Clear search"
                             onMouseDown={handleClearSearch}
                         >

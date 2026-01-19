@@ -158,7 +158,7 @@ export const HistoryEntry: FC<HistoryEntryProps> = memo(({ version, searchQuery,
             )}
 
             {!settings?.isListView && (
-                <div className={clsx("v-entry-footer", { 'is-hidden': isNamingThisVersion })}>
+                <div className={clsx("v-entry-footer", { 'v-is-hidden': isNamingThisVersion })}>
                     {showFooterDescription ? (
                         <div className="v-history-description">
                             <HighlightedText

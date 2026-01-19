@@ -332,7 +332,7 @@ export const DiffPanel: FC<DiffPanelProps> = ({ panelState }) => {
                                 <button className="clickable-icon" disabled={totalMatches === 0} onClick={() => goToMatch('prev')}><Icon name="chevron-up" /></button>
                                 <button className="clickable-icon" disabled={totalMatches === 0} onClick={() => goToMatch('next')}><Icon name="chevron-down" /></button>
                                 <button className={clsx('clickable-icon', { 'is-active': search.isCaseSensitive })} onClick={search.toggleCaseSensitivity}><Icon name="case-sensitive" /></button>
-                                <button className={clsx('clickable-icon', { 'is-hidden': !search.localSearchQuery })} onClick={search.handleClearSearch}><Icon name="x" /></button>
+                                <button className={clsx('clickable-icon', { 'v-is-hidden': !search.localSearchQuery })} onClick={search.handleClearSearch}><Icon name="x" /></button>
                             </div>
                         </div>
                     </div>
