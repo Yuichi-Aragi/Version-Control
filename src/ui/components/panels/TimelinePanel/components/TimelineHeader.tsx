@@ -117,7 +117,7 @@ export const TimelineHeader: FC<TimelineHeaderProps> = ({
                                 <Icon name="case-sensitive" />
                             </button>
                             <button
-                                className={clsx('clickable-icon', { 'is-hidden': !searchState.localSearchQuery })}
+                                className={clsx('clickable-icon', { 'v-is-hidden': !searchState.localSearchQuery })}
                                 onClick={searchState.handleClearSearch}
                             >
                                 <Icon name="x" />

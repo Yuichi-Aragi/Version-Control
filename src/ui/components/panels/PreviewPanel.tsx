@@ -162,7 +162,7 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({ panelState }) => {
                                     <button className={clsx('clickable-icon', { 'is-active': search.isCaseSensitive })} aria-label="Toggle case sensitivity" onClick={search.toggleCaseSensitivity}>
                                         <Icon name="case-sensitive" />
                                     </button>
-                                    <button className={clsx('clickable-icon', { 'is-hidden': !search.localSearchQuery })} aria-label="Clear search" onClick={search.handleClearSearch}>
+                                    <button className={clsx('clickable-icon', { 'v-is-hidden': !search.localSearchQuery })} aria-label="Clear search" onClick={search.handleClearSearch}>
                                         <Icon name="x" />
                                     </button>
                                 </div>

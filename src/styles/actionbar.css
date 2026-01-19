@@ -209,7 +209,7 @@
 
 /* FIX: Add a more specific selector to ensure this component is hidden correctly,
    overriding the `display: flex` rule above and preventing style conflicts. */
-.v-diff-indicator.is-hidden {
+.v-diff-indicator.v-is-hidden {
     display: none;
 }
 

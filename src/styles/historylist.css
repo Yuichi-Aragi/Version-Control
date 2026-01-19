@@ -185,7 +185,7 @@
     border-top: 1px solid var(--background-modifier-border);
 }
 
-.v-entry-footer.is-hidden {
+.v-entry-footer.v-is-hidden {
     display: none;
 }
 
