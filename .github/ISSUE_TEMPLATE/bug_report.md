@@ -26,7 +26,7 @@ If applicable, add screenshots or screen recordings to help explain your problem
 ## Environment
 
 ### Obsidian Info
-<!-- Paste the output from: Settings → General → Advanced → "Copy debug info" -->
+<!-- Paste the output from: Command pallette → "Show debug info" 
 ```
 PASTE DEBUG INFO HERE
 ```
@@ -43,7 +43,7 @@ PASTE DEBUG INFO HERE
 <!-- Please check the boxes that apply -->
 - [ ] I have updated the plugin to the latest version
 - [ ] I have restarted Obsidian **after** updating
-- [ ] I have tested with other plugins disabled (Settings → Community plugins → "Restricted mode")
+- [ ] I have tested with other plugins disabled (Settings → Community plugins)
 - [ ] The issue persists after disabling other plugins
 - [ ] I have checked for similar issues in the repository
 
