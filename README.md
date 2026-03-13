@@ -1,3 +1,5 @@
+***
+
 <div align="center">
 
 ![Banner](https://github.com/Lae-Aragi/Version-Control/blob/7fa9fdea45c5ab373cec5997aa990ef013070b75/assets/1000202057.jpg)
@@ -204,14 +206,16 @@ If you find that our vision doesn't perfectly align with yours, or if you want t
 
 ---
 
-## Maintenance & Contributions
+## 🛠️ Maintenance and Contribution 
 
-**This project will live and die with us.**
+This project is a passion project maintained by **Yuichi Aragi** and **Lae Aragi**. To keep our relationship with this community healthy and transparent, we want to be clear about how we view this work:
 
-This plugin is a passion project maintained by **Yuichi Aragi** and **Lae Aragi**. We are dedicated to its development and stability.
-
-* **Contributors:** We are **not** accepting code contributions or Pull Requests. We want to maintain a specific vision and code standard for this tool.
-* **Feedback:** If you have Feature Requests, Issues, or Suggestions, please simply **tell us**. Open an issue on GitHub, and we will handle the implementation.
+*   **Why we are here:** I built this because I wanted it to exist, and I manage it because I want to. I am here because I want to be, not because I have to be.
+*   **The "Ride":** Software is ephemeral. Don't build your life around this plugin; rather than striving for obsessive future-proofing, enjoy the ride while it lasts.
+*   **Status Updates:** If I decide to abandon this project someday, you will know it immediately by looking at the **status badge** at the top of this README.
+*   **What "Abandoned" means:** Flipping the badge to "abandoned" isn't necessarily a sign of "I will never manage this plugin again." It simply means that, for the time being, you shouldn't expect support or updates. However, don't get your hopes high for a return.
+*   **Contributions:** We are **not** accepting code contributions or Pull Requests. We want to maintain a specific vision and code standard.
+*   **Feedback:** If you have Feature Requests, Issues, or Suggestions, please **tell us**. Open an issue on GitHub, and if it aligns with our vision, we will handle the implementation.
 
 ---
 
@@ -233,3 +237,5 @@ If that resonates with you—if you're someone who wants to consciously manage h
 ***
 
 *Made with ❤️ for writers, perfectionists, and conscious creators.*
+
+***
